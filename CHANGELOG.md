@@ -3,6 +3,45 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.5] - 2026-10-03
+
+Windows app end to end, multi-file artifacts, live provider failover, and the robustness fixes those
+runs exposed. Evidence: `docs/evidence/2026-10-03-v0.1.5-live-runs.md`.
+
+### Added
+- Multi-file `bundle` artifacts (`axbranch/artifacts.py`): builder returns `files`; only safe relative
+  paths are written (no absolute, drive, `..`; ≤40 files / 400 KB); refused paths fail verification;
+  per-file sha256 manifest, artifact hash = manifest hash; `check` detects changed, missing and
+  unexpected files; the entry file runs with no args and empty stdin.
+- `AXBranch.exe --goal "…"` and `--resume <id>` (drive the window's own handlers).
+- GUI end-to-end test through real Tk widgets; GUI is injectable (workspace, engine factory).
+- `context_used` event: the vault notes and GAI items (title + URL) the CEO saw; archived as Evidence.
+- `decision` event when verification had to run on the producer's engine.
+- Schema version (`PRAGMA user_version`=2); `docs/INTEGRATION.md`.
+
+### Changed
+- Bundle self-tests run with `python -E -s` (`-I` drops the script folder from `sys.path`).
+- GAI items must match ≥30% of the goal's terms (min 2); stray two-word matches added off-topic papers.
+- All SQLite inserts name their columns.
+
+### Fixed
+- An unexpected engine error killed the GUI worker silently and stranded the project in EXECUTING. Now
+  the project pauses with the reason and a traceback goes to `workspace/logs/engine-errors.log`.
+- Older code running against a newer database crashed mid-run; it now refuses up front ("Update AX Branch").
+- Closing the window left the refresh timer firing into a destroyed window.
+
+### Verification
+- 27 unit tests pass (engine, lock, GUI, bundle, robustness, release).
+- Live: packaged exe goal -> FAIL -> (crash found) -> 0.1.5 exe `--resume` -> PASS -> report, no stage
+  re-run beyond the lost build; bundle project v1 FAIL (Windows CRLF) -> v2 PASS (20 tests); failover
+  project all 11 turns on real Codex after a stand-in Claude refusal, 3 FAIL -> PASS. Independent checks
+  of all three artifacts passed (see evidence).
+
+### Known issues
+- The failover test simulated Claude's refusal; a genuine usage-limit event has not occurred yet.
+- No person has yet clicked through the exe; the GUI path is covered by automated widget tests and `--goal`/`--resume`.
+- AX Works integration is planned only (it has no data on this PC). Self-test still not sandboxed.
+
 ## [0.1.4] - 2026-10-03
 
 ### Added

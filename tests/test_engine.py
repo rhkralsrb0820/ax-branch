@@ -36,7 +36,7 @@ class Script:
         if schema is E.WORK:
             return {'output': 'use +', 'key_points': ['use +']}, prefer, []
         if schema is E.BUILD:
-            return {'content': self.builds.pop(0), 'summary': 's', 'changes_from_previous': ''}, prefer, []
+            return {'content': self.builds.pop(0), 'files': [], 'summary': 's', 'changes_from_previous': ''}, prefer, []
         if schema is E.VERDICT:
             v = self.verdicts.pop(0)
             return {'verdict': v, 'lenses_applied': ['se'], 'criteria': [{'criterion': 'add', 'met': v == 'PASS', 'evidence': 'e'}],
@@ -203,6 +203,18 @@ class EngineTests(unittest.TestCase):
         path.write_text("import sys\nif __name__ == '__main__':\n    assert sys.argv[1:] == []\n"
                         "    assert sys.stdin.read() == ''\n", encoding='utf-8')
         self.assertTrue(self.engine(Script([], [])).checks(path, 'python')['ok'])
+
+    def test_verifier_on_producer_engine_is_recorded(self):
+        script = Script([GOOD], ['PASS'])
+
+        def other_engine_limited(prompt, schema, **kw):
+            result, used, notes = script(prompt, schema, **kw)
+            return (result, 'claude', notes) if schema is E.VERDICT else (result, used, notes)
+        eng = self.engine(other_engine_limited)     # producer is claude; verifier forced onto claude too
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        whats = [e['detail']['what'] for e in self.store.events(pid, {'decision'})]
+        self.assertIn("verification ran on the producer's engine", whats)
 
     def test_illegal_transition(self):
         pid = self.store.new_project('x')

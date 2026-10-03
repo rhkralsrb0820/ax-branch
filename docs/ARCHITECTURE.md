@@ -19,7 +19,8 @@ Owner ── GUI / CLI ──► Engine (淸月 AI CEO driver) ──► provide
 | `state.py` | SQLite tables (projects, agents, stage_outputs, artifacts, verifications, events), state machine, structured `handoff()`. |
 | `providers.py` | Claude Code / Codex CLI as interchangeable engines; quota failover. |
 | `engine.py` | CEO planning, staffing, build, deterministic checks, independent verification, rebuild, strategy review, CEO report, close/archive. |
-| `knowledge.py` | Vault retrieval, GAI read-only search, verified archive notes. |
+| `knowledge.py` | Vault retrieval, GAI read-only search (relevance-gated, provenance recorded), verified archive notes. |
+| `artifacts.py` | Single-file and multi-file (bundle) artifacts: safe paths, sha256 manifest, integrity, text view. |
 | `gui.py`, `__main__.py` | Owner window and CLI. |
 
 ## Lifecycle
@@ -43,6 +44,12 @@ round budget) remembers `resume_state`.
 Agent = role + goal + context + permissions + tools. The provider is just the engine for a turn.
 Production agents get no shell and no file writes (CLI flags); they return content as JSON and the
 engine writes the artifact. Web access only for stages the CEO marks `web`.
+
+## Safety rails
+
+- One session per project (`run.lock`, OS file lock). Refused sessions exit 2 / show in the GUI.
+- Unexpected errors pause the project with the reason; traceback in `workspace/logs/engine-errors.log`.
+- Schema version in `PRAGMA user_version`; older code refuses a newer database.
 
 ## Continuity
 

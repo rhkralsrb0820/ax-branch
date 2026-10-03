@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS events(
   detail TEXT NOT NULL);
 '''
 _JSON = ('plan', 'report')
+SCHEMA_VERSION = 2   # 1 = 0.1.0-0.1.4 (no marker), 2 = artifacts.manifest (0.1.5)
 
 
 class Rejected(Exception):
@@ -119,7 +120,18 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('PRAGMA foreign_keys=ON')
+        found = self.db.execute('PRAGMA user_version').fetchone()[0]
+        if found > SCHEMA_VERSION:
+            # A newer AX Branch already upgraded this database. Running older code on it is
+            # exactly what stranded a project in 0.1.4, so stop before touching anything.
+            self.db.close()
+            raise Rejected(f'This workspace database uses schema v{found}; this AX Branch understands up to '
+                           f'v{SCHEMA_VERSION}. Update AX Branch (rebuild/reinstall) before using it.')
         self.db.executescript(SCHEMA)
+        if 'manifest' not in {r['name'] for r in self.db.execute('PRAGMA table_info(artifacts)')}:
+            self.db.execute('ALTER TABLE artifacts ADD COLUMN manifest TEXT')   # 0.1.5: multi-file bundles
+        if found < SCHEMA_VERSION:
+            self.db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
 
     def close(self):
         self.db.close()
@@ -201,7 +213,8 @@ class Store:
     # ---- agents (temporary specialists; CEO and Verification are permanent and not rows)
     def add_agent(self, pid, role, provider):
         aid = _new_id('A')
-        self.db.execute('INSERT INTO agents VALUES(?,?,?,?,?,?,NULL)', (aid, pid, role, provider, 'active', time.time()))
+        self.db.execute('INSERT INTO agents(id,project_id,role,provider,status,created) VALUES(?,?,?,?,?,?)',
+                        (aid, pid, role, provider, 'active', time.time()))
         self.event(pid, 'agent_hired', agent=aid, role=role, provider=provider)
         return aid
 
@@ -220,7 +233,8 @@ class Store:
 
     # ---- work products
     def save_output(self, pid, iteration, plan_version, stage, agent_id, provider, output):
-        self.db.execute('INSERT INTO stage_outputs VALUES(?,?,?,?,?,?,?,?)',
+        self.db.execute('INSERT INTO stage_outputs(project_id,iteration,plan_version,stage,agent_id,provider,output,created) '
+                        'VALUES(?,?,?,?,?,?,?,?)',
                         (pid, iteration, plan_version, stage, agent_id, provider,
                          json.dumps(output, ensure_ascii=False), time.time()))
 
@@ -233,10 +247,11 @@ class Store:
         row = self.db.execute(sql + ' ORDER BY iteration DESC LIMIT 1', args).fetchone()
         return None if row is None else {**dict(row), 'output': json.loads(row['output'])}
 
-    def add_artifact(self, pid, iteration, path, sha, kind, agent_id):
+    def add_artifact(self, pid, iteration, path, sha, kind, agent_id, manifest=None):
         aid = _new_id('F')
-        self.db.execute('INSERT INTO artifacts VALUES(?,?,?,?,?,?,?,?)',
-                        (aid, pid, iteration, str(path), sha, kind, agent_id, time.time()))
+        self.db.execute('INSERT INTO artifacts(id,project_id,iteration,path,sha256,kind,agent_id,created,manifest) '
+                        'VALUES(?,?,?,?,?,?,?,?,?)', (aid, pid, iteration, str(path), sha, kind, agent_id, time.time(),
+                                                      manifest and json.dumps(manifest, ensure_ascii=False)))
         return aid
 
     def artifacts(self, pid):
@@ -244,7 +259,8 @@ class Store:
 
     def add_verification(self, pid, artifact_id, iteration, verdict, result, checks, provider):
         vid = _new_id('V')
-        self.db.execute('INSERT INTO verifications VALUES(?,?,?,?,?,?,?,?,?)',
+        self.db.execute('INSERT INTO verifications(id,project_id,artifact_id,iteration,verdict,result,checks,provider,created) '
+                        'VALUES(?,?,?,?,?,?,?,?,?)',
                         (vid, pid, artifact_id, iteration, verdict, json.dumps(result, ensure_ascii=False),
                          json.dumps(checks, ensure_ascii=False), provider, time.time()))
         self.event(pid, 'verification', verdict=verdict, iteration=iteration, provider=provider)

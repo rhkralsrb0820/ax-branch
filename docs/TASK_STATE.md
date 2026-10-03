@@ -6,14 +6,15 @@
 | P1 | Architecture + reuse map | done (`ARCHITECTURE.md`, `DECISIONS.md`) |
 | P2–P4 | SQLite state, checkpoint/resume/handoff, Obsidian + GAI interfaces | done |
 | P5–P7 | CEO / Verification boundaries, dynamic pipeline, Build→Verify→Rebuild | done |
-| P8 | Provider abstraction + continuity | both CLIs run turns and drive sessions (live-proven); quota failover not live-proven |
-| P9 | Minimal Owner UI | done (Tk window); not exercised end-to-end by a person yet |
+| P8 | Provider abstraction + continuity | both CLIs run turns and drive sessions; failover live with a stand-in refusal; genuine limit not yet observed |
+| P9 | Minimal Owner UI | done; automated widget e2e + live `--goal`/`--resume`; no recorded human click-through yet |
 | P10 | Real end-to-end run | done (`P-20261003-906ead`, v1 FAIL → v2 PASS) |
-| P11 | Windows exe | built + launches; a full GUI run from the exe not yet done |
+| P11 | Windows exe | live goal run inside the packaged app; crash recovery by newer exe |
 
 ## Open, in priority order
-1. Owner: decide when to close `P-20261003-906ead` (kept open on instruction).
-2. Confirm archived knowledge is retrieved by a later live project (`knowledge.retrieve`).
-3. Observe a real quota-limit failover when one occurs (timeout policy stays: pause).
-4. Decide whether non-quota faults (timeouts) may fail over to the other provider (Owner policy; today: pause).
-5. Multi-file / repo-editing artifacts; ax-works integration; Upgrade Proposal document generator.
+1. Owner: decide when to close the PENDING_CLOSE projects (906ead, 97494b, 4e3292, 46185d).
+2. Owner: click through the exe once (goal -> report -> close) to confirm the human path.
+3. Observe a genuine usage-limit failover when one occurs (timeout policy stays: pause).
+4. Confirm archived knowledge is retrieved by a later live project (`context_used` now records it).
+5. Self-test isolation beyond a temp dir (separate account / job object) — risk grows with bundles.
+6. AX Works seams per `INTEGRATION.md` once AX Works has real data; Upgrade Proposal generator.

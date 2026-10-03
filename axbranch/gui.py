@@ -14,11 +14,15 @@ FONT = ('Malgun Gothic', 10)
 
 
 class App(tk.Tk):
-    def __init__(self):
+    def __init__(self, workspace=WORKSPACE, engine_factory=None, goal=None, resume=None):
+        """engine_factory: callable returning a fresh Engine (own SQLite connection) — tests
+        inject one; goal: pre-filled and submitted once the window is up (`--goal`)."""
         super().__init__()
+        self.workspace = workspace
+        self.engine_factory = engine_factory or (lambda: open_engine(workspace))
         self.title(f'AX Branch {__version__} — 淸月 AI CEO')
         self.geometry('1180x760')
-        self.store = Store(WORKSPACE / 'axbranch.sqlite3')
+        self.store = Store(workspace / 'axbranch.sqlite3')
         self.running = {}            # pid -> cancel Event
         self.selected = None
         self.notice = ''              # set by worker threads, shown by the Tk thread
@@ -42,6 +46,12 @@ class App(tk.Tk):
         self.status = ttk.Label(bar, text=''); self.status.pack(side='right')
         self.protocol('WM_DELETE_WINDOW', self.quit_app)
         self.refresh()
+        if goal:
+            self.goal.insert('1.0', goal)
+            self.after(500, self.start)
+        elif resume:                     # same as selecting the project and pressing 계속 실행 / 재개
+            self.selected = resume
+            self.after(500, self.resume)
 
     # ---- engine threads
     def _launch(self, pid):
@@ -51,13 +61,17 @@ class App(tk.Tk):
         self.running[pid] = cancel
 
         def work():
-            engine = open_engine()
+            engine = None
             try:
+                engine = self.engine_factory()
                 engine.run(pid, cancel)
             except Busy as e:           # e.g. a CLI or Codex session is running it; nothing changed
                 self.notice = str(e)
+            except Exception as e:      # never die silently in a windowed app
+                self.notice = f'{type(e).__name__}: {e}'
             finally:
-                engine.store.close()
+                if engine is not None:
+                    engine.store.close()
                 self.running.pop(pid, None)
         threading.Thread(target=work, daemon=True).start()
 
@@ -88,7 +102,7 @@ class App(tk.Tk):
     def finish(self):
         if not self.selected:
             return
-        engine = open_engine()
+        engine = self.engine_factory()
         try:
             p = engine.close(self.selected)            # CEO asks before anything happens
         except Exception as e:
@@ -116,7 +130,7 @@ class App(tk.Tk):
             ttk.Button(win, text=text, command=lambda c=choice: choose(c)).pack(fill='x', padx=12, pady=3)
 
     def open_folder(self):
-        target = WORKSPACE / 'projects' / self.selected if self.selected else WORKSPACE
+        target = self.workspace / 'projects' / self.selected if self.selected else self.workspace
         if target.exists():
             os.startfile(target)
 
@@ -139,7 +153,7 @@ class App(tk.Tk):
                     self.list.selection_set(i)
         self.show()
         self.status.config(text=self.notice or f'실행 중 {len(self.running)}건')
-        self.after(1500, self.refresh)
+        self._tick = self.after(1500, self.refresh)
 
     def show(self):
         if not self.selected:
@@ -168,6 +182,12 @@ class App(tk.Tk):
             self.detail.config(state='normal'); self.detail.delete('1.0', 'end')
             self.detail.insert('1.0', text); self.detail.config(state='disabled')
 
+    def destroy(self):
+        if getattr(self, '_tick', None):
+            self.after_cancel(self._tick)       # no refresh callback firing into a destroyed window
+        self.store.close()
+        super().destroy()
+
     def quit_app(self):
         if self.running and not messagebox.askyesno('AX Branch', '실행 중인 프로젝트가 있습니다. 중단하고 닫을까요? '
                                                     '(상태는 저장되어 다음에 재개할 수 있습니다)'):
@@ -181,6 +201,6 @@ def _brief(detail):
     return ', '.join(f'{k}={str(v)[:80]}' for k, v in detail.items())
 
 
-def main():
-    App().mainloop()
+def main(goal=None, resume=None):
+    App(goal=goal, resume=resume).mainloop()
 

@@ -13,9 +13,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import traceback
 from pathlib import Path
 
-from . import GAI_DB, VAULT, WORKSPACE, governance as gov, knowledge, providers
+from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, providers
 from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
@@ -35,10 +37,10 @@ def ENUM(*values):
 
 
 STAGE = S(name=STR, agent_role=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
-PLAN = S(interpretation=STR, artifact_kind=ENUM('markdown', 'python'), artifact_filename=STR,
+PLAN = S(interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR), pipeline=ARR(STAGE))
 WORK = S(output=STR, key_points=ARR(STR))
-BUILD = S(content=STR, summary=STR, changes_from_previous=STR)
+BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), summary=STR, changes_from_previous=STR)
 VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
             criteria=ARR(S(criterion=STR, met=BOOL, evidence=STR)),
             findings=ARR(S(severity=ENUM('critical', 'major', 'minor'), issue=STR, evidence=STR)))
@@ -54,7 +56,9 @@ You decide what it means, what knowledge it needs, which temporary specialist ag
 and the pipeline they run. You do not do specialist work yourself.
 {gov.SUMMARY}
 Rules:
-- The deliverable is ONE file produced by the LAST pipeline stage. Earlier stages produce notes
+- The deliverable is produced by the LAST pipeline stage: ONE file (artifact_kind markdown or python),
+  or, only when the goal truly needs several files, a bundle (artifact_kind bundle; artifact_filename
+  is then the relative path of the python entry file that runs the bundle's self-test). Earlier stages produce notes
   (research, design, analysis) that are handed to later stages. Use as few stages as the goal
   truly needs (1-{gov.MAX_STAGES}).
 - Pick a provider per stage from available_providers. Set web=true only for stages that must
@@ -149,6 +153,16 @@ class Engine:
         except (Rejected, providers.Rejected) as e:
             # Provider fault, both quotas exhausted, unusable reply: stop, never loop.
             self.store.pause(pid, f'{type(e).__name__}: {e}')
+        except Exception as e:
+            # A bug must never leave a project silently stuck in an active state (0.1.4: a schema
+            # mismatch killed the GUI worker and the project sat in EXECUTING with no trace).
+            log = self.workspace / 'logs' / 'engine-errors.log'
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open('a', encoding='utf-8') as f:
+                f.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} {pid}\n{traceback.format_exc()}")
+            if self.store.db.in_transaction:
+                self.store.db.execute('ROLLBACK')
+            self.store.pause(pid, f'Internal error {type(e).__name__}: {e} (traceback: {log})')
         self.write_handoff(pid)
         return self.store.project(pid)
 
@@ -171,6 +185,9 @@ class Engine:
                    'available_tools': tools,
                    'prior_knowledge': knowledge.retrieve(self.vault, goal),
                    'intelligence': knowledge.intel(self.gai_db, goal)}
+        # Provenance: exactly which prior knowledge and intelligence the CEO was shown.
+        self.store.event(pid, 'context_used', vault_notes=[n['note'] for n in context['prior_knowledge']],
+                         intelligence=[f"{i['title']} <{i['url']}>" for i in context['intelligence']])
         plan, used = self._ask(pid, 'CEO', CEO_SYSTEM, 'Interpret the Owner goal and design the pipeline.',
                                context, PLAN, prefer='claude')
         plan = self._sanitize(plan)
@@ -189,9 +206,13 @@ class Engine:
         if not plan['pipeline']:
             raise Rejected('CEO returned an empty pipeline.')
         plan['pipeline'] = plan['pipeline'][:gov.MAX_STAGES]
-        ext = '.py' if plan['artifact_kind'] == 'python' else '.md'
-        stem = re.sub(r'[^\w.-]+', '_', Path(plan['artifact_filename']).stem).strip('._') or 'artifact'
-        plan['artifact_filename'] = stem + ext
+        if plan['artifact_kind'] == 'bundle':
+            entry = artifacts.safe_relpath(plan['artifact_filename']) or 'run_tests.py'
+            plan['artifact_filename'] = entry if entry.endswith('.py') else entry + '.py'
+        else:
+            ext = '.py' if plan['artifact_kind'] == 'python' else '.md'
+            stem = re.sub(r'[^\w.-]+', '_', Path(plan['artifact_filename']).stem).strip('._') or 'artifact'
+            plan['artifact_filename'] = stem + ext
         plan['required_tools'] = [t for t in plan['required_tools'] if re.fullmatch(r'[\w.-]+', t)]
         return plan
 
@@ -229,32 +250,45 @@ class Engine:
         context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
                    'deliverable': {'kind': plan['artifact_kind'], 'filename': plan['artifact_filename']},
                    'acceptance_criteria': plan['acceptance_criteria'], 'previous_stages': upstream,
-                   'content_rule': 'content = the complete file text, nothing else.',
-                   'execution_check': EXEC_CONTRACT if plan['artifact_kind'] == 'python' else 'document must be substantive'}
+                   'content_rule': ('files = every file of the bundle as {path (relative), content}; content = ""'
+                                    if plan['artifact_kind'] == 'bundle' else
+                                    'content = the complete file text, nothing else; files = []'),
+                   'execution_check': (EXEC_CONTRACT.replace('<file>', plan['artifact_filename'])
+                                       if plan['artifact_kind'] != 'markdown' else 'document must be substantive')}
         system = WORKER_SYSTEM.format(role=final['agent_role'])
         history = self.store.verifications(pid)
         if history:
             last = self.store.artifacts(pid)[-1]
-            context['previous_artifact'] = Path(last['path']).read_text(encoding='utf-8')
+            context['previous_artifact'] = artifacts.text_of(last)
             context['verification_findings'] = [{'round': v['iteration'], 'criteria': v['result']['criteria'],
                                                  'findings': v['result']['findings'], 'checks': v['checks']}
                                                 for v in history[-2:]]
             system += '\n\n' + REWORK
         build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context, BUILD,
                                 prefer=final['provider'], web=final['web'])
-        path = self.workspace / 'projects' / pid / 'artifacts' / f'v{it}' / plan['artifact_filename']
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Exact bytes: write_text translates newlines on Windows and would break the recorded hash.
-        path.write_bytes(build['content'].encode('utf-8'))
-        sha = hashlib.sha256(build['content'].encode('utf-8')).hexdigest()
+        folder = self.workspace / 'projects' / pid / 'artifacts' / f'v{it}'
+        folder.mkdir(parents=True, exist_ok=True)
+        manifest = None
+        if plan['artifact_kind'] == 'bundle':
+            manifest, sha = artifacts.write_bundle(folder, build['files'])
+            path = folder
+        else:
+            content = build['content'] or (build['files'][0]['content'] if len(build['files']) == 1 else '')
+            path = folder / plan['artifact_filename']
+            # Exact bytes: write_text translates newlines on Windows and would break the recorded hash.
+            path.write_bytes(content.encode('utf-8'))
+            sha = artifacts.sha(content.encode('utf-8'))
         with self.store.tx():
             agent = self._agent(pid, final)
             self.store.save_output(pid, it, pv, len(notes_stages), agent, used, build)
-            self.store.add_artifact(pid, it, path, sha, plan['artifact_kind'], agent)
+            self.store.add_artifact(pid, it, path, sha, plan['artifact_kind'], agent, manifest)
             self.store.set_state(pid, 'VERIFYING', reason=f'artifact v{it} built')
 
-    def checks(self, path, kind):
-        """Deterministic evidence. A model's opinion can never override these."""
+    def checks(self, path, kind, entry=None, rejected=()):
+        """Deterministic evidence. A model's opinion can never override these.
+        path: the file, or for a bundle its folder (entry = relative path of the file to run)."""
+        if kind == 'bundle':
+            return self._bundle_checks(Path(path), entry, rejected)
         text = Path(path).read_text(encoding='utf-8')
         if kind != 'python':
             ok = len(text.strip()) >= 200
@@ -280,19 +314,50 @@ class Engine:
         output = (proc.stdout + proc.stderr)[-3000:]
         return {'ok': proc.returncode == 0, 'ran': ['compile', 'self-test'], 'exit_code': proc.returncode, 'output': output}
 
+    def _bundle_checks(self, folder, entry, rejected):
+        ran = ['paths']
+        if rejected:
+            return {'ok': False, 'ran': ran, 'output': 'refused files: ' + '; '.join(rejected)}
+        if not entry or not (folder / entry).is_file():
+            return {'ok': False, 'ran': ran, 'output': f'entry file {entry} is missing from the bundle'}
+        ran.append('compile')
+        for py in sorted(folder.rglob('*.py')):
+            try:
+                compile(py.read_text(encoding='utf-8'), str(py), 'exec')
+            except (SyntaxError, UnicodeDecodeError) as e:
+                return {'ok': False, 'ran': ran, 'output': f'{py.relative_to(folder).as_posix()}: {e}'}
+        python = sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
+        if not python:
+            return {'ok': False, 'ran': ran, 'output': 'no Python interpreter to run the self-test'}
+        ran.append('self-test')
+        with tempfile.TemporaryDirectory(prefix='axb-check-') as cwd:
+            shutil.copytree(folder, cwd, dirs_exist_ok=True)
+            try:
+                # -E -s, not -I: isolated mode drops the script folder from sys.path, so a bundle
+                # could not import its own modules. Environment and user site-packages stay ignored.
+                proc = subprocess.run([python, '-E', '-s', '-X', 'utf8', entry], cwd=cwd, capture_output=True,
+                                      stdin=subprocess.DEVNULL, text=True, encoding='utf-8', errors='replace',
+                                      timeout=gov.CHECK_TIMEOUT, creationflags=providers.NO_WINDOW)
+            except subprocess.TimeoutExpired:
+                return {'ok': False, 'ran': ran, 'output': f'self-test timed out ({gov.CHECK_TIMEOUT}s)'}
+        return {'ok': proc.returncode == 0, 'ran': ran, 'exit_code': proc.returncode,
+                'output': (proc.stdout + proc.stderr)[-3000:]}
+
     def _verifying(self, pid):
         p = self.store.project(pid)
         plan = p['plan']
         artifact = self.store.artifacts(pid)[-1]
-        raw = Path(artifact['path']).read_bytes()
-        text = raw.decode('utf-8')
-        if hashlib.sha256(raw).hexdigest() != artifact['sha256']:
-            raise Rejected(f"Artifact {artifact['path']} changed on disk after it was built.")
-        checks = self.checks(artifact['path'], artifact['kind'])
+        changed = artifacts.problems(artifact)
+        if changed:
+            raise Rejected(f"Artifact changed on disk after it was built: {'; '.join(changed)}")
+        text = artifacts.text_of(artifact)
+        rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
+        checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
         producer = plan['pipeline'][-1]['provider']
         context = {'owner_goal': p['goal'], 'acceptance_criteria': plan['acceptance_criteria'],
                    'lenses': plan['verification_lenses'],
-                   'artifact': {'filename': Path(artifact['path']).name, 'kind': artifact['kind'], 'content': text},
+                   'artifact': {'filename': plan['artifact_filename'], 'kind': artifact['kind'], 'content': text,
+                                'files': [rel for rel, _, _ in artifacts.files_of(artifact)]},
                    'deterministic_checks': checks,
                    'earlier_rounds': [{'round': v['iteration'], 'findings': v['result']['findings']}
                                       for v in self.store.verifications(pid)],
@@ -300,6 +365,11 @@ class Engine:
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
+        if used == producer:
+            self.store.event(pid, 'decision', what="verification ran on the producer's engine",
+                             why=f'{_other(producer)} unavailable (usage limit or not installed); the Verification '
+                                 f'Agent is still a separate role with its own prompt and no production context, '
+                                 f'but engine diversity was lost for round {p["iteration"]}', by='engine')
         blocking = [f for f in result['findings'] if f['severity'] in ('critical', 'major')]
         unmet = [c for c in result['criteria'] if not c['met']]
         passed = result['verdict'] == 'PASS' and checks['ok'] and not blocking and not unmet
@@ -395,7 +465,7 @@ class Engine:
         elif choice == 'save':
             self.store.set_state(pid, 'ARCHIVING')
             evidence = [', '.join(f'{k}: {v}' for k, v in e['detail'].items())
-                        for e in self.store.events(pid, {'audit', 'provider_handoff'})]
+                        for e in self.store.events(pid, {'audit', 'provider_handoff', 'context_used'})]
             note, sha = knowledge.archive(self.vault, self.store.project(pid), self.store.verifications(pid),
                                           [e['detail'] for e in self.store.events(pid, {'decision'})],
                                           evidence, self.store.artifacts(pid))
@@ -428,11 +498,7 @@ class Engine:
         """Problems between SQLite and disk that would make continuing unsafe. [] = consistent."""
         p, problems = self.store.project(pid), []
         for a in self.store.artifacts(pid):
-            path = Path(a['path'])
-            if not path.is_file():
-                problems.append(f"artifact v{a['iteration']} missing: {path}")
-            elif hashlib.sha256(path.read_bytes()).hexdigest() != a['sha256']:
-                problems.append(f"artifact v{a['iteration']} bytes differ from recorded sha256: {path}")
+            problems += [f'artifact {msg}' for msg in artifacts.problems(a)]
         if p['state'] not in ('CREATED', 'PLANNING', 'CLOSED') and not p['plan']:
             problems.append(f"state {p['state']} but no plan recorded")
         if p['state'] == 'VERIFYING' and not any(a['iteration'] == p['iteration'] for a in self.store.artifacts(pid)):
@@ -454,5 +520,5 @@ def git_state(repo=Path(__file__).resolve().parents[1]):
                      'uncommitted_files': len((git('status', '--porcelain') or '').splitlines())}
 
 
-def open_engine(**kwargs):
-    return Engine(Store(WORKSPACE / 'axbranch.sqlite3'), **kwargs)
+def open_engine(workspace=WORKSPACE, **kwargs):
+    return Engine(Store(Path(workspace) / 'axbranch.sqlite3'), workspace=workspace, **kwargs)

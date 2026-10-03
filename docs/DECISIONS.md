@@ -13,9 +13,9 @@ Nothing to install to run from source.
 **D4 ax-works not integrated in v0.1.** Its UI/task module is not on the critical path of the
 Goal → verified artifact loop. Revisit when AX Branch needs a richer workspace UI.
 
-**D5 Artifacts are single files returned as JSON; agents get no shell.** Keeps production agents
+**D5 Artifacts are returned as JSON (one file, or a bundle of files since 0.1.5); agents get no shell.** Keeps production agents
 inside the subscription CLIs' restricted mode and keeps every artifact hashable and versioned
-(`artifacts/v<N>/`). Multi-file / repo-editing agents are a later capability.
+(`artifacts/v<N>/`). Agents that edit an existing repository in place are a later capability.
 
 **D6 Deterministic checks gate PASS.** Evidence beats confidence: a failing self-test fails the
 round even if the verifier model says PASS.
@@ -24,3 +24,12 @@ round even if the verifier model says PASS.
 the Owner; resume grants more rounds.
 
 **D8 Provider order is retried every turn; no reset-time guessing.** Matches cheongwol's rule.
+
+**D9 (0.1.4) One session per project via an OS file lock.** Released by the OS on crash, so no stale
+locks; refused sessions change nothing.
+
+**D10 (0.1.5) Bundles are hash-addressed by manifest; model paths are untrusted.** Only safe relative
+paths are written; refusals fail verification rather than pausing the project.
+
+**D11 (0.1.5) Unexpected errors pause, never strand; schema is versioned.** Learned live: an older
+packaged exe crashed on a newer schema and the project sat in EXECUTING with no trace.

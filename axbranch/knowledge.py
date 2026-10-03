@@ -45,9 +45,11 @@ def intel(db_path, query, limit=5):
             con.close()
     except sqlite3.Error:
         return []
+    # Off-topic news in the CEO's context is noise: require a real share of the query, not 2 stray words.
+    need = max(2, -(-len(q) * 3 // 10))
     scored = sorted(((len(q & terms(f'{r[0]} {r[1]}')), r) for r in rows), key=lambda s: -s[0])
     return [{'title': r[0], 'summary': (r[1] or '')[:400], 'source': r[2], 'published_at': r[3],
-             'url': r[4], 'verification_status': r[5]} for score, r in scored[:limit] if score >= 2]
+             'url': r[4], 'verification_status': r[5]} for score, r in scored[:limit] if score >= need]
 
 
 def _slug(text, n=50):
