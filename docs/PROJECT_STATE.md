@@ -1,6 +1,6 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-03 · version **0.1.1** · repo `AX-Branch/ax-branch` (local git only, not pushed).
+Updated 2026-10-03 · version **0.1.2** · repo `AX-Branch/ax-branch` (local git only, not pushed).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
 
@@ -18,11 +18,11 @@ covers the *development* of AX Branch itself.
 |---|---|---|
 | Runs an agent turn (any role) | live-proven | live-proven (engineer, verifier) |
 | Quota failover to the other | unit-tested only | unit-tested only |
-| Drives a project as the session (`python -m axbranch run`) | done in this session | **not yet proven** |
+| Drives a project as the session (`python -m axbranch run`) | live-proven | **live-proven** (2026-10-03, see `evidence/`) |
 
-## Live project
-`P-20261003-906ead` is **PENDING_CLOSE**, waiting for the Owner to review and choose
-SAVE & CLOSE / PAUSE / CLOSE WITHOUT SAVE (`python -m axbranch finish P-20261003-906ead`).
+## Live projects (both PENDING_CLOSE, Owner decision; do not close without the Owner)
+- `P-20261003-906ead` — business-registration-number validator (v2 PASS). Owner: keep open for now.
+- `P-20261003-06983b` — won amount → Hangul (v1 PASS); finished by a Codex CLI session (continuation test).
 
 ## Next
 See `TASK_STATE.md`.

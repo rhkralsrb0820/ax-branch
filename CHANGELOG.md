@@ -3,6 +3,38 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.2] - 2026-10-03
+
+Real Codex CLI continuation test passed: Codex, given only "Continue the AX Branch work.", read
+persistent state and finished an interrupted project without re-running completed work.
+
+### Added
+- `axbranch run <id> --stop-at STATE`: end a session at a controlled checkpoint (project stays active).
+- `axbranch check <id>`: SQLite <-> disk consistency (artifact sha256 vs bytes, plan/state sanity); exit 1 if unsafe.
+- `session` events (OS pid + names of CODEX*/CLAUDE* environment variables, never values) as evidence of the driving CLI.
+- HANDOFF.md now includes `ax_branch_git` (commit, subject, uncommitted files) and `consistency_problems`.
+- AGENTS.md continuation protocol; `.gitattributes` (LF); `docs/GITHUB_PLAN.md`; evidence record
+  `docs/evidence/2026-10-03-codex-continuation.md`.
+
+### Changed
+- `.gitignore` hardened for a public-host push (runtime DBs, agent context, logs, keys, tool state, builds).
+
+### Fixed
+- CHANGELOG 0.1.1 test count corrected (13, not 14).
+
+### Verification
+- 15 unit tests pass, including stop-at + second-session continuation without rerun and tamper detection.
+- Live: project `P-20261003-06983b` stopped at VERIFYING by a Claude Code session; the Owner launched
+  `codex exec` with no task context; Codex read AGENTS/HANDOFF/state docs, ran `check`, then `run`.
+  SQLite shows a Codex session (CODEX_SESSION_ID), only Verification + CEO report calls, stage output
+  unchanged, VERIFYING -> PENDING_CLOSE, `check` consistent, the other project untouched.
+- Delivered `won_reader.py`: self-test exit 0; 0 mismatches vs an independent reference on 20,010 inputs.
+
+### Known issues
+- Quota failover between providers still not exercised live.
+- Codex as driver needs `-s danger-full-access` (writes outside the repo, temp dir, nested CLI with network).
+- Earlier items remain: no cross-process run lock, self-test not sandboxed, single-file artifacts, ax-works not integrated.
+
 ## [0.1.1] - 2026-10-03
 
 First live end-to-end run (project `P-20261003-906ead`, Korean business-registration-number
