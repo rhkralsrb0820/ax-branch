@@ -1,8 +1,42 @@
+# Python caches
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Build outputs (build_exe.py) — rebuild from source, never commit
 build/
 dist/
 *.spec
-*.sqlite3*
-.env*
 build.log
+
+# Runtime state and agent context — lives in ../workspace, never in this repo
+*.sqlite3*
+*.db
+*.db-*
+*.log
+workspace/
+projects/
+HANDOFF.md
+
+# Secrets and local tool state
+.env*
+*.pem
+*.key
+owner.key
+credentials*.json
+secrets*.json
+.claude/
+.codex/
+.agents/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+~$*
+*.tmp
