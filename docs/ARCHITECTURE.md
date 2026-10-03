@@ -20,13 +20,20 @@ Owner ── GUI / CLI ──► Engine (淸月 AI CEO driver) ──► provide
 | `providers.py` | Claude Code / Codex CLI as interchangeable engines; quota failover. |
 | `engine.py` | CEO planning, staffing, build, deterministic checks, independent verification, rebuild, strategy review, CEO report, close/archive. |
 | `knowledge.py` | Vault retrieval, GAI read-only search (relevance-gated, provenance recorded), verified archive notes. |
+| `runtime.py` | Runtime Acceptance: launch the artifact the way the Owner will (cli / web / gui), run probes, record evidence. |
 | `sandbox.py` | Runs generated self-tests: clean env, Job Object limits, whole tree killed. |
 | `artifacts.py` | Single-file and multi-file (bundle) artifacts: safe paths, sha256 manifest, integrity, text view. |
 | `gui.py`, `__main__.py` | Owner window and CLI. |
 
 ## Lifecycle
 
-`CREATED → PLANNING → STAFFING → EXECUTING → VERIFYING → (REWORK → STAFFING → EXECUTING → VERIFYING)* → PENDING_CLOSE → ARCHIVE_PENDING_APPROVAL → ARCHIVING → CLOSED`;
+`CREATED → PLANNING → STAFFING → EXECUTING → VERIFYING → (REWORK → STAFFING → EXECUTING → VERIFYING)* → OWNER_REVIEW → PENDING_CLOSE → ARCHIVE_PENDING_APPROVAL → ARCHIVING → CLOSED`;
+**Owner review loop (0.1.8):** in OWNER_REVIEW the Owner reports *works* (→ PENDING_CLOSE), *problem* or
+*change* (→ REWORK on the same project, history kept). In REWORK with new Owner feedback the engine first
+runs Runtime Acceptance on the delivered version (reproduction), the CEO diagnoses from the feedback and
+that evidence and revises criteria / runtime spec / pipeline (plan_version+1), the revised acceptance is
+run against the old version (it should fail if the problem is real), then the normal build → verify loop
+runs and the verified version returns to OWNER_REVIEW.
 `PAUSED` from any active state (Owner stop, provider fault, both quotas exhausted, missing tool,
 round budget) remembers `resume_state`.
 
@@ -38,7 +45,8 @@ round budget) remembers `resume_state`.
 - **Verification Agent** (permanent): separate prompt, schema with no content field (cannot fix),
   runs on the *other* provider than the producer when possible, sees deterministic check output and
   earlier findings. PASS is gated in code: model verdict PASS **and** every criterion met **and**
-  no critical/major finding **and** deterministic checks pass.
+  no critical/major finding **and** deterministic checks pass (self-test via `--self-test`) **and**
+  Runtime Acceptance passes (the artifact launched as the Owner launches it, primary flow exercised).
 - **Temporary specialists**: one row per role+provider in `agents`; hired from the CEO's pipeline,
   kept across rework, marked `replaced` on strategy change, `terminated` at close.
 

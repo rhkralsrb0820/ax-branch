@@ -17,7 +17,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, providers, sandbox
+from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, providers, runtime, sandbox
 from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
@@ -38,7 +38,11 @@ def ENUM(*values):
 
 STAGE = S(name=STR, agent_role=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
 PLAN = S(interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
-         acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR), pipeline=ARR(STAGE))
+         acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
+         runtime=runtime.SPEC, pipeline=ARR(STAGE))
+DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=STR,
+              artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
+              acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC, pipeline=ARR(STAGE))
 WORK = S(output=STR, key_points=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), summary=STR, changes_from_previous=STR)
 VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
@@ -47,9 +51,22 @@ VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
 STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE))
 REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR))
 
-EXEC_CONTRACT = ("The engine verifies a python artifact by running `python <file>` with NO arguments and "
-                 "empty stdin in an empty temp dir; that exact invocation must run the full self-test and "
-                 "exit 0 only if it passes. Other CLI modes must be reachable with arguments.")
+EXEC_CONTRACT = ("The engine runs `python <file> --self-test` with empty stdin in an empty temp dir; that "
+                 "invocation must run the full self-test and exit 0 only if it passes. Running `python <file>` "
+                 "with NO arguments is the Owner's normal launch (a double-click on Windows) and must start the "
+                 "primary user experience, never the self-test.")
+RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the engine executes it at verification
+  (Runtime Acceptance) and the artifact cannot PASS unless every probe holds.
+  owner_launch = plain instructions for the Owner (e.g. 'double-click app.py; the browser opens
+  http://127.0.0.1:8050'). mode: web for anything with a page or dashboard, gui for a desktop window,
+  cli for terminal tools, none only for documents or pure libraries. If the goal is vague about the
+  interface ('make a program'), choose what a non-technical Owner can use by double-clicking.
+  cli: probes run `python <file> *args` with stdin; expect_exit (-1 = any) and expect_contains.
+  web: the program must accept `--port PORT` and `--no-browser` and bind 127.0.0.1 only; launch_args
+  must be e.g. ["--port", "{port}", "--no-browser"] (the engine substitutes a free port); probes are
+  HTTP requests (http_method/path/body, expect_status, expect_contains) that walk the primary user flow
+  end to end, including the requests the page itself makes (e.g. its API calls).
+  Probes must use realistic input and check meaningful output, not just that something answered."""
 
 CEO_SYSTEM = f"""You are 淸月 AI CEO, the executive of AX Branch. The Owner gave a Goal.
 You decide what it means, what knowledge it needs, which temporary specialist agents to hire,
@@ -68,6 +85,7 @@ Rules:
   `if __name__ == '__main__':` that asserts the behavior and exits non-zero on failure. It must
   not use the network or touch files outside its working directory.
 - {EXEC_CONTRACT}
+{RUNTIME_RULES}
 - Production agents cannot execute code, use a shell or write files; never instruct them to run
   anything. Execution evidence comes only from the engine's deterministic checks at verification.
 - required_tools: only external programs the work truly needs (e.g. blender); [] otherwise.
@@ -92,11 +110,31 @@ deterministic check output. Severity: critical = wrong, unsafe or unusable; majo
 not met or a significant defect; minor = polish. Verdict PASS only if every criterion is met and
 there is no critical or major finding. Earlier failed rounds never lower the standard: re-check
 that earlier findings are truly resolved. Do not claim to have executed anything yourself; only
-the deterministic checks shown were run."""
+the deterministic checks shown were run.
+deterministic_checks.runtime shows what happened when the artifact was launched the way the Owner
+launches it. A program that does not start, crashes, loses connections or whose primary flow fails
+is unusable (critical), whatever its source quality or unit tests. Also judge whether the runtime
+spec truly reflects the Owner's real use; a spec too weak to show usability is a major finding.
+If owner_rework is present, the Owner reported a real problem with an earlier version: confirm with
+runtime evidence that exactly that problem is gone."""
 
 REPORT_SYSTEM = """You are 淸月 AI CEO. Production agents delivered an artifact and the independent
 Verification Agent PASSED it. Give the Owner a concise executive report: what was achieved,
 your judgment of its value and limits (from the evidence shown, not optimism), and next steps."""
+
+DIAGNOSE_SYSTEM = """You are 淸月 AI CEO. The Owner tested the delivered, verified artifact and reported
+a problem or requested a change (owner_feedback). Treat the Owner's report as ground truth about their
+experience even though verification passed: verification missed something. runtime_evidence_current
+shows the current artifact launched the way the Owner launches it — use it to reproduce and diagnose.
+Find the root cause, including gaps in the previous acceptance criteria or runtime spec that let the
+problem pass. Return a revised plan for the SAME project: interpretation, the complete acceptance
+criteria (add ones that would have caught this), a runtime spec whose probes would FAIL on the current
+artifact if the problem is real, and the pipeline (reuse suitable roles). Never drop or weaken existing
+requirements unless the Owner asked for that change."""
+
+OWNER_REWORK = """The Owner tested the previous version and reported a problem or change (owner_rework:
+feedback, CEO diagnosis, reproduction evidence). Build a NEW complete version that resolves it under
+the runtime acceptance spec, keeping every still-valid requirement."""
 
 STRATEGY_SYSTEM = """You are 淸月 AI CEO. The artifact keeps FAILING independent verification. The
 standard will not be lowered. Decide: continue (same team, findings are fixable), switch_provider
@@ -168,10 +206,28 @@ class Engine:
 
     def _ask(self, pid, who, system, task, context, schema, prefer, web=False):
         self.log(f'{who} -> {prefer}')
-        result, used, notes = self.llm(_prompt(system, task, context), schema, prefer=prefer, web=web, cancel=self.cancel)
+        p = self.store.project(pid)
+        self.store.event(pid, 'call_start', who=who, preferred=prefer, state=p['state'], iteration=p['iteration'])
+        activity = self.workspace / 'projects' / pid / 'ACTIVITY.json'
+        base = {'project': pid, 'agent': who, 'state': p['state'], 'iteration': p['iteration'],
+                'preferred': prefer, 'started_at': time.strftime('%Y-%m-%d %H:%M:%S'), 'os_pid': os.getpid()}
+        started = time.monotonic()
+
+        def tick(info):   # live, per second: which agent, which provider/CLI pid, elapsed, last output
+            data = json.dumps({**base, **info, 'updated_at': time.strftime('%H:%M:%S')}, ensure_ascii=False)
+            tmp = activity.with_suffix('.tmp')
+            tmp.write_text(data, encoding='utf-8')
+            os.replace(tmp, activity)
+        activity.parent.mkdir(parents=True, exist_ok=True)
+        tick({'provider': prefer, 'elapsed': 0, 'output_bytes': 0, 'idle': 0})
+        try:
+            result, used, notes = self.llm(_prompt(system, task, context), schema, prefer=prefer, web=web,
+                                           cancel=self.cancel, on_tick=tick)
+        finally:
+            activity.unlink(missing_ok=True)
         if notes:
             self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, notes=notes)
-        self.store.event(pid, 'call', who=who, provider=used)
+        self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started))
         return result, used
 
     # ---- states
@@ -213,7 +269,11 @@ class Engine:
             ext = '.py' if plan['artifact_kind'] == 'python' else '.md'
             stem = re.sub(r'[^\w.-]+', '_', Path(plan['artifact_filename']).stem).strip('._') or 'artifact'
             plan['artifact_filename'] = stem + ext
-        plan['required_tools'] = [t for t in plan['required_tools'] if re.fullmatch(r'[\w.-]+', t)]
+        plan['required_tools'] = [t for t in plan.get('required_tools', []) if re.fullmatch(r'[\w.-]+', t)]
+        spec = plan.get('runtime') or dict(runtime.DEFAULT)
+        if plan['artifact_kind'] == 'markdown':
+            spec = {**spec, 'mode': 'none'}
+        plan['runtime'] = runtime.normalize(spec)[0]
         return plan
 
     def _staffing(self, pid):
@@ -254,9 +314,13 @@ class Engine:
                                     if plan['artifact_kind'] == 'bundle' else
                                     'content = the complete file text, nothing else; files = []'),
                    'execution_check': (EXEC_CONTRACT.replace('<file>', plan['artifact_filename'])
-                                       if plan['artifact_kind'] != 'markdown' else 'document must be substantive')}
+                                       if plan['artifact_kind'] != 'markdown' else 'document must be substantive'),
+                   'runtime_acceptance': runtime.normalize(plan.get('runtime'))[0]}
         system = WORKER_SYSTEM.format(role=final['agent_role'])
         history = self.store.verifications(pid)
+        if plan.get('owner_rework'):
+            context['owner_rework'] = plan['owner_rework']
+            system += '\n\n' + OWNER_REWORK
         if history:
             last = self.store.artifacts(pid)[-1]
             context['previous_artifact'] = artifacts.text_of(last)
@@ -304,7 +368,7 @@ class Engine:
             return {'ok': False, 'ran': ['compile'], 'output': 'no Python interpreter to run the self-test'}
         with tempfile.TemporaryDirectory(prefix='axb-check-', ignore_cleanup_errors=True) as cwd:
             (Path(cwd) / Path(path).name).write_bytes(Path(path).read_bytes())
-            code, output = sandbox.run([python, '-I', '-X', 'utf8', Path(path).name], cwd, gov.CHECK_TIMEOUT)
+            code, output = sandbox.run([python, '-I', '-X', 'utf8', Path(path).name, '--self-test'], cwd, gov.CHECK_TIMEOUT)
         return self._result(['compile', 'self-test'], code, output)
 
     @staticmethod
@@ -333,7 +397,7 @@ class Engine:
             shutil.copytree(folder, cwd, dirs_exist_ok=True)
             # -E -s, not -I: isolated mode drops the script folder from sys.path, so a bundle
             # could not import its own modules. Environment and user site-packages stay ignored.
-            code, output = sandbox.run([python, '-E', '-s', '-X', 'utf8', entry], cwd, gov.CHECK_TIMEOUT)
+            code, output = sandbox.run([python, '-E', '-s', '-X', 'utf8', entry, '--self-test'], cwd, gov.CHECK_TIMEOUT)
         return self._result(ran, code, output)
 
     def _verifying(self, pid):
@@ -346,6 +410,12 @@ class Engine:
         text = artifacts.text_of(artifact)
         rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
         checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
+        checks['runtime'] = self.runtime_evidence(artifact, plan.get('runtime'), plan['artifact_filename'])
+        if not checks['runtime']['ok']:
+            checks['ok'] = False
+            checks['output'] = (checks.get('output', '') + '\nRUNTIME ACCEPTANCE FAILED: '
+                                + '; '.join(f"{s['name']}: {', '.join(s['problems'])}"
+                                            for s in checks['runtime']['steps'] if not s['ok']))[-3000:]
         producer = plan['pipeline'][-1]['provider']
         context = {'owner_goal': p['goal'], 'acceptance_criteria': plan['acceptance_criteria'],
                    'lenses': plan['verification_lenses'],
@@ -354,7 +424,8 @@ class Engine:
                    'deterministic_checks': checks,
                    'earlier_rounds': [{'round': v['iteration'], 'findings': v['result']['findings']}
                                       for v in self.store.verifications(pid)],
-                   'verification_knowledge': knowledge.retrieve(self.vault, p['goal'] + ' verification failed lesson')}
+                   'verification_knowledge': knowledge.retrieve(self.vault, p['goal'] + ' verification failed lesson'),
+                   'runtime_spec': plan.get('runtime'), 'owner_rework': plan.get('owner_rework')}
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
@@ -410,7 +481,85 @@ class Engine:
             self.store.event(pid, 'decision', what=f"strategy: {decision['decision']}", why=decision['rationale'], by=used)
 
     def _rework(self, pid):
+        if self.store.feedback(pid, pending_only=True):
+            return self._owner_rework(pid)
         self.store.set_state(pid, 'STAFFING', reason='rebuild')
+
+    def _python(self):
+        return sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
+
+    def runtime_evidence(self, artifact, spec, entry):
+        """Launch the artifact the way the Owner will (Runtime Acceptance) in a contained temp copy."""
+        if artifact['kind'] not in ('python', 'bundle'):
+            return {'ok': True, 'mode': 'none', 'steps': [], 'notes': ['not an executable artifact']}
+        python = self._python()
+        if not python:
+            return {'ok': False, 'mode': (spec or {}).get('mode'), 'notes': [],
+                    'steps': [{'name': 'interpreter', 'ok': False, 'problems': ['no Python interpreter found']}]}
+        with tempfile.TemporaryDirectory(prefix='axb-run-', ignore_cleanup_errors=True) as cwd:
+            artifacts.materialize(artifact, cwd)
+            rel = entry if artifact['kind'] == 'bundle' else Path(artifact['path']).name
+            return runtime.check(spec or runtime.DEFAULT, rel, python, cwd)
+
+    def _owner_rework(self, pid):
+        """Owner reported a problem/change: reproduce, let the CEO diagnose, revise the SAME project's plan."""
+        p = self.store.project(pid)
+        plan, last = p['plan'], self.store.artifacts(pid)[-1]
+        old_entry = plan['artifact_filename']
+        before = self.runtime_evidence(last, plan.get('runtime'), old_entry)
+        feedback = self.store.feedback(pid)
+        context = {'owner_goal': p['goal'], 'current_plan': plan,
+                   'owner_feedback': [{'round': f['iteration'], 'verdict': f['verdict'], 'text': f['text'],
+                                       'new': f['handled_iteration'] is None} for f in feedback],
+                   'delivered_artifact': {'path': last['path'], 'content': artifacts.text_of(last)[:60000]},
+                   'runtime_evidence_current': before,
+                   'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
+                                             'findings': v['result']['findings']} for v in self.store.verifications(pid)],
+                   'available_providers': providers.available() or list(gov.PROVIDERS)}
+        d, used = self._ask(pid, 'CEO', DIAGNOSE_SYSTEM, 'Diagnose the Owner feedback and revise this project.',
+                            context, DIAGNOSIS, prefer='claude')
+        new = self._sanitize({**plan, **{k: d[k] for k in ('interpretation', 'artifact_kind', 'artifact_filename',
+                                                          'acceptance_criteria', 'verification_lenses', 'runtime',
+                                                          'pipeline')}})
+        # Reproduce: the revised acceptance run against the version the Owner has. If the problem is
+        # real, this should fail now — and the rebuilt version must pass it.
+        repro = self.runtime_evidence(last, new['runtime'], old_entry)
+        failed = [f"{s['name']}: {', '.join(s['problems'])}" for s in repro['steps'] if not s['ok']]
+        new['owner_rework'] = {'feedback': [f['text'] for f in feedback if f['handled_iteration'] is None],
+                               'diagnosis': d['diagnosis'], 'root_cause': d['root_cause'],
+                               'change_summary': d['change_summary'],
+                               'reproduced_on_previous_version': not repro['ok'], 'reproduction_failures': failed[:10]}
+        fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+        with self.store.tx():
+            self.store.update(pid, plan=new, plan_version=p['plan_version'] + 1, budget=fails + gov.MAX_ROUNDS)
+            self.store.event(pid, 'decision', what='owner feedback diagnosis',
+                             why=f"{d['diagnosis']} | root cause: {d['root_cause']}", by=used)
+            self.store.event(pid, 'reproduction', version=last['iteration'], current_spec_ok=before['ok'],
+                             revised_spec_ok=repro['ok'], failures=failed[:10])
+            self.store.mark_feedback_handled(pid, p['iteration'])
+            self.store.set_state(pid, 'STAFFING', reason='rebuild for Owner feedback')
+
+    # ---- Owner review
+    def owner_review(self, pid, verdict, text=''):
+        """verdict: 'works' | 'problem' | 'change'. Problem/change reopen the SAME project at REWORK."""
+        with self.lock(pid):
+            p = self.store.project(pid)
+            if verdict not in ('works', 'problem', 'change'):
+                raise Rejected(f'Unknown review verdict {verdict!r}.')
+            if p['state'] not in ('OWNER_REVIEW', 'PENDING_CLOSE'):
+                raise Rejected(f"Project is {p['state']}; the Owner reviews a delivered project (OWNER_REVIEW).")
+            if verdict != 'works' and not text.strip():
+                raise Rejected('Describe the problem or the change you want, so the CEO can act on it.')
+            with self.store.tx():
+                self.store.add_feedback(pid, p['iteration'], verdict, text.strip() or 'works as expected')
+                if verdict == 'works':
+                    if p['state'] == 'OWNER_REVIEW':
+                        self.store.set_state(pid, 'PENDING_CLOSE', reason='Owner: works')
+                else:
+                    self.store.update(pid, iteration=p['iteration'] + 1)
+                    self.store.set_state(pid, 'REWORK', reason=f'Owner: {verdict}')
+            self.write_handoff(pid)
+            return self.store.project(pid)
 
     def _deliver(self, pid, artifact, text, verdict):
         p = self.store.project(pid)
@@ -420,9 +569,11 @@ class Engine:
                    'rounds': p['iteration']}
         report, used = self._ask(pid, 'CEO', REPORT_SYSTEM, 'Report the verified result to the Owner.',
                                  context, REPORT, prefer='claude')
+        how = (p['plan'].get('runtime') or {}).get('owner_launch', '')
         with self.store.tx():
-            self.store.update(pid, report={**report, 'artifact': artifact['path'], 'rounds': p['iteration']})
-            self.store.set_state(pid, 'PENDING_CLOSE', reason='verified artifact delivered to Owner')
+            self.store.update(pid, report={**report, 'artifact': artifact['path'], 'rounds': p['iteration'],
+                                           'how_to_test': how})
+            self.store.set_state(pid, 'OWNER_REVIEW', reason='verified artifact delivered; Owner to test it')
 
     # ---- Owner lifecycle
     def close(self, pid, choice=None, confirm=False, satisfaction=None):
@@ -433,10 +584,10 @@ class Engine:
 
     def _close(self, pid, choice, confirm, satisfaction):
         p = self.store.project(pid)
-        if p['state'] == 'PAUSED' and p['resume_state'] in ('PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
+        if p['state'] == 'PAUSED' and p['resume_state'] in ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
             self.store.resume(pid)
             p = self.store.project(pid)
-        if p['state'] == 'PENDING_CLOSE':
+        if p['state'] in ('PENDING_CLOSE', 'OWNER_REVIEW'):
             self.store.set_state(pid, 'ARCHIVE_PENDING_APPROVAL', reason='Owner said finished; CEO asks about knowledge')
         elif p['state'] != 'ARCHIVE_PENDING_APPROVAL':
             raise Rejected(f"Project is {p['state']}; only a delivered project can be closed.")
@@ -458,7 +609,8 @@ class Engine:
         elif choice == 'save':
             self.store.set_state(pid, 'ARCHIVING')
             evidence = [', '.join(f'{k}: {v}' for k, v in e['detail'].items())
-                        for e in self.store.events(pid, {'audit', 'provider_handoff', 'context_used'})]
+                        for e in self.store.events(pid, {'audit', 'provider_handoff', 'context_used', 'reproduction'})]
+            evidence += [f"Owner feedback round {f['iteration']} ({f['verdict']}): {f['text']}" for f in self.store.feedback(pid)]
             note, sha = knowledge.archive(self.vault, self.store.project(pid), self.store.verifications(pid),
                                           [e['detail'] for e in self.store.events(pid, {'decision'})],
                                           evidence, self.store.artifacts(pid))
@@ -478,6 +630,7 @@ class Engine:
         folder.mkdir(parents=True, exist_ok=True)
         data = self.store.handoff(pid)
         data['ax_branch_git'] = git_state()
+        data['activity'] = activity(self.workspace, pid)
         data['consistency_problems'] = self.consistency(pid)
         (folder / 'HANDOFF.md').write_text(
             f"# AX Branch handoff — {pid}\n\nAny engine (Claude Code, Codex CLI, a person) continues from this "
@@ -497,6 +650,15 @@ class Engine:
         if p['state'] == 'VERIFYING' and not any(a['iteration'] == p['iteration'] for a in self.store.artifacts(pid)):
             problems.append(f"VERIFYING but no artifact for iteration {p['iteration']}")
         return problems
+
+
+def activity(workspace, pid):
+    """The call in flight right now (None if idle): agent, provider, CLI pid, elapsed, idle seconds."""
+    path = Path(workspace) / 'projects' / pid / 'ACTIVITY.json'
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
 
 
 def git_state(repo=Path(__file__).resolve().parents[1]):

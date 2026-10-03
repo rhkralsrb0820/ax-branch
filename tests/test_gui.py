@@ -11,7 +11,7 @@ from tkinter import ttk
 from axbranch import engine as E
 from axbranch.gui import App
 from axbranch.state import Store
-from tests.test_engine import BROKEN, GOOD, Script
+from tests.test_engine import BROKEN, GOOD, LAUNCHABLE, Script
 
 
 def _buttons(widget):
@@ -32,8 +32,10 @@ class GuiTests(unittest.TestCase):
         self.ws, self.vault = self.tmp / 'ws', self.tmp / 'vault'
         self.vault.mkdir()
         self.script = Script([BROKEN, GOOD], ['FAIL', 'PASS'])
-        factory = lambda: E.Engine(Store(self.ws / 'axbranch.sqlite3'), workspace=self.ws, vault=self.vault,
-                                   gai_db=self.tmp / 'none.db', llm=self.script)
+        ws, vault, gai, script = self.ws, self.vault, self.tmp / 'none.db', self.script
+
+        def factory():          # captures plain values only: a worker thread must never hold the window
+            return E.Engine(Store(ws / 'axbranch.sqlite3'), workspace=ws, vault=vault, gai_db=gai, llm=script)
         try:
             self.app = App(workspace=self.ws, engine_factory=factory)
         except tk.TclError as e:
@@ -57,12 +59,14 @@ class GuiTests(unittest.TestCase):
         self.app.goal.insert('1.0', 'make an add tool')
         _press(self.app, '淸月 CEO에게 맡기기')
         pid = self.app.selected
-        self.pump_until(lambda: self.app.store.project(pid)['state'] == 'PENDING_CLOSE' and not self.app.running)
+        self.pump_until(lambda: self.app.store.project(pid)['state'] == 'OWNER_REVIEW' and not self.app.running)
         self.pump_until(lambda: '淸月 AI CEO 보고' in self.app.detail.get('1.0', 'end'))
         shown = self.app.detail.get('1.0', 'end')
         self.assertIn('검증 1회차: FAIL', shown)
         self.assertIn('검증 2회차: PASS', shown)
 
+        _press(self.app, '작동함')                         # Owner tried it: works
+        self.assertEqual(self.app.store.project(pid)['state'], 'PENDING_CLOSE')
         _press(self.app, '프로젝트 종료…')
         dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
         _press(dialog, 'A. SAVE & CLOSE')
@@ -70,6 +74,18 @@ class GuiTests(unittest.TestCase):
         note = Path(self.app.store.project(pid)['archive_note'])
         self.assertTrue(note.is_file())
         self.pump_until(lambda: 'Obsidian 저장' in self.app.detail.get('1.0', 'end'))
+
+    def test_problem_report_reopens_same_project_and_redelivers(self):
+        self.script.builds, self.script.verdicts = [GOOD, LAUNCHABLE], ['PASS', 'PASS']
+        self.app.goal.insert('1.0', 'make an add tool')
+        _press(self.app, '淸月 CEO에게 맡기기')
+        pid = self.app.selected
+        self.pump_until(lambda: self.app.store.project(pid)['state'] == 'OWNER_REVIEW' and not self.app.running)
+        self.app.review('problem', 'double-click closes immediately')   # text the dialog would collect
+        self.pump_until(lambda: self.app.store.project(pid)['state'] == 'OWNER_REVIEW' and not self.app.running
+                        and len(self.app.store.artifacts(pid)) == 2)
+        self.assertEqual(self.app.store.projects()[0]['id'], pid)            # same project, not a new one
+        self.pump_until(lambda: 'Owner 피드백 1회차 (problem)' in self.app.detail.get('1.0', 'end'))
 
     def test_busy_project_is_reported_not_run(self):
         pid = self.app.store.new_project('make an add tool')

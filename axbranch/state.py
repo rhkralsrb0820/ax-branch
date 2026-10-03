@@ -18,9 +18,11 @@ TRANSITIONS = {
     'PLANNING': {'STAFFING'},
     'STAFFING': {'EXECUTING'},
     'EXECUTING': {'VERIFYING'},
-    'VERIFYING': {'REWORK', 'PENDING_CLOSE'},
+    'VERIFYING': {'REWORK', 'OWNER_REVIEW'},
     'REWORK': {'STAFFING'},
-    'PENDING_CLOSE': {'ARCHIVE_PENDING_APPROVAL'},
+    # The Owner tries the verified artifact: works -> PENDING_CLOSE; problem / change -> REWORK (same project).
+    'OWNER_REVIEW': {'PENDING_CLOSE', 'REWORK', 'ARCHIVE_PENDING_APPROVAL'},
+    'PENDING_CLOSE': {'ARCHIVE_PENDING_APPROVAL', 'REWORK'},
     'ARCHIVE_PENDING_APPROVAL': {'ARCHIVING', 'CLOSED'},
     'ARCHIVING': {'CLOSED'},
     'CLOSED': set(),
@@ -33,9 +35,10 @@ NEXT = {
     'STAFFING': 'CEO hires the temporary specialist agents the pipeline needs',
     'EXECUTING': 'Production agents run the pipeline stages and build the artifact',
     'VERIFYING': 'Verification Agent judges the latest artifact',
-    'REWORK': 'Production agents rebuild from the verification findings',
+    'REWORK': 'Rebuild: CEO diagnoses Owner feedback (if any), production agents rebuild from findings',
+    'OWNER_REVIEW': 'Owner tests the verified artifact and reports: works / problem / change request',
     'PAUSED': 'Owner decides: resume (python -m axbranch resume <id>)',
-    'PENDING_CLOSE': 'Owner reviews the verified result and says when the project is finished',
+    'PENDING_CLOSE': 'Owner accepted the result; says when the project is finished (or reports a problem)',
     'ARCHIVE_PENDING_APPROVAL': 'Owner chooses SAVE & CLOSE, PAUSE or CLOSE WITHOUT SAVE',
     'ARCHIVING': 'Write and verify the Obsidian archive',
     'CLOSED': 'Nothing; project closed',
@@ -61,12 +64,16 @@ CREATE TABLE IF NOT EXISTS verifications(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), artifact_id TEXT NOT NULL,
   iteration INTEGER NOT NULL, verdict TEXT NOT NULL, result TEXT NOT NULL, checks TEXT NOT NULL,
   provider TEXT, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS owner_feedback(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL REFERENCES projects(id),
+  iteration INTEGER NOT NULL, verdict TEXT NOT NULL, text TEXT NOT NULL, created REAL NOT NULL,
+  handled_iteration INTEGER);
 CREATE TABLE IF NOT EXISTS events(
   id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, at REAL NOT NULL, kind TEXT NOT NULL,
   detail TEXT NOT NULL);
 '''
 _JSON = ('plan', 'report')
-SCHEMA_VERSION = 2   # 1 = 0.1.0-0.1.4 (no marker), 2 = artifacts.manifest (0.1.5)
+SCHEMA_VERSION = 3   # 1 = 0.1.0-0.1.4 (no marker), 2 = artifacts.manifest (0.1.5), 3 = owner_feedback (0.1.8)
 
 
 class Rejected(Exception):
@@ -279,6 +286,20 @@ class Store:
                 for r in self.db.execute('SELECT * FROM events WHERE project_id=? ORDER BY id', (pid,))]
         return [r for r in rows if kinds is None or r['kind'] in kinds]
 
+    # ---- Owner review
+    def add_feedback(self, pid, iteration, verdict, text):
+        self.db.execute('INSERT INTO owner_feedback(project_id,iteration,verdict,text,created) VALUES(?,?,?,?,?)',
+                        (pid, iteration, verdict, text, time.time()))
+        self.event(pid, 'owner_feedback', verdict=verdict, iteration=iteration, text=text[:2000])
+
+    def feedback(self, pid, pending_only=False):
+        sql = 'SELECT * FROM owner_feedback WHERE project_id=?' + (' AND handled_iteration IS NULL' if pending_only else '')
+        return [dict(r) for r in self.db.execute(sql + ' ORDER BY id', (pid,))]
+
+    def mark_feedback_handled(self, pid, iteration):
+        self.db.execute('UPDATE owner_feedback SET handled_iteration=? WHERE project_id=? AND handled_iteration IS NULL',
+                        (iteration, pid))
+
     def discard_context(self, pid):
         """Agent working context (stage outputs). Artifacts and verdicts stay as the audit record."""
         self.db.execute('DELETE FROM stage_outputs WHERE project_id=?', (pid,))
@@ -311,6 +332,9 @@ class Store:
             'decisions': [e['detail'] for e in self.events(pid, {'decision'})],
             'provider_handoffs': [e['detail'] for e in self.events(pid, {'provider_handoff'})],
             'ceo_report': p['report'],
+            'owner_feedback': [{k: f[k] for k in ('iteration', 'verdict', 'text', 'handled_iteration')}
+                               for f in self.feedback(pid)],
+            'runtime_spec': plan.get('runtime'),
             'constraints': gov.SUMMARY,
             'continue_with': f'python -m axbranch run {pid}   (from the ax-branch folder; any engine)',
         }

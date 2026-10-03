@@ -4,10 +4,10 @@ and always shows the persisted truth."""
 import os
 import threading
 import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import messagebox, scrolledtext, simpledialog, ttk
 
 from . import WORKSPACE, __version__
-from .engine import open_engine
+from .engine import activity, open_engine
 from .state import Busy, Store
 
 FONT = ('Malgun Gothic', 10)
@@ -25,7 +25,7 @@ class App(tk.Tk):
         self.store = Store(workspace / 'axbranch.sqlite3')
         self.running = {}            # pid -> cancel Event
         self.selected = None
-        self.notice = ''              # set by worker threads, shown by the Tk thread
+        self._notice = ['']           # set by worker threads, shown by the Tk thread
 
         top = ttk.Frame(self, padding=8); top.pack(fill='x')
         ttk.Label(top, text='Goal', font=('Malgun Gothic', 11, 'bold')).pack(anchor='w')
@@ -40,7 +40,9 @@ class App(tk.Tk):
         body.add(self.detail, weight=3)
 
         bar = ttk.Frame(self, padding=8); bar.pack(fill='x')
-        for text, cmd in (('계속 실행 / 재개', self.resume), ('중단', self.stop), ('프로젝트 종료…', self.finish),
+        for text, cmd in (('작동함', lambda: self.review('works')), ('문제 있음…', lambda: self.review('problem')),
+                          ('수정 요청…', lambda: self.review('change')),
+                          ('계속 실행 / 재개', self.resume), ('중단', self.stop), ('프로젝트 종료…', self.finish),
                           ('폴더 열기', self.open_folder)):
             ttk.Button(bar, text=text, command=cmd).pack(side='left', padx=3)
         self.status = ttk.Label(bar, text=''); self.status.pack(side='right')
@@ -59,20 +61,23 @@ class App(tk.Tk):
             return
         cancel = threading.Event()
         self.running[pid] = cancel
+        # The worker must not reference the window: if it outlived the window and dropped the last
+        # reference, Tk would be torn down on the wrong thread and abort the process.
+        factory, running, notice = self.engine_factory, self.running, self._notice
 
         def work():
             engine = None
             try:
-                engine = self.engine_factory()
+                engine = factory()
                 engine.run(pid, cancel)
             except Busy as e:           # e.g. a CLI or Codex session is running it; nothing changed
-                self.notice = str(e)
+                notice[0] = str(e)
             except Exception as e:      # never die silently in a windowed app
-                self.notice = f'{type(e).__name__}: {e}'
+                notice[0] = f'{type(e).__name__}: {e}'
             finally:
                 if engine is not None:
                     engine.store.close()
-                self.running.pop(pid, None)
+                running.pop(pid, None)
         threading.Thread(target=work, daemon=True).start()
 
     def start(self):
@@ -98,6 +103,27 @@ class App(tk.Tk):
     def stop(self):
         if self.selected in self.running:
             self.running[self.selected].set()
+
+    def review(self, verdict, text=None):
+        """Owner's verdict on a delivered artifact. Problem/change reopen the same project and rebuild it."""
+        if not self.selected:
+            return
+        if verdict != 'works' and text is None:
+            prompt = ('무엇이 작동하지 않나요? 어떻게 실행했고 무엇이 보였는지 적어 주세요.' if verdict == 'problem'
+                      else '무엇을 바꾸고 싶은지 적어 주세요.')
+            text = simpledialog.askstring('AX Branch — Owner review', prompt, parent=self)
+            if not text:
+                return
+        engine = self.engine_factory()
+        try:
+            p = engine.owner_review(self.selected, verdict, text or '')
+        except Exception as e:
+            messagebox.showwarning('AX Branch', str(e))
+            return
+        finally:
+            engine.store.close()
+        if p['state'] == 'REWORK':
+            self._launch(self.selected)
 
     def finish(self):
         if not self.selected:
@@ -152,7 +178,7 @@ class App(tk.Tk):
                 if self.ids[i] == self.selected:
                     self.list.selection_set(i)
         self.show()
-        self.status.config(text=self.notice or f'실행 중 {len(self.running)}건')
+        self.status.config(text=self._notice[0] or f'실행 중 {len(self.running)}건')
         self._tick = self.after(1500, self.refresh)
 
     def show(self):
@@ -161,18 +187,32 @@ class App(tk.Tk):
         h = self.store.handoff(self.selected)
         p = self.store.project(self.selected)
         lines = [f"[{h['project_id']}] {h['state']}" + (f"  ⏸ {h['pause_reason']}" if h['pause_reason'] else ''),
-                 f"Goal: {h['goal']}", f"다음: {h['next_action']}", '']
+                 f"Goal: {h['goal']}", f"다음: {h['next_action']}"]
+        a = activity(self.workspace, self.selected)
+        if a:
+            lines.append(f"▶ 진행 중: {a['agent']} · {a.get('provider')} (CLI pid {a.get('pid', '-')}) · 경과 {a.get('elapsed', 0)}초 · "
+                         f"출력 {a.get('output_bytes', 0)}B · 마지막 출력 {a.get('idle', 0)}초 전"
+                         + (' (Claude는 완료 시에만 출력)' if a.get('provider') == 'claude' else ''))
+        lines.append('')
         if h['interpretation']:
             lines += ['■ CEO 해석', h['interpretation'], '', '■ 수용 기준', *[f'  - {c}' for c in h['acceptance_criteria']], '',
                       '■ 파이프라인', *[f"  {i + 1}. {s['name']} — {s['agent_role']} ({s['provider']}{', web' if s['web'] else ''})"
                                        for i, s in enumerate(h['pipeline'])], '']
         for v in self.store.verifications(self.selected):
+            rt = v['checks'].get('runtime')
             lines.append(f"■ 검증 {v['iteration']}회차: {v['verdict']} ({v['provider']}) · 결정적 검사 "
-                         f"{'통과' if v['checks']['ok'] else '실패'}")
+                         f"{'통과' if v['checks']['ok'] else '실패'}"
+                         + (f" · 실행 검증({rt['mode']}) {'통과' if rt['ok'] else '실패'}" if rt else ''))
+            if rt:
+                lines += [f"  실행 {'OK ' if s['ok'] else 'FAIL'} {s['name']}" + (f" — {', '.join(s['problems'])}" if s.get('problems') else '')
+                          for s in rt.get('steps', [])]
             lines += [f"  [{f['severity']}] {f['issue']}" for f in v['result']['findings']]
+        for f in self.store.feedback(self.selected):
+            lines.append(f"■ Owner 피드백 {f['iteration']}회차 ({f['verdict']}): {f['text']}")
         if p['report']:
             r = p['report']
             lines += ['', '■ 淸月 AI CEO 보고', r['summary'], '', f"판단: {r['judgment']}", f"산출물: {r['artifact']}",
+                      *([f"테스트 방법: {r['how_to_test']}"] if r.get('how_to_test') else []),
                       *[f'  - {s}' for s in r['next_steps']]]
         if p['archive_note']:
             lines += ['', f"Obsidian 저장: {p['archive_note']}"]

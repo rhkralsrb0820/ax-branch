@@ -3,6 +3,48 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.8] - 2026-10-04
+
+Owner acceptance found a delivered program that was unusable (closed 0.3 s after a double-click; no
+page). This release adds the Owner review loop and Runtime Acceptance Verification, and repairs that
+project through the normal loop. Evidence: `docs/evidence/2026-10-04-owner-review-stock-analyzer.md`.
+
+### Added
+- **OWNER_REVIEW** state after delivery. Owner reports *works* (→ PENDING_CLOSE), *problem* or
+  *change* (→ REWORK on the SAME project). `owner_feedback` table (schema v3). On new feedback the
+  engine reproduces (runtime run of the delivered version), the CEO diagnoses (feedback + evidence)
+  and revises criteria / runtime spec / pipeline, the revised acceptance is run on the old version,
+  then build → verify → back to OWNER_REVIEW. Round budget refreshed per Owner request.
+- **Runtime Acceptance Verification** (`axbranch/runtime.py`): the plan declares how the Owner
+  launches the artifact (cli / web / gui / none) and probes for the primary flow; the engine runs them
+  contained. Web: server start on a free port, HTTP flow, connection loss detection, survival, a
+  repeat request, and the **exact Owner launch** (no arguments). PASS requires it.
+- CLI `axbranch review <id> --works | --problem "…" | --change "…"`; window buttons
+  작동함 / 문제 있음… / 수정 요청…; report shows how to test; detail shows runtime steps and feedback.
+- Live activity: `call_start` events; `ACTIVITY.json` (agent, provider, CLI pid, elapsed, output
+  bytes, seconds since last output) shown by `status` and the window; `call` events carry duration.
+
+### Changed
+- Self-test runs as `python <file> --self-test`; a no-argument launch is the Owner's program.
+- Web launch contract (`--port {port} --no-browser`) enforced in code; `BROWSER` is a no-op under verification.
+- Provider CLIs run inside a Job Object (no caps): timeout / Owner stop kill the whole tree.
+
+### Fixed
+- Provider timeout killed only npm's `cmd.exe` wrapper; the real CLI kept running (proven).
+- cheongwol's folder was prepended to `sys.path`, shadowing AX Branch's own `tests` package.
+- A GUI worker thread outliving the window aborted Python (`Tcl_AsyncDelete`).
+
+### Verification
+- 47 unit tests pass, including runtime acceptance against real servers (dropped connection, crash,
+  exact-launch failure), the Owner review loop, provider tree kill on timeout and stop, live activity.
+- Live: P-20261003-bbad3c reproduced → diagnosed → v2 FAIL (runtime + self-test) → v3 PASS (17/17,
+  8/8 runtime steps, exact Owner launch OK); independent exact-launch check with 8765 free and taken.
+
+### Known issues
+- `gui` mode only checks that a window starts and stays up; window content is not exercised.
+- Claude reports output only at the end, so its "last output" stays 0 until the call completes.
+- Delivered projects from before 0.1.8 stay in PENDING_CLOSE; they can still receive problem reports.
+
 ## [0.1.7] - 2026-10-03
 
 ### Added

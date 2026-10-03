@@ -7,6 +7,7 @@
   python -m axbranch check <id>                  SQLite <-> disk consistency (exit 1 if unsafe)
   python -m axbranch resume <id> [--rounds N]    resume a PAUSED project
   python -m axbranch finish <id> [--save|--pause|--discard --confirm] [--satisfaction N]
+  python -m axbranch review <id> --works | --problem "..." | --change "..."   Owner verdict; problem/change rebuild
   python -m axbranch upgrade-proposal           draft only, and only if Owner satisfaction >= 90%
 """
 import argparse
@@ -37,6 +38,10 @@ def main(argv=None):
         g.add_argument('--' + choice, dest='choice', action='store_const', const=choice)
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
     sub.add_parser('upgrade-proposal')
+    rv = sub.add_parser('review'); rv.add_argument('id')
+    gv = rv.add_mutually_exclusive_group(required=True)
+    gv.add_argument('--works', action='store_true'); gv.add_argument('--problem'); gv.add_argument('--change')
+    rv.add_argument('--no-run', action='store_true', help='record the feedback only; rebuild later with run')
     a = ap.parse_args(argv)
     try:
         return _dispatch(a)
@@ -67,11 +72,22 @@ def _dispatch(a):
         if a.id:
             print(json.dumps(store.handoff(a.id), ensure_ascii=False, indent=2))
         else:
+            from .engine import activity
             for p in store.projects():
                 print(f"{p['id']}  {p['state']:<25} v{p['iteration']}  {p['goal'][:70]}")
+                a = activity(engine.workspace, p['id'])
+                if a:
+                    print(f"    ▶ {a['agent']} on {a.get('provider')} (CLI pid {a.get('pid', '-')}): "
+                          f"{a.get('elapsed', 0)}s elapsed, {a.get('output_bytes', 0)} B output, last output {a.get('idle', 0)}s ago")
     elif a.cmd == 'resume':
         store.resume(a.id, a.rounds)
         _show(engine.run(a.id))
+    elif a.cmd == 'review':
+        verdict, text = ('works', '') if a.works else ('problem', a.problem) if a.problem else ('change', a.change)
+        p = engine.owner_review(a.id, verdict, text)
+        print(f"[{p['id']}] {p['state']} — Owner feedback recorded ({verdict})")
+        if p['state'] == 'REWORK' and not a.no_run:
+            _show(engine.run(a.id))
     elif a.cmd == 'upgrade-proposal':
         from . import providers, upgrade
         status, result = upgrade.propose(store, engine.workspace, providers.call)
@@ -94,12 +110,15 @@ def _dispatch(a):
 
 def _show(p):
     print(f"\n[{p['id']}] {p['state']}" + (f" — {p['pause_reason']}" if p.get('pause_reason') else ''))
-    if p.get('report') and p['state'] == 'PENDING_CLOSE':
+    if p.get('report') and p['state'] in ('OWNER_REVIEW', 'PENDING_CLOSE'):
         r = p['report']
         print(f"\n淸月 AI CEO 보고\n{r['summary']}\n\n판단: {r['judgment']}\n산출물: {r['artifact']} "
               f"(검증 {r['rounds']}회차 PASS)")
         for step in r['next_steps']:
             print(' -', step)
+        if p['state'] == 'OWNER_REVIEW':
+            print(f"\n테스트 방법: {r.get('how_to_test') or '-'}\n"
+                  f"결과 알려주기: python -m axbranch review {p['id']} --works | --problem \"...\" | --change \"...\"")
     if p.get('archive_note'):
         print('Obsidian:', p['archive_note'])
 

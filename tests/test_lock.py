@@ -53,7 +53,7 @@ class LockTests(unittest.TestCase):
         self.assertEqual(self.store.project(pid)['state'], 'EXECUTING')
         release.set()
         worker.join(10)
-        self.assertEqual(self.store.project(pid)['state'], 'PENDING_CLOSE')
+        self.assertEqual(self.store.project(pid)['state'], 'OWNER_REVIEW')
 
     def test_other_process_holds_lock_and_crash_releases_it(self):
         lock = self.tmp / 'run.lock'

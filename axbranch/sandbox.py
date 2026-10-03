@@ -22,7 +22,10 @@ def clean_env(tmp):
     keep = {k: os.environ[k] for k in ('SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC', 'PATHEXT', 'LANG')
             if k in os.environ}
     keep.update({'PATH': os.path.dirname(os.__file__) if os.name != 'nt' else os.environ.get('SYSTEMROOT', '') + r'\system32',
-                 'TEMP': tmp, 'TMP': tmp, 'TMPDIR': tmp, 'HOME': tmp, 'USERPROFILE': tmp, 'PYTHONUTF8': '1'})
+                 'TEMP': tmp, 'TMP': tmp, 'TMPDIR': tmp, 'HOME': tmp, 'USERPROFILE': tmp, 'PYTHONUTF8': '1',
+                 # Python's webbrowser honors BROWSER: under verification "open the browser" is a no-op,
+                 # never a window on the Owner's desktop.
+                 'BROWSER': 'cmd /c exit' if os.name == 'nt' else 'true'})
     return keep
 
 
@@ -54,12 +57,12 @@ if os.name == 'nt':
     CREATE_SUSPENDED, CREATE_NO_WINDOW = 0x4, 0x08000000
     KILL_ON_JOB_CLOSE, ACTIVE_PROCESS, JOB_MEMORY = 0x2000, 0x8, 0x200
 
-    def _job():
+    def _job(caps=True):
         job = _k32.CreateJobObjectW(None, None)
         if not job:
             raise OSError(ctypes.get_last_error(), 'CreateJobObject failed')
         info = _Extended()
-        info.BasicLimitInformation.LimitFlags = KILL_ON_JOB_CLOSE | ACTIVE_PROCESS | JOB_MEMORY
+        info.BasicLimitInformation.LimitFlags = KILL_ON_JOB_CLOSE | ((ACTIVE_PROCESS | JOB_MEMORY) if caps else 0)
         info.BasicLimitInformation.ActiveProcessLimit = MAX_PROCESSES
         info.JobMemoryLimit = MAX_MEMORY
         if not _k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
@@ -68,54 +71,83 @@ if os.name == 'nt':
         return job
 
 
-def run(args, cwd, timeout):
+def run(args, cwd, timeout, stdin_text=''):
     """Returns (returncode or None on timeout, combined output)."""
-    tmp = tempfile.mkdtemp(prefix='axb-tmp-')          # outside cwd: the program's folder stays as built
+    proc = start(args, cwd, stdin_text)
     try:
-        return _run(args, cwd, timeout, tmp)
+        code = proc.wait(timeout)
+        proc.stop()
+        return code, proc.output()
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        proc.stop()
+        proc.cleanup()
 
 
-def _run(args, cwd, timeout, tmp):
+def start(args, cwd, stdin_text='', env=None, caps=True):
+    """A contained process that keeps running (e.g. a server under test). Always call stop().
+    env=None -> the clean environment for generated code; provider CLIs pass their own (logged-in)
+    environment and caps=False, keeping only kill-the-whole-tree."""
+    return Contained(args, cwd, stdin_text, env, caps)
+
+
+class Contained:
     # Output goes to a file, not a pipe: a grandchild inheriting a pipe would keep us waiting until
     # it finished its work. We wait for the main process only, then kill whatever is left.
-    log = Path(tmp) / 'output.txt'
-    with log.open('wb') as out:
-        common = dict(cwd=cwd, env=clean_env(tmp), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
-        code = _launch_and_wait(args, timeout, common)
-    return code, log.read_bytes().decode('utf-8', errors='replace')
+    def __init__(self, args, cwd, stdin_text, env=None, caps=True):
+        self.tmp = Path(tempfile.mkdtemp(prefix='axb-tmp-'))   # outside cwd: the program's folder stays as built
+        self.log = self.tmp / 'output.txt'
+        stdin_path = self.tmp / 'stdin.txt'
+        stdin_path.write_bytes((stdin_text or '').encode('utf-8'))
+        self._out, self._in = self.log.open('wb'), stdin_path.open('rb')
+        common = dict(cwd=cwd, env=clean_env(str(self.tmp)) if env is None else env, stdin=self._in,
+                      stdout=self._out, stderr=subprocess.STDOUT)
+        self.job = None
+        if os.name != 'nt':
+            self.proc = subprocess.Popen(args, start_new_session=True, **common)
+            return
+        self.job = _job(caps)
+        # Suspended until it is inside the job, so nothing it starts can escape the limits.
+        self.proc = subprocess.Popen(args, creationflags=CREATE_SUSPENDED | CREATE_NO_WINDOW, **common)
+        if not _k32.AssignProcessToJobObject(self.job, int(self.proc._handle)):
+            self.proc.kill()
+            self.stop()
+            raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject failed')
+        _ntdll.NtResumeProcess(int(self.proc._handle))
 
+    def alive(self):
+        return self.proc.poll() is None
 
-def _launch_and_wait(args, timeout, common):
-    if os.name != 'nt':
-        import signal
-        proc = subprocess.Popen(args, start_new_session=True, **common)
+    def wait(self, timeout):
+        """Exit code, or None if still running after timeout."""
         try:
-            return proc.wait(timeout=timeout)
+            return self.proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             return None
-        finally:
+
+    def output(self):
+        if not self._out.closed:
+            self._out.flush()
+        return self.log.read_bytes().decode('utf-8', errors='replace')
+
+    def stop(self):
+        """Kill the whole tree now (idempotent); returns the exit code if it had exited by itself."""
+        code = self.proc.poll()
+        if self.job is not None:
+            _k32.TerminateJobObject(self.job, 1)
+            self.proc.wait()
+            _k32.CloseHandle(self.job)
+            self.job = None
+        elif os.name != 'nt':
+            import signal
             try:
-                os.killpg(proc.pid, signal.SIGKILL)       # the main process and anything it left behind
+                os.killpg(self.proc.pid, signal.SIGKILL)
             except OSError:
                 pass
-            proc.wait()
-    job = _job()
-    try:
-        # Suspended until it is inside the job, so nothing it starts can escape the limits.
-        proc = subprocess.Popen(args, creationflags=CREATE_SUSPENDED | CREATE_NO_WINDOW, **common)
-        if not _k32.AssignProcessToJobObject(job, int(proc._handle)):
-            proc.kill()
-            proc.wait()
-            raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject failed')
-        _ntdll.NtResumeProcess(int(proc._handle))
-        try:
-            return proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return None
-        finally:
-            _k32.TerminateJobObject(job, 1)               # whole tree, now — not when it chooses to exit
-            proc.wait()
-    finally:
-        _k32.CloseHandle(job)
+            self.proc.wait()
+        for f in (self._out, self._in):
+            if not f.closed:
+                f.close()
+        return code
+
+    def cleanup(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)

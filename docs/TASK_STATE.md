@@ -12,6 +12,7 @@
 | P11 | Windows exe | live goal run inside the packaged app; crash recovery by newer exe |
 
 ## Open, in priority order
+0. Owner: test the repaired stock analyzer (P-20261003-bbad3c v3) and report works / problem / change.
 1. Owner: decide when to close the PENDING_CLOSE projects (906ead, 97494b, 4e3292, 46185d, d356e8); give a satisfaction score when closing (feeds the upgrade gate).
 2. Owner: click through the exe once (goal -> report -> close) to confirm the human path.
 3. Observe a genuine usage-limit failover when one occurs (timeout policy stays: pause).

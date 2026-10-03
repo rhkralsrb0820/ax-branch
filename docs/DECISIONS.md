@@ -38,3 +38,12 @@ packaged exe crashed on a newer schema and the project sat in EXECUTING with no 
 and memory caps, whole tree killed at the end). Reading the user's files and network access remain
 possible under the same account; a dedicated low-privilege Windows account is the upgrade path and
 needs Owner setup (account creation is an Owner action).
+
+**D13 (0.1.8) Verification includes Runtime Acceptance.** Owner acceptance found a program that passed
+source review and its self-test but closed 0.3 s after a double-click with no usable surface. PASS now
+also requires the artifact to work when launched the way the Owner launches it. The self-test moved to
+`--self-test`; a no-argument launch is the Owner's program. Launch contracts are enforced in code.
+
+**D14 (0.1.8) Owner feedback reopens the same project.** History, agents and knowledge are kept; the
+engine reproduces the problem and the CEO diagnoses before any rebuild. Normal rework never spawns a
+new project.

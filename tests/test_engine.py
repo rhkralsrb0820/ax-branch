@@ -13,6 +13,12 @@ GOOD = "def add(a, b):\n    return a + b\n\nif __name__ == '__main__':\n    asse
 BROKEN = "def add(a, b):\n    return a - b\n\nif __name__ == '__main__':\n    assert add(2, 3) == 5\n"
 
 
+# Fixed per Owner feedback: a double-click shows the result; the self-test moved behind --self-test.
+LAUNCHABLE = ("import sys\ndef add(a, b):\n    return a + b\n\nif __name__ == '__main__':\n"
+              "    if sys.argv[1:] == ['--self-test']:\n        assert add(2, 3) == 5\n        print('ok')\n"
+              "    else:\n        print('result:', add(2, 3))\n")
+
+
 class Script:
     """Answers by schema. `builds` and `verdicts` are consumed in order."""
 
@@ -20,7 +26,7 @@ class Script:
         self.builds, self.verdicts, self.strategy = list(builds), list(verdicts), strategy
         self.fail_on, self.prompts = fail_on, []
 
-    def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None):
+    def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
         self.prompts.append((schema, prefer, prompt))
         if self.fail_on is schema:
             self.fail_on = None
@@ -29,6 +35,7 @@ class Script:
             return {'interpretation': 'Build an add() helper', 'artifact_kind': 'python',
                     'artifact_filename': '../evil/add tool.py', 'acceptance_criteria': ['add(2,3)==5'],
                     'verification_lenses': ['software engineering'], 'required_tools': [],
+                    'runtime': {'mode': 'cli', 'owner_launch': 'double-click', 'launch_args': [], 'probes': []},
                     'pipeline': [{'name': 'design', 'agent_role': 'Architect', 'instructions': 'design',
                                   'provider': 'codex', 'web': False},
                                  {'name': 'build', 'agent_role': 'Developer', 'instructions': 'build',
@@ -43,6 +50,17 @@ class Script:
                     'findings': [] if v == 'PASS' else [{'severity': 'major', 'issue': 'wrong sum', 'evidence': 'a - b'}]}, prefer, []
         if schema is E.STRATEGY:
             return {'decision': self.strategy, 'rationale': 'r', 'pipeline': []}, 'claude', []
+        if schema is E.DIAGNOSIS:
+            return {'diagnosis': 'owner saw it close', 'root_cause': 'no usable launch', 'change_summary': 'add probe',
+                    'interpretation': 'Build an add() helper usable by double-click', 'artifact_kind': 'python',
+                    'artifact_filename': 'add_tool.py', 'acceptance_criteria': ['add(2,3)==5', 'launch prints a result'],
+                    'verification_lenses': ['software engineering', 'usability'],
+                    'runtime': {'mode': 'cli', 'owner_launch': 'double-click', 'launch_args': [],
+                                'probes': [{'name': 'launch shows result', 'args': [], 'stdin': '', 'http_method': '',
+                                            'http_path': '', 'http_body': '', 'expect_exit': 0, 'expect_status': 0,
+                                            'expect_contains': ['result: 5']}]},
+                    'pipeline': [{'name': 'build', 'agent_role': 'Developer', 'instructions': 'rebuild',
+                                  'provider': 'claude', 'web': False}]}, 'claude', []
         if schema is E.REPORT:
             return {'summary': 'done', 'judgment': 'good', 'next_steps': ['use it']}, 'claude', []
         raise AssertionError('unexpected schema')
@@ -67,7 +85,7 @@ class EngineTests(unittest.TestCase):
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         p = eng.run(pid)
-        self.assertEqual(p['state'], 'PENDING_CLOSE')
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
         vs = self.store.verifications(pid)
         # Deterministic self-test overrides the model's PASS on the broken build.
         self.assertEqual([v['verdict'] for v in vs], ['FAIL', 'PASS'])
@@ -113,7 +131,7 @@ class EngineTests(unittest.TestCase):
         try:
             store2.resume(pid)
             eng2 = E.Engine(store2, workspace=self.tmp / 'ws', vault=self.vault, gai_db=self.tmp / 'none.db', llm=script)
-            self.assertEqual(eng2.run(pid)['state'], 'PENDING_CLOSE')
+            self.assertEqual(eng2.run(pid)['state'], 'OWNER_REVIEW')
         finally:
             store2.close()
         self.assertEqual(sum(s is E.PLAN for s, _, _ in script.prompts), 1)   # no re-planning
@@ -183,7 +201,7 @@ class EngineTests(unittest.TestCase):
         store2 = Store(self.tmp / 'ws' / 'axbranch.sqlite3')
         try:
             eng2 = E.Engine(store2, workspace=self.tmp / 'ws', vault=self.vault, gai_db=self.tmp / 'none.db', llm=script)
-            self.assertEqual(eng2.run(pid)['state'], 'PENDING_CLOSE')
+            self.assertEqual(eng2.run(pid)['state'], 'OWNER_REVIEW')
         finally:
             store2.close()
         # The second session made only the verification and the CEO report calls.
@@ -198,9 +216,9 @@ class EngineTests(unittest.TestCase):
         self.assertIn('differ', eng.consistency(pid)[0])
         self.assertEqual(eng.run(pid)['state'], 'PAUSED')          # never verifies a changed artifact
 
-    def test_self_test_gets_empty_stdin_and_no_args(self):
+    def test_self_test_gets_empty_stdin_and_flag(self):
         path = self.tmp / 'reads_stdin.py'
-        path.write_text("import sys\nif __name__ == '__main__':\n    assert sys.argv[1:] == []\n"
+        path.write_text("import sys\nif __name__ == '__main__':\n    assert sys.argv[1:] == ['--self-test']\n"
                         "    assert sys.stdin.read() == ''\n", encoding='utf-8')
         self.assertTrue(self.engine(Script([], [])).checks(path, 'python')['ok'])
 
@@ -215,6 +233,59 @@ class EngineTests(unittest.TestCase):
         eng.run(pid)
         whats = [e['detail']['what'] for e in self.store.events(pid, {'decision'})]
         self.assertIn("verification ran on the producer's engine", whats)
+
+    def test_owner_problem_reopens_same_project_reproduces_and_redelivers(self):
+        script = Script([GOOD, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        with self.assertRaises(Rejected):
+            eng.owner_review(pid, 'problem', '   ')                      # a problem needs a description
+        self.assertEqual(eng.owner_review(pid, 'problem', 'double-click closes immediately')['state'], 'REWORK')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW')                      # back to the Owner, same project
+        self.assertEqual(len(self.store.projects()), 1)
+        diag = next(pr for s, _, pr in script.prompts if s is E.DIAGNOSIS)
+        self.assertIn('double-click closes immediately', diag)            # CEO saw the Owner's words
+        self.assertIn('runtime_evidence_current', diag)                   # ...and the reproduction run
+        repro = self.store.events(pid, {'reproduction'})[0]['detail']
+        self.assertTrue(repro['current_spec_ok'])                         # old spec missed it
+        self.assertFalse(repro['revised_spec_ok'])                        # revised acceptance reproduces it on v1
+        vs = self.store.verifications(pid)
+        # v2 (unchanged GOOD) is blocked by Runtime Acceptance despite the model's PASS; v3 passes.
+        self.assertEqual([v['verdict'] for v in vs], ['PASS', 'FAIL', 'PASS'])
+        self.assertFalse(vs[1]['checks']['runtime']['ok'])
+        self.assertTrue(vs[2]['checks']['runtime']['ok'])
+        self.assertTrue(all(f['handled_iteration'] for f in self.store.feedback(pid)))
+        self.assertEqual(p['plan_version'], 2)
+        builds = [pr for s, _, pr in script.prompts if s is E.BUILD]
+        self.assertIn('owner_rework', builds[-1])
+        self.assertEqual(eng.owner_review(pid, 'works')['state'], 'PENDING_CLOSE')
+
+    def test_live_activity_is_visible_during_a_call_and_cleared_after(self):
+        script = Script([GOOD], ['PASS'])
+        seen = []
+
+        def watching(prompt, schema, **kw):
+            if schema is E.BUILD:
+                kw['on_tick']({'provider': 'codex', 'pid': 4242, 'elapsed': 61, 'output_bytes': 900, 'idle': 3})
+                seen.append(E.activity(self.tmp / 'ws', pid))
+            return script(prompt, schema, **kw)
+        eng = self.engine(watching)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        a = seen[0]
+        self.assertEqual((a['agent'], a['provider'], a['pid'], a['elapsed'], a['state']), ('Developer', 'codex', 4242, 61, 'EXECUTING'))
+        self.assertIsNone(E.activity(self.tmp / 'ws', pid))          # nothing in flight any more
+        starts = self.store.events(pid, {'call_start'})
+        self.assertTrue(starts and all('who' in e['detail'] for e in starts))
+        self.assertTrue(all('seconds' in e['detail'] for e in self.store.events(pid, {'call'})))
+
+    def test_review_only_for_delivered_projects(self):
+        eng = self.engine(Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        with self.assertRaises(Rejected):
+            eng.owner_review(pid, 'works')
 
     def test_illegal_transition(self):
         pid = self.store.new_project('x')

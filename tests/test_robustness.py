@@ -35,7 +35,7 @@ class RobustnessTests(unittest.TestCase):
             self.assertIn('simulated bug', (self.tmp / 'ws' / 'logs' / 'engine-errors.log').read_text(encoding='utf-8'))
             store.resume(pid)                           # once fixed, the Owner resumes and it continues
             eng.llm = script
-            self.assertEqual(eng.run(pid)['state'], 'PENDING_CLOSE')
+            self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
         finally:
             store.close()
 

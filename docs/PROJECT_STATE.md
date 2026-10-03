@@ -1,6 +1,6 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-03 · version **0.1.7** · repo `AX-Branch/ax-branch` (local git only, not pushed).
+Updated 2026-10-03 · version **0.1.8** · repo `AX-Branch/ax-branch` (local git only, not pushed).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
 
@@ -11,6 +11,9 @@ covers the *development* of AX Branch itself.
 - SQLite runtime state, enforced lifecycle, PAUSED/resume from DB (proven live after a provider timeout).
 - Claude Code CLI and Codex CLI both executed real turns (Claude: CEO + builder; Codex: engineer + verifier).
 - Deterministic gate (compile + self-test) overrides model verdicts; artifacts hashed and versioned.
+- Owner review loop: verified deliveries go to OWNER_REVIEW; problems/changes reopen the same project (live-proven on P-20261003-bbad3c).
+- Runtime Acceptance: artifacts must work when launched the way the Owner launches them (cli/web/gui), exact double-click included.
+- Live activity visibility (agent, provider, CLI pid, elapsed, last output).
 - Archived knowledge is retrieved by later projects (live-proven, provenance in `context_used`).
 - Upgrade Proposal path: gated by Owner satisfaction ≥ 90%; draft only.
 - Generated code runs contained: clean env, Job Object caps, whole process tree killed (not file/network isolation).
@@ -25,7 +28,8 @@ covers the *development* of AX Branch itself.
 | Quota failover to the other | — | live: real Codex took over every Claude turn after a stand-in Claude refusal; genuine limit not yet seen |
 | Drives a project as the session (`python -m axbranch run`) | live-proven | **live-proven** (2026-10-03, see `evidence/`) |
 
-## Live projects (PENDING_CLOSE ones wait for the Owner)
+## Live projects (OWNER_REVIEW / PENDING_CLOSE wait for the Owner)
+- `P-20261003-bbad3c` — stock analyzer, repaired via the Owner review loop (v3 PASS). **OWNER_REVIEW — Owner to test again.**
 - `P-20261003-906ead` — business-registration-number validator (v2 PASS). **PENDING_CLOSE — Owner: keep open; do not close.**
 - `P-20261003-d356e8` — Hangul won → integer (packaged-exe run, reused 06983b knowledge, v2 PASS). PENDING_CLOSE.
 - `P-20261003-97494b` — venv guide (packaged-exe run, v2 PASS). PENDING_CLOSE.

@@ -20,7 +20,7 @@ class BundleScript(Script):
         super().__init__([], verdicts)
         self.bundle_builds = list(builds)
 
-    def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None):
+    def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
         if schema is E.PLAN:
             plan, used, notes = super().__call__(prompt, schema, prefer, web, cancel)
             plan.update(artifact_kind='bundle', artifact_filename='run_tests.py')
@@ -54,7 +54,7 @@ class BundleTests(unittest.TestCase):
         eng = self.engine(BundleScript([GOOD_FILES], ['PASS']))
         pid = self.store.new_project('make a calc package')
         p = eng.run(pid)
-        self.assertEqual(p['state'], 'PENDING_CLOSE')
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
         art = self.store.artifacts(pid)[-1]
         self.assertEqual(art['kind'], 'bundle')
         self.assertEqual(sorted(r for r, _, _ in artifacts.files_of(art)),
