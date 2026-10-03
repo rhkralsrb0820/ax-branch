@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.7] - 2026-10-03
+
+### Added
+- `axbranch upgrade-proposal` (`axbranch/upgrade.py`): locked unless average Owner satisfaction over
+  closed projects is ≥ 90%; when open, the CEO drafts a proposal (problem, capability, improvement,
+  cost, ROI, security, alternatives, lock-in) from measured SQLite evidence into
+  `workspace/proposals/`, marked DRAFT / NOT APPROVED. Nothing is ever purchased or enabled.
+- Evidence: `docs/evidence/2026-10-03-v0.1.7-retrieval-and-exe.md`.
+
+### Changed
+- Nothing else.
+
+### Fixed
+- Nothing.
+
+### Verification
+- 33 unit tests pass.
+- Live in the packaged 0.1.6 exe: an archived project's knowledge was retrieved, recorded
+  (`context_used`) and used by a new project; self-tests ran contained in the frozen app; v1 FAIL → v2 PASS;
+  independent round-trip check against the archived project's artifact: 0/20,008 mismatches.
+- Live gate: `upgrade-proposal` reports locked without calling a model.
+
+### Known issues
+- The upgrade gate needs satisfaction scores: give one when closing (`finish … --satisfaction N` or the dialog).
+- A genuine usage-limit failover, a recorded human click-through, and AX Works data remain open.
+
 ## [0.1.6] - 2026-10-03
 
 Containment for generated code run during verification.

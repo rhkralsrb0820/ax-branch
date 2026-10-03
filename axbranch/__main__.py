@@ -7,6 +7,7 @@
   python -m axbranch check <id>                  SQLite <-> disk consistency (exit 1 if unsafe)
   python -m axbranch resume <id> [--rounds N]    resume a PAUSED project
   python -m axbranch finish <id> [--save|--pause|--discard --confirm] [--satisfaction N]
+  python -m axbranch upgrade-proposal           draft only, and only if Owner satisfaction >= 90%
 """
 import argparse
 import json
@@ -35,6 +36,7 @@ def main(argv=None):
     for choice in ('save', 'pause', 'discard'):
         g.add_argument('--' + choice, dest='choice', action='store_const', const=choice)
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
+    sub.add_parser('upgrade-proposal')
     a = ap.parse_args(argv)
     try:
         return _dispatch(a)
@@ -70,6 +72,16 @@ def _dispatch(a):
     elif a.cmd == 'resume':
         store.resume(a.id, a.rounds)
         _show(engine.run(a.id))
+    elif a.cmd == 'upgrade-proposal':
+        from . import providers, upgrade
+        status, result = upgrade.propose(store, engine.workspace, providers.call)
+        if status == 'locked':
+            avg = result['average_satisfaction']
+            print(f"Paid expansion is locked: average Owner satisfaction "
+                  f"{'n/a' if avg is None else f'{avg:.0f}%'} over {len(result['owner_satisfaction'])} closed projects "
+                  f"(gate {result['gate']}%). No proposal drafted; nothing purchased.")
+        else:
+            print(f'Draft written (NOT approved, nothing purchased): {result}')
     elif a.cmd == 'finish':
         p = engine.close(a.id, a.choice, a.confirm, a.satisfaction)
         if p['state'] == 'ARCHIVE_PENDING_APPROVAL':
