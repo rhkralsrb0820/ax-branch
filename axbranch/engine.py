@@ -44,6 +44,10 @@ VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
 STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE))
 REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR))
 
+EXEC_CONTRACT = ("The engine verifies a python artifact by running `python <file>` with NO arguments and "
+                 "empty stdin in an empty temp dir; that exact invocation must run the full self-test and "
+                 "exit 0 only if it passes. Other CLI modes must be reachable with arguments.")
+
 CEO_SYSTEM = f"""You are 淸月 AI CEO, the executive of AX Branch. The Owner gave a Goal.
 You decide what it means, what knowledge it needs, which temporary specialist agents to hire,
 and the pipeline they run. You do not do specialist work yourself.
@@ -58,6 +62,7 @@ Rules:
 - python artifacts: a single standard-library-only file with a self-test under
   `if __name__ == '__main__':` that asserts the behavior and exits non-zero on failure. It must
   not use the network or touch files outside its working directory.
+- {EXEC_CONTRACT}
 - Production agents cannot execute code, use a shell or write files; never instruct them to run
   anything. Execution evidence comes only from the engine's deterministic checks at verification.
 - required_tools: only external programs the work truly needs (e.g. blender); [] otherwise.
@@ -207,7 +212,8 @@ class Engine:
         context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
                    'deliverable': {'kind': plan['artifact_kind'], 'filename': plan['artifact_filename']},
                    'acceptance_criteria': plan['acceptance_criteria'], 'previous_stages': upstream,
-                   'content_rule': 'content = the complete file text, nothing else.'}
+                   'content_rule': 'content = the complete file text, nothing else.',
+                   'execution_check': EXEC_CONTRACT if plan['artifact_kind'] == 'python' else 'document must be substantive'}
         system = WORKER_SYSTEM.format(role=final['agent_role'])
         history = self.store.verifications(pid)
         if history:
@@ -221,7 +227,8 @@ class Engine:
                                 prefer=final['provider'], web=final['web'])
         path = self.workspace / 'projects' / pid / 'artifacts' / f'v{it}' / plan['artifact_filename']
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(build['content'], encoding='utf-8')
+        # Exact bytes: write_text translates newlines on Windows and would break the recorded hash.
+        path.write_bytes(build['content'].encode('utf-8'))
         sha = hashlib.sha256(build['content'].encode('utf-8')).hexdigest()
         with self.store.tx():
             agent = self._agent(pid, final)
@@ -248,7 +255,7 @@ class Engine:
             target = Path(cwd) / Path(path).name
             target.write_text(text, encoding='utf-8')
             try:
-                proc = subprocess.run([python, '-I', '-X', 'utf8', target.name], cwd=cwd, capture_output=True,
+                proc = subprocess.run([python, '-I', '-X', 'utf8', target.name], cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL,
                                       text=True, encoding='utf-8', errors='replace', timeout=gov.CHECK_TIMEOUT,
                                       creationflags=providers.NO_WINDOW)
             except subprocess.TimeoutExpired:
@@ -260,8 +267,9 @@ class Engine:
         p = self.store.project(pid)
         plan = p['plan']
         artifact = self.store.artifacts(pid)[-1]
-        text = Path(artifact['path']).read_text(encoding='utf-8')
-        if hashlib.sha256(text.encode('utf-8')).hexdigest() != artifact['sha256']:
+        raw = Path(artifact['path']).read_bytes()
+        text = raw.decode('utf-8')
+        if hashlib.sha256(raw).hexdigest() != artifact['sha256']:
             raise Rejected(f"Artifact {artifact['path']} changed on disk after it was built.")
         checks = self.checks(artifact['path'], artifact['kind'])
         producer = plan['pipeline'][-1]['provider']

@@ -79,9 +79,10 @@ def archive(vault, project, verifications, decisions, artifact_text, artifact):
     folder = Path(vault) / 'Projects'
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{time.strftime('%Y-%m-%d')} {_slug(project['goal'])} {project['id'][-6:]}.md"
-    path.write_text(text, encoding='utf-8')
-    sha = hashlib.sha256(text.encode('utf-8')).hexdigest()
-    back = path.read_text(encoding='utf-8')
-    if hashlib.sha256(back.encode('utf-8')).hexdigest() != sha or '## Verification Knowledge' not in back:
+    data = text.encode('utf-8')
+    path.write_bytes(data)                      # exact bytes, so the sha256 matches the file on disk
+    sha = hashlib.sha256(data).hexdigest()
+    back = path.read_bytes()
+    if hashlib.sha256(back).hexdigest() != sha or b'## Verification Knowledge' not in back:
         raise ValueError(f'Archive verification failed for {path}')
     return path, sha

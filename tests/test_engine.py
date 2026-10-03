@@ -75,6 +75,9 @@ class EngineTests(unittest.TestCase):
         arts = self.store.artifacts(pid)
         self.assertEqual([Path(a['path']).parent.name for a in arts], ['v1', 'v2'])
         self.assertEqual(Path(arts[0]['path']).name, 'add_tool.py')       # filename sanitized, no traversal
+        import hashlib
+        for a in arts:   # recorded hash = bytes on disk (no Windows newline translation)
+            self.assertEqual(hashlib.sha256(Path(a['path']).read_bytes()).hexdigest(), a['sha256'])
         # Rebuild prompt carried the findings; verifier ran on the other provider than the producer.
         build_prompts = [pr for s, _, pr in script.prompts if s is E.BUILD]
         self.assertIn('FAILED independent verification', build_prompts[1])
@@ -162,6 +165,12 @@ class EngineTests(unittest.TestCase):
         pid = self.store.new_project('x tool')
         stop = threading.Event(); stop.set()
         self.assertEqual(eng.run(pid, stop)['state'], 'PAUSED')
+
+    def test_self_test_gets_empty_stdin_and_no_args(self):
+        path = self.tmp / 'reads_stdin.py'
+        path.write_text("import sys\nif __name__ == '__main__':\n    assert sys.argv[1:] == []\n"
+                        "    assert sys.stdin.read() == ''\n", encoding='utf-8')
+        self.assertTrue(self.engine(Script([], [])).checks(path, 'python')['ok'])
 
     def test_illegal_transition(self):
         pid = self.store.new_project('x')
