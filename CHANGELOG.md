@@ -26,7 +26,7 @@ were found by that run.
 - Self-test subprocess inherited the parent's stdin; now `DEVNULL` (a stdin-reading program could hang).
 
 ### Verification
-- 14 unit tests pass (`python -X utf8 -m unittest discover -s tests -t .`); the new hash assertion fails on 0.1.0 code.
+- 13 unit tests pass (`python -X utf8 -m unittest discover -s tests -t .`); the new hash assertion fails on 0.1.0 code. (Corrected: an earlier note said 14.)
 - Live run: Claude CEO plan; Codex engineer stage; Claude finalizer; independent Verification on Codex;
   v1 FAIL (self-test not reachable with no args — harness contract was unstated), v2 PASS; CEO report.
 - Resume: paused on Claude timeout, resumed from SQLite; no re-plan, Codex stage not re-run (call ledger).

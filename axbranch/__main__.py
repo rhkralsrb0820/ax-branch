@@ -4,6 +4,7 @@
   python -m axbranch new "goal" [--run]          create a project (and run it)
   python -m axbranch run <id>                    continue a project from SQLite (any engine)
   python -m axbranch status [<id>]               projects / one project's handoff
+  python -m axbranch check <id>                  SQLite <-> disk consistency (exit 1 if unsafe)
   python -m axbranch resume <id> [--rounds N]    resume a PAUSED project
   python -m axbranch finish <id> [--save|--pause|--discard --confirm] [--satisfaction N]
 """
@@ -23,6 +24,9 @@ def main(argv=None):
     sub.add_parser('gui')
     n = sub.add_parser('new'); n.add_argument('goal'); n.add_argument('--run', action='store_true')
     r = sub.add_parser('run'); r.add_argument('id')
+    r.add_argument('--stop-at', choices=('STAFFING', 'EXECUTING', 'VERIFYING'),
+                   help='end the session when this state is reached (controlled checkpoint)')
+    c = sub.add_parser('check'); c.add_argument('id')
     s = sub.add_parser('status'); s.add_argument('id', nargs='?')
     rs = sub.add_parser('resume'); rs.add_argument('id'); rs.add_argument('--rounds', type=int, default=0)
     f = sub.add_parser('finish'); f.add_argument('id')
@@ -43,7 +47,11 @@ def main(argv=None):
         if a.run:
             _show(engine.run(pid))
     elif a.cmd == 'run':
-        _show(engine.run(a.id))
+        _show(engine.run(a.id, stop_at=a.stop_at))
+    elif a.cmd == 'check':
+        problems = engine.consistency(a.id)
+        print('consistent' if not problems else '\n'.join(problems))
+        return 1 if problems else 0
     elif a.cmd == 'status':
         if a.id:
             print(json.dumps(store.handoff(a.id), ensure_ascii=False, indent=2))

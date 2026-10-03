@@ -7,6 +7,7 @@ the CEO's response schemas have no field that reaches it.
 """
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -119,13 +120,21 @@ class Engine:
         self.cancel = None
 
     # ---- driver
-    def run(self, pid, cancel=None):
-        """Advance the project until it needs the Owner (or is closed). Safe to call again anytime."""
+    def run(self, pid, cancel=None, stop_at=None):
+        """Advance the project until it needs the Owner (or is closed). Safe to call again anytime.
+        stop_at: end this session (state left ACTIVE, like an interrupted engine) when the
+        project reaches that state — a controlled checkpoint for continuation tests."""
         self.cancel = cancel
+        self.store.event(pid, 'session', os_pid=os.getpid(), state=self.store.project(pid)['state'],
+                         # names only (never values): shows which CLI environment drove this session
+                         env=sorted(k for k in os.environ if k.upper().startswith(('CODEX', 'CLAUDE'))))
         try:
             while self.store.project(pid)['state'] in ACTIVE:
                 if cancel is not None and cancel.is_set():
                     self.store.pause(pid, 'Owner stopped the run')
+                    break
+                if self.store.project(pid)['state'] == stop_at:
+                    self.store.event(pid, 'session_end', at_state=stop_at, reason='controlled checkpoint')
                     break
                 getattr(self, '_' + self.store.project(pid)['state'].lower())(pid)
                 self.write_handoff(pid)
@@ -392,12 +401,44 @@ class Engine:
         folder = self.workspace / 'projects' / pid
         folder.mkdir(parents=True, exist_ok=True)
         data = self.store.handoff(pid)
+        data['ax_branch_git'] = git_state()
+        data['consistency_problems'] = self.consistency(pid)
         (folder / 'HANDOFF.md').write_text(
             f"# AX Branch handoff — {pid}\n\nAny engine (Claude Code, Codex CLI, a person) continues from this "
             f"state, not from chat history. Source of Truth: `{self.workspace / 'axbranch.sqlite3'}`.\n\n"
             f"- state: **{data['state']}**\n- next: {data['next_action']}\n- continue: `{data['continue_with']}`\n\n"
             f"```json\n{json.dumps(data, ensure_ascii=False, indent=2)}\n```\n", encoding='utf-8')
         return folder / 'HANDOFF.md'
+
+
+    def consistency(self, pid):
+        """Problems between SQLite and disk that would make continuing unsafe. [] = consistent."""
+        p, problems = self.store.project(pid), []
+        for a in self.store.artifacts(pid):
+            path = Path(a['path'])
+            if not path.is_file():
+                problems.append(f"artifact v{a['iteration']} missing: {path}")
+            elif hashlib.sha256(path.read_bytes()).hexdigest() != a['sha256']:
+                problems.append(f"artifact v{a['iteration']} bytes differ from recorded sha256: {path}")
+        if p['state'] not in ('CREATED', 'PLANNING', 'CLOSED') and not p['plan']:
+            problems.append(f"state {p['state']} but no plan recorded")
+        if p['state'] == 'VERIFYING' and not any(a['iteration'] == p['iteration'] for a in self.store.artifacts(pid)):
+            problems.append(f"VERIFYING but no artifact for iteration {p['iteration']}")
+        return problems
+
+
+def git_state(repo=Path(__file__).resolve().parents[1]):
+    """The AX Branch code version that wrote this state (None if not a git checkout)."""
+    def git(*args):
+        try:
+            out = subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True, timeout=10,
+                                 creationflags=providers.NO_WINDOW)
+            return out.stdout.strip() if out.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    head = git('rev-parse', '--short', 'HEAD')
+    return head and {'commit': head, 'subject': git('log', '-1', '--format=%s'),
+                     'uncommitted_files': len((git('status', '--porcelain') or '').splitlines())}
 
 
 def open_engine(**kwargs):

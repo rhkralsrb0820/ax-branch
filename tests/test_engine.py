@@ -166,6 +166,34 @@ class EngineTests(unittest.TestCase):
         stop = threading.Event(); stop.set()
         self.assertEqual(eng.run(pid, stop)['state'], 'PAUSED')
 
+    def test_stop_at_checkpoint_then_another_session_continues_without_rerun(self):
+        script = Script([GOOD], ['PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid, stop_at='VERIFYING')
+        self.assertEqual(p['state'], 'VERIFYING')                 # left ACTIVE, like an interrupted engine
+        self.assertEqual(eng.consistency(pid), [])
+        handoff = (self.tmp / 'ws' / 'projects' / pid / 'HANDOFF.md').read_text(encoding='utf-8')
+        self.assertIn('Verification Agent judges the latest artifact', handoff)
+        before = len(script.prompts)
+        store2 = Store(self.tmp / 'ws' / 'axbranch.sqlite3')
+        try:
+            eng2 = E.Engine(store2, workspace=self.tmp / 'ws', vault=self.vault, gai_db=self.tmp / 'none.db', llm=script)
+            self.assertEqual(eng2.run(pid)['state'], 'PENDING_CLOSE')
+        finally:
+            store2.close()
+        # The second session made only the verification and the CEO report calls.
+        self.assertEqual([s for s, _, _ in script.prompts[before:]], [E.VERDICT, E.REPORT])
+        self.assertEqual(len(self.store.events(pid, {'session'})), 2)
+
+    def test_consistency_detects_tampered_artifact(self):
+        eng = self.engine(Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid, stop_at='VERIFYING')
+        Path(self.store.artifacts(pid)[-1]['path']).write_bytes(b'tampered')
+        self.assertIn('differ', eng.consistency(pid)[0])
+        self.assertEqual(eng.run(pid)['state'], 'PAUSED')          # never verifies a changed artifact
+
     def test_self_test_gets_empty_stdin_and_no_args(self):
         path = self.tmp / 'reads_stdin.py'
         path.write_text("import sys\nif __name__ == '__main__':\n    assert sys.argv[1:] == []\n"
