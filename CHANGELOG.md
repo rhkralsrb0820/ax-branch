@@ -3,6 +3,31 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.4] - 2026-10-03
+
+### Added
+- One session per project: `run` and `finish` hold an exclusive OS lock
+  (`workspace/projects/<id>/run.lock`, msvcrt on Windows / flock elsewhere). The OS releases it
+  when the holder exits or crashes, so no stale locks. A refused session raises `state.Busy`
+  before writing anything; the CLI exits 2 with a message; the GUI shows it in the status bar.
+- `tests/test_lock.py`: second thread refused mid-build without writing; separate process refused;
+  killed holder releases the lock.
+
+### Changed
+- Nothing else.
+
+### Fixed
+- 0.1.0 known issue "two runners on the same project are not locked out".
+
+### Verification
+- 17 unit tests pass.
+- Live CLI (scratch AXB_ROOT): while process A held the lock, `axbranch run` and `axbranch finish --save`
+  each exited 2 with "Already running in another session"; project stayed CREATED; lock free after A exited.
+
+### Known issues
+- The lock is per machine (file lock); two machines sharing one workspace folder are not supported.
+- Remaining: Windows-app end-to-end run, live quota failover, multi-file artifacts, AX Works integration.
+
 ## [0.1.3] - 2026-10-03
 
 First live SAVE & CLOSE (project `P-20261003-06983b`).

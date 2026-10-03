@@ -8,7 +8,7 @@ from tkinter import messagebox, scrolledtext, ttk
 
 from . import WORKSPACE, __version__
 from .engine import open_engine
-from .state import Store
+from .state import Busy, Store
 
 FONT = ('Malgun Gothic', 10)
 
@@ -21,6 +21,7 @@ class App(tk.Tk):
         self.store = Store(WORKSPACE / 'axbranch.sqlite3')
         self.running = {}            # pid -> cancel Event
         self.selected = None
+        self.notice = ''              # set by worker threads, shown by the Tk thread
 
         top = ttk.Frame(self, padding=8); top.pack(fill='x')
         ttk.Label(top, text='Goal', font=('Malgun Gothic', 11, 'bold')).pack(anchor='w')
@@ -53,6 +54,8 @@ class App(tk.Tk):
             engine = open_engine()
             try:
                 engine.run(pid, cancel)
+            except Busy as e:           # e.g. a CLI or Codex session is running it; nothing changed
+                self.notice = str(e)
             finally:
                 engine.store.close()
                 self.running.pop(pid, None)
@@ -135,7 +138,7 @@ class App(tk.Tk):
                 if self.ids[i] == self.selected:
                     self.list.selection_set(i)
         self.show()
-        self.status.config(text=f'실행 중 {len(self.running)}건')
+        self.status.config(text=self.notice or f'실행 중 {len(self.running)}건')
         self.after(1500, self.refresh)
 
     def show(self):

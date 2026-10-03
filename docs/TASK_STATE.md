@@ -15,6 +15,5 @@
 1. Owner: decide when to close `P-20261003-906ead` (kept open on instruction).
 2. Confirm archived knowledge is retrieved by a later live project (`knowledge.retrieve`).
 3. Observe a real quota-limit failover when one occurs (timeout policy stays: pause).
-4. Cross-process run lock (GUI + CLI on the same project).
-5. Decide whether non-quota faults (timeouts) may fail over to the other provider (Owner policy; today: pause).
-6. Multi-file / repo-editing artifacts; ax-works integration; Upgrade Proposal document generator.
+4. Decide whether non-quota faults (timeouts) may fail over to the other provider (Owner policy; today: pause).
+5. Multi-file / repo-editing artifacts; ax-works integration; Upgrade Proposal document generator.

@@ -1,12 +1,13 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-03 · version **0.1.3** · repo `AX-Branch/ax-branch` (local git only, not pushed).
+Updated 2026-10-03 · version **0.1.4** · repo `AX-Branch/ax-branch` (local git only, not pushed).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
 
 ## Working now (verified)
 - Goal -> CEO plan -> dynamic pipeline -> temporary agents -> artifact -> independent verification
   -> FAIL rebuild -> PASS -> CEO report. Proven live on project `P-20261003-906ead`.
+- One session per project (OS run lock; GUI threads, CLI and Codex sessions cannot overlap).
 - SQLite runtime state, enforced lifecycle, PAUSED/resume from DB (proven live after a provider timeout).
 - Claude Code CLI and Codex CLI both executed real turns (Claude: CEO + builder; Codex: engineer + verifier).
 - Deterministic gate (compile + self-test) overrides model verdicts; artifacts hashed and versioned.

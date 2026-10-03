@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from . import GAI_DB, VAULT, WORKSPACE, governance as gov, knowledge, providers
-from .state import ACTIVE, Rejected, Store
+from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
 STR, BOOL = {'type': 'string'}, {'type': 'boolean'}
@@ -123,7 +123,15 @@ class Engine:
     def run(self, pid, cancel=None, stop_at=None):
         """Advance the project until it needs the Owner (or is closed). Safe to call again anytime.
         stop_at: end this session (state left ACTIVE, like an interrupted engine) when the
-        project reaches that state — a controlled checkpoint for continuation tests."""
+        project reaches that state — a controlled checkpoint for continuation tests.
+        Raises state.Busy (changing nothing) if another session is running this project."""
+        with self.lock(pid):
+            return self._run(pid, cancel, stop_at)
+
+    def lock(self, pid):
+        return run_lock(self.workspace / 'projects' / pid / 'run.lock')
+
+    def _run(self, pid, cancel, stop_at):
         self.cancel = cancel
         self.store.event(pid, 'session', os_pid=os.getpid(), state=self.store.project(pid)['state'],
                          # names only (never values): shows which CLI environment drove this session
@@ -357,6 +365,10 @@ class Engine:
     def close(self, pid, choice=None, confirm=False, satisfaction=None):
         """Owner says the project is finished. Without a choice, the CEO only asks.
         choice: 'save' (SAVE & CLOSE), 'pause' (PAUSE), 'discard' (CLOSE WITHOUT SAVE)."""
+        with self.lock(pid):
+            return self._close(pid, choice, confirm, satisfaction)
+
+    def _close(self, pid, choice, confirm, satisfaction):
         p = self.store.project(pid)
         if p['state'] == 'PAUSED' and p['resume_state'] in ('PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
             self.store.resume(pid)

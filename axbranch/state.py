@@ -4,6 +4,7 @@ Chat transcripts are never consulted. Anything a fresh engine (Claude, Codex or 
 human) needs to continue a project is in these tables, and handoff() renders it.
 """
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -69,6 +70,41 @@ _JSON = ('plan', 'report')
 
 class Rejected(Exception):
     pass
+
+
+class Busy(Rejected):
+    """Another session (GUI thread, CLI, Codex...) is running this project right now."""
+
+
+@contextmanager
+def run_lock(path):
+    """Exclusive, non-blocking OS lock on `path`. The OS drops it when the holder exits or
+    crashes, so a dead session never leaves a stale lock. Two threads of one process conflict
+    too (each takes its own handle)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(path, 'a+b')
+    try:
+        f.seek(0)
+        if os.name == 'nt':
+            import msvcrt
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        raise Busy(f'Already running in another session (lock {path}). Not started; nothing changed.') from None
+    try:
+        yield
+    finally:
+        try:
+            f.seek(0)
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            f.close()
 
 
 def _new_id(prefix):

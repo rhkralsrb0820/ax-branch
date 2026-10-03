@@ -14,6 +14,7 @@ import sys
 
 from . import __version__
 from .engine import open_engine
+from .state import Busy
 
 
 def main(argv=None):
@@ -35,6 +36,14 @@ def main(argv=None):
         g.add_argument('--' + choice, dest='choice', action='store_const', const=choice)
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
     a = ap.parse_args(argv)
+    try:
+        return _dispatch(a)
+    except Busy as e:
+        print(f'AX Branch: {e}', file=sys.stderr)
+        return 2
+
+
+def _dispatch(a):
 
     if a.cmd in (None, 'gui'):
         from .gui import main as gui
