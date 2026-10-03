@@ -16,5 +16,5 @@
 2. Owner: click through the exe once (goal -> report -> close) to confirm the human path.
 3. Observe a genuine usage-limit failover when one occurs (timeout policy stays: pause).
 4. Confirm archived knowledge is retrieved by a later live project (`context_used` now records it).
-5. Self-test isolation beyond a temp dir (separate account / job object) — risk grows with bundles.
+5. Stronger isolation for generated code: dedicated low-privilege account + network block (needs Owner to create the account).
 6. AX Works seams per `INTEGRATION.md` once AX Works has real data; Upgrade Proposal generator.

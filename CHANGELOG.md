@@ -3,6 +3,36 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.6] - 2026-10-03
+
+Containment for generated code run during verification.
+
+### Added
+- `axbranch/sandbox.py`: self-tests (single file and bundle) run with a clean environment (only what
+  Python needs; no API keys or CLI session tokens), inside a Windows Job Object (≤8 processes, ≤1 GiB
+  for the whole tree). When the main process exits or times out, the whole tree is killed at once.
+  Non-Windows: new session + killpg.
+- `tests/test_sandbox.py` with real processes: parent secret invisible, orphaned grandchild killed,
+  timeout kills the tree, process cap enforced.
+
+### Changed
+- Output is captured to a file and only the main process is awaited.
+
+### Fixed
+- Generated code inherited the full parent environment, including CLI session tokens.
+- On timeout only the direct child was killed; a spawned grandchild kept running. And while reading
+  output through a pipe, a grandchild holding the pipe could finish its own work before the check
+  ended (found by the new test).
+
+### Verification
+- 31 unit tests pass.
+- The four delivered live artifacts (906ead v2, 06983b v1, 4e3292 v2 bundle — its tests start
+  subprocesses — and 46185d v4) all still pass their self-tests under containment.
+
+### Known issues
+- Same OS account: generated code can still read the user's files. A separate low-privilege
+  account is the upgrade path (D12). Network access is not blocked.
+
 ## [0.1.5] - 2026-10-03
 
 Windows app end to end, multi-file artifacts, live provider failover, and the robustness fixes those

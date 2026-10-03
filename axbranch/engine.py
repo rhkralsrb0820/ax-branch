@@ -17,7 +17,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, providers
+from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, providers, sandbox
 from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
@@ -302,17 +302,16 @@ class Engine:
         python = sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
         if not python:
             return {'ok': False, 'ran': ['compile'], 'output': 'no Python interpreter to run the self-test'}
-        with tempfile.TemporaryDirectory(prefix='axb-check-') as cwd:
-            target = Path(cwd) / Path(path).name
-            target.write_text(text, encoding='utf-8')
-            try:
-                proc = subprocess.run([python, '-I', '-X', 'utf8', target.name], cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL,
-                                      text=True, encoding='utf-8', errors='replace', timeout=gov.CHECK_TIMEOUT,
-                                      creationflags=providers.NO_WINDOW)
-            except subprocess.TimeoutExpired:
-                return {'ok': False, 'ran': ['compile', 'self-test'], 'output': f'self-test timed out ({gov.CHECK_TIMEOUT}s)'}
-        output = (proc.stdout + proc.stderr)[-3000:]
-        return {'ok': proc.returncode == 0, 'ran': ['compile', 'self-test'], 'exit_code': proc.returncode, 'output': output}
+        with tempfile.TemporaryDirectory(prefix='axb-check-', ignore_cleanup_errors=True) as cwd:
+            (Path(cwd) / Path(path).name).write_bytes(Path(path).read_bytes())
+            code, output = sandbox.run([python, '-I', '-X', 'utf8', Path(path).name], cwd, gov.CHECK_TIMEOUT)
+        return self._result(['compile', 'self-test'], code, output)
+
+    @staticmethod
+    def _result(ran, code, output):
+        if code is None:
+            return {'ok': False, 'ran': ran, 'output': f'self-test timed out ({gov.CHECK_TIMEOUT}s); process tree killed'}
+        return {'ok': code == 0, 'ran': ran, 'exit_code': code, 'output': output[-3000:]}
 
     def _bundle_checks(self, folder, entry, rejected):
         ran = ['paths']
@@ -330,18 +329,12 @@ class Engine:
         if not python:
             return {'ok': False, 'ran': ran, 'output': 'no Python interpreter to run the self-test'}
         ran.append('self-test')
-        with tempfile.TemporaryDirectory(prefix='axb-check-') as cwd:
+        with tempfile.TemporaryDirectory(prefix='axb-check-', ignore_cleanup_errors=True) as cwd:
             shutil.copytree(folder, cwd, dirs_exist_ok=True)
-            try:
-                # -E -s, not -I: isolated mode drops the script folder from sys.path, so a bundle
-                # could not import its own modules. Environment and user site-packages stay ignored.
-                proc = subprocess.run([python, '-E', '-s', '-X', 'utf8', entry], cwd=cwd, capture_output=True,
-                                      stdin=subprocess.DEVNULL, text=True, encoding='utf-8', errors='replace',
-                                      timeout=gov.CHECK_TIMEOUT, creationflags=providers.NO_WINDOW)
-            except subprocess.TimeoutExpired:
-                return {'ok': False, 'ran': ran, 'output': f'self-test timed out ({gov.CHECK_TIMEOUT}s)'}
-        return {'ok': proc.returncode == 0, 'ran': ran, 'exit_code': proc.returncode,
-                'output': (proc.stdout + proc.stderr)[-3000:]}
+            # -E -s, not -I: isolated mode drops the script folder from sys.path, so a bundle
+            # could not import its own modules. Environment and user site-packages stay ignored.
+            code, output = sandbox.run([python, '-E', '-s', '-X', 'utf8', entry], cwd, gov.CHECK_TIMEOUT)
+        return self._result(ran, code, output)
 
     def _verifying(self, pid):
         p = self.store.project(pid)

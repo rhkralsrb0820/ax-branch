@@ -33,3 +33,8 @@ paths are written; refusals fail verification rather than pausing the project.
 
 **D11 (0.1.5) Unexpected errors pause, never strand; schema is versioned.** Learned live: an older
 packaged exe crashed on a newer schema and the project sat in EXECUTING with no trace.
+
+**D12 (0.1.6) Generated code runs contained, not isolated.** Clean environment + Job Object (process
+and memory caps, whole tree killed at the end). Reading the user's files and network access remain
+possible under the same account; a dedicated low-privilege Windows account is the upgrade path and
+needs Owner setup (account creation is an Owner action).

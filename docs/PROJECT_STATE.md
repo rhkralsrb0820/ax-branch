@@ -1,6 +1,6 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-03 · version **0.1.5** · repo `AX-Branch/ax-branch` (local git only, not pushed).
+Updated 2026-10-03 · version **0.1.6** · repo `AX-Branch/ax-branch` (local git only, not pushed).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
 
@@ -11,6 +11,7 @@ covers the *development* of AX Branch itself.
 - SQLite runtime state, enforced lifecycle, PAUSED/resume from DB (proven live after a provider timeout).
 - Claude Code CLI and Codex CLI both executed real turns (Claude: CEO + builder; Codex: engineer + verifier).
 - Deterministic gate (compile + self-test) overrides model verdicts; artifacts hashed and versioned.
+- Generated code runs contained: clean env, Job Object caps, whole process tree killed (not file/network isolation).
 - Owner close flow: SAVE & CLOSE live-proven (P-20261003-06983b); pause / discard+confirm unit-tested only.
 - Windows exe: a goal ran end to end inside the packaged app (`--goal`), and a crashed run was resumed by the newer exe (`--resume`).
 - Multi-file bundle artifacts (live-proven) alongside single markdown/python files.

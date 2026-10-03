@@ -20,6 +20,7 @@ Owner ── GUI / CLI ──► Engine (淸月 AI CEO driver) ──► provide
 | `providers.py` | Claude Code / Codex CLI as interchangeable engines; quota failover. |
 | `engine.py` | CEO planning, staffing, build, deterministic checks, independent verification, rebuild, strategy review, CEO report, close/archive. |
 | `knowledge.py` | Vault retrieval, GAI read-only search (relevance-gated, provenance recorded), verified archive notes. |
+| `sandbox.py` | Runs generated self-tests: clean env, Job Object limits, whole tree killed. |
 | `artifacts.py` | Single-file and multi-file (bundle) artifacts: safe paths, sha256 manifest, integrity, text view. |
 | `gui.py`, `__main__.py` | Owner window and CLI. |
 
