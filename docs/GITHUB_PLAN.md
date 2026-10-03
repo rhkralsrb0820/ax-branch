@@ -1,4 +1,13 @@
-# GitHub step — prepared, NOT executed (needs Owner go-ahead)
+# GitHub repository
+
+**Done 2026-10-03 (Owner approved):** `https://github.com/rhkralsrb0820/ax-branch`, visibility
+PRIVATE, `main` tracks `origin/main`. Verified after push: remote HEAD == local HEAD (`fa8daf7`),
+remote file set identical to `git ls-files` (26 files), no DB/log/exe/key/build files on the remote.
+The other three repositories are unchanged with their own remotes.
+
+---
+
+Plan as prepared before the push:
 
 Target: a new **private** repository `rhkralsrb0820/ax-branch`, separate from the existing three
 (`rhkralsrb0820/-` = cheongwol, `ax-works`, `global-ai-intelligence`), which are not touched.
