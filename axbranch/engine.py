@@ -382,10 +382,11 @@ class Engine:
                 self.store.set_state(pid, 'CLOSED', reason='Owner: close without save')
         elif choice == 'save':
             self.store.set_state(pid, 'ARCHIVING')
-            artifact = self.store.artifacts(pid)[-1]
+            evidence = [', '.join(f'{k}: {v}' for k, v in e['detail'].items())
+                        for e in self.store.events(pid, {'audit', 'provider_handoff'})]
             note, sha = knowledge.archive(self.vault, self.store.project(pid), self.store.verifications(pid),
                                           [e['detail'] for e in self.store.events(pid, {'decision'})],
-                                          Path(artifact['path']).read_text(encoding='utf-8'), artifact)
+                                          evidence, self.store.artifacts(pid))
             with self.store.tx():
                 self.store.event(pid, 'archived', note=str(note), sha256=sha)
                 self.store.end_agents(pid, 'terminated')

@@ -54,35 +54,50 @@ def _slug(text, n=50):
     return re.sub(r'[\\/:*?"<>|#^\[\]\s]+', ' ', text).strip()[:n].strip() or 'project'
 
 
-def archive(vault, project, verifications, decisions, artifact_text, artifact):
+SECTIONS = ('## Goal', '## Decisions', '## Lessons', '## Verification Findings', '## Evidence', '## CEO Report', '## Artifacts')
+
+
+def archive(vault, project, verifications, decisions, evidence, artifacts):
     """Write the project's durable knowledge note, then read it back to verify.
-    Returns (path, sha256). Raises OSError/ValueError if the archive is not intact."""
+    Durable = goal, decisions, lessons, every verification finding, evidence, the CEO report and
+    artifact references (path + sha256). Raw artifact content and agent working context are NOT
+    archived: artifacts stay in the workspace, addressed by hash.
+    Returns (path, sha256). Raises ValueError if the archive is not intact."""
     plan, report = project['plan'] or {}, project['report'] or {}
-    lessons = [f"- Round {v['iteration']} FAIL — [{f['severity']}] {f['issue']} (evidence: {f['evidence']})"
-               for v in verifications if v['verdict'] == 'FAIL' for f in v['result'].get('findings', [])]
+    rounds, lessons = [], []
+    for v in verifications:
+        r, ch = v['result'], v['checks']
+        rounds += [f"### Round {v['iteration']} — {v['verdict']} (verifier: {v['provider']})",
+                   f"- deterministic checks: {'pass' if ch.get('ok') else 'FAIL'} ({', '.join(ch.get('ran', []))})"
+                   + ('' if ch.get('ok') else f" — {str(ch.get('output', ''))[:300]}"),
+                   f"- criteria met: {sum(c['met'] for c in r.get('criteria', []))}/{len(r.get('criteria', []))}",
+                   *[f"- [{c.get('met') and 'met' or 'UNMET'}] {c['criterion']}" for c in r.get('criteria', []) if not c['met']],
+                   *[f"- [{f['severity']}] {f['issue']} — evidence: {f['evidence']}" for f in r.get('findings', [])], '']
+        if v['verdict'] == 'FAIL':
+            lessons += [f"- Round {v['iteration']} failed: [{f['severity']}] {f['issue']}" for f in r.get('findings', [])]
     lines = [
         f"# {_slug(project['goal'], 80)}", '',
-        f"- project: `{project['id']}`  closed: {time.strftime('%Y-%m-%d')}  rounds: {len(verifications)}",
+        f"- project: `{project['id']}`  closed: {time.strftime('%Y-%m-%d')}  verification rounds: {len(verifications)}",
         '- tags: #ax-branch #project-archive', '',
-        '## Goal', project['goal'], '',
-        '## CEO Interpretation', plan.get('interpretation', ''), '',
-        '## Acceptance Criteria', *[f'- {c}' for c in plan.get('acceptance_criteria', [])], '',
-        '## Pipeline', *[f"- {s['name']} — {s['agent_role']} ({s['provider']})" for s in plan.get('pipeline', [])], '',
-        '## Decisions', *[f"- {d.get('what')}: {d.get('why', '')}" for d in decisions], '',
-        '## Verification Knowledge / Failed Approaches', *(lessons or ['- Passed first round.']), '',
+        '## Goal', project['goal'], '', '### CEO interpretation', plan.get('interpretation', ''), '',
+        '### Acceptance criteria', *[f'- {c}' for c in plan.get('acceptance_criteria', [])], '',
+        '### Pipeline', *[f"- {s['name']} — {s['agent_role']} ({s['provider']})" for s in plan.get('pipeline', [])], '',
+        '## Decisions', *([f"- {d.get('what')}: {d.get('why', '')}" for d in decisions] or ['- none recorded']), '',
+        '## Lessons', *(lessons or ['- No failed rounds. See verification findings for residual issues.']), '',
+        '## Verification Findings', *rounds,
+        '## Evidence', *([f"- {e}" for e in evidence] or ['- none recorded']), '',
         '## CEO Report', report.get('summary', ''), '', f"Judgment: {report.get('judgment', '')}", '',
         *[f'- {s}' for s in report.get('next_steps', [])], '',
-        '## Artifact', f"`{artifact['path']}`  sha256 `{artifact['sha256']}`", '',
-        '```', artifact_text[:4000], '```', '',
+        '## Artifacts', *[f"- v{a['iteration']}: `{a['path']}` sha256 `{a['sha256']}`" for a in artifacts], '',
     ]
-    text = '\n'.join(lines)
+    data = '\n'.join(lines).encode('utf-8')
     folder = Path(vault) / 'Projects'
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{time.strftime('%Y-%m-%d')} {_slug(project['goal'])} {project['id'][-6:]}.md"
-    data = text.encode('utf-8')
     path.write_bytes(data)                      # exact bytes, so the sha256 matches the file on disk
     sha = hashlib.sha256(data).hexdigest()
     back = path.read_bytes()
-    if hashlib.sha256(back).hexdigest() != sha or b'## Verification Knowledge' not in back:
-        raise ValueError(f'Archive verification failed for {path}')
+    missing = [s for s in SECTIONS if s.encode('utf-8') not in back]
+    if hashlib.sha256(back).hexdigest() != sha or missing:
+        raise ValueError(f'Archive verification failed for {path}: {missing or "hash mismatch"}')
     return path, sha

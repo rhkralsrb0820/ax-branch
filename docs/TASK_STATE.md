@@ -12,8 +12,8 @@
 | P11 | Windows exe | built + launches; a full GUI run from the exe not yet done |
 
 ## Open, in priority order
-1. Owner: approve the private GitHub push (`docs/GITHUB_PLAN.md`).
-2. Owner: decide when to close the two PENDING_CLOSE projects (live test of SAVE & CLOSE → Obsidian).
+1. Owner: decide when to close `P-20261003-906ead` (kept open on instruction).
+2. Confirm archived knowledge is retrieved by a later live project (`knowledge.retrieve`).
 3. Observe a real quota-limit failover when one occurs (timeout policy stays: pause).
 4. Cross-process run lock (GUI + CLI on the same project).
 5. Decide whether non-quota faults (timeouts) may fail over to the other provider (Owner policy; today: pause).

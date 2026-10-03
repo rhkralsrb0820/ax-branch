@@ -92,6 +92,10 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(p['state'], 'CLOSED')
         note = Path(p['archive_note'])
         self.assertIn('Gate override', note.read_text(encoding='utf-8'))
+        text = note.read_text(encoding='utf-8')
+        self.assertNotIn('return a + b', text)                       # no raw artifact content archived
+        self.assertIn('### Round 2 — PASS', text)                    # every round's verification, not only FAILs
+        self.assertIn(self.store.artifacts(pid)[-1]['sha256'], text)  # artifacts by reference
         self.assertEqual(self.store.agents(pid), [])
         # Archived knowledge is retrievable for the next goal.
         self.assertTrue(knowledge.retrieve(self.vault, 'add tool gate override'))

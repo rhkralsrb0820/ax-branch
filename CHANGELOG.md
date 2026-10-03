@@ -3,6 +3,35 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.3] - 2026-10-03
+
+First live SAVE & CLOSE (project `P-20261003-06983b`).
+
+### Added
+- Archive note sections: Goal (interpretation, criteria, pipeline), Decisions, Lessons, Verification
+  Findings (every round), Evidence (audit and provider-handoff events), CEO Report, Artifacts.
+
+### Changed
+- Archives hold durable knowledge only: artifacts are referenced by path + sha256, never copied
+  (0.1.2 embedded up to 4,000 characters of artifact source).
+- Archive verification now requires every section in addition to the byte-exact sha256 read-back.
+
+### Fixed
+- Findings from PASS rounds were dropped from the archive (only FAIL rounds were kept); a project
+  that passed first time lost its residual minor findings.
+- Evidence (e.g. the Codex continuation audit) was not archived.
+
+### Verification
+- 15 unit tests pass; the archive test now asserts no artifact source, every round present, artifacts by hash.
+- Live: `finish P-20261003-06983b --save` -> PENDING_CLOSE -> ARCHIVE_PENDING_APPROVAL -> ARCHIVING -> CLOSED.
+  Note sha256 on disk == recorded; all 7 sections present; agent `terminated`; stage outputs (agent
+  context) deleted; artifact and verification records kept. Source lines in the note are only the
+  verifier's quoted evidence. `P-20261003-906ead` unchanged (state, updated, last event, outputs, agents).
+
+### Known issues
+- Archive retrieval (`knowledge.retrieve`) has not yet fed a later live project.
+- Earlier items remain: quota failover not exercised live, no cross-process run lock, self-test not sandboxed, single-file artifacts.
+
 ## [0.1.2] - 2026-10-03
 
 Real Codex CLI continuation test passed: Codex, given only "Continue the AX Branch work.", read
