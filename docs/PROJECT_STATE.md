@@ -1,6 +1,6 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-03 · version **0.1.8** · repo `AX-Branch/ax-branch` (local git only, not pushed).
+Updated 2026-10-03 · version **0.1.9** · repo `AX-Branch/ax-branch` (local git only, not pushed).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
 
@@ -13,7 +13,11 @@ covers the *development* of AX Branch itself.
 - Deterministic gate (compile + self-test) overrides model verdicts; artifacts hashed and versioned.
 - Owner review loop: verified deliveries go to OWNER_REVIEW; problems/changes reopen the same project (live-proven on P-20261003-bbad3c).
 - Runtime Acceptance: artifacts must work when launched the way the Owner launches them (cli/web/gui), exact double-click included.
-- Live activity visibility (agent, provider, CLI pid, elapsed, last output).
+- Live activity visibility (agent, provider, CLI pid, elapsed, streamed output).
+- Owner review = two questions (works? / what next?) with plain-language feedback; closure only on explicit finish.
+- External connections of delivered programs need Owner approval (gate before build).
+- Rendered-page checks (headless Edge), edit-based builds, sleep-aware timeouts, machine-wide provider slots, memory floor.
+- Owner Effort KPI: `axbranch effort` (measured / estimated / unknown). Gap analysis: `GAP_ANALYSIS.md`.
 - Archived knowledge is retrieved by later projects (live-proven, provenance in `context_used`).
 - Upgrade Proposal path: gated by Owner satisfaction ≥ 90%; draft only.
 - Generated code runs contained: clean env, Job Object caps, whole process tree killed (not file/network isolation).
@@ -25,7 +29,7 @@ covers the *development* of AX Branch itself.
 | Capability | Claude Code | Codex CLI |
 |---|---|---|
 | Runs an agent turn (any role) | live-proven | live-proven (engineer, verifier) |
-| Quota failover to the other | — | live: real Codex took over every Claude turn after a stand-in Claude refusal; genuine limit not yet seen |
+| Quota failover to the other | — | **genuine** Claude usage limit 2026-10-04: Codex took over every Claude turn automatically |
 | Drives a project as the session (`python -m axbranch run`) | live-proven | **live-proven** (2026-10-03, see `evidence/`) |
 
 ## Live projects (OWNER_REVIEW / PENDING_CLOSE wait for the Owner)

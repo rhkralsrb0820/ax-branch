@@ -12,8 +12,16 @@ python -m axbranch new "goal..." --run     # CLI
 python -m axbranch status [<id>]
 python -m axbranch run <id>                # continue any project from SQLite (Claude or Codex session)
 python -m axbranch resume <id> [--rounds N]
+python -m axbranch review <id> [--works | --broken "..."] [--request "..."] [--finish]   # Owner review
+python -m axbranch approve <id> --network yes|no      # external connections the program would make
+python -m axbranch replan <id> --reason "..."         # recovery: CEO strategy review
+python -m axbranch effort [<id>]                      # Owner Effort KPI
 python -m axbranch finish <id> [--save | --pause | --discard --confirm] [--satisfaction N]
 ```
+
+Product principle: *you manage the goal; AX Branch manages the AI work* — planning, agents, engine
+choice, verification (incl. running the result the way you will), recovery and handoffs between
+Claude Code and Codex.
 
 Requirements: Python 3.11+, `claude` and/or `codex` CLI logged in with a subscription,
 and the sibling `../cheongwol` repo (its provider layer is reused). No paid API is used;

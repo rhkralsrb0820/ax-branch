@@ -11,10 +11,9 @@
 | P10 | Real end-to-end run | done (`P-20261003-906ead`, v1 FAIL → v2 PASS) |
 | P11 | Windows exe | live goal run inside the packaged app; crash recovery by newer exe |
 
-## Open, in priority order
-0. Owner: test the repaired stock analyzer (P-20261003-bbad3c v3) and report works / problem / change.
-1. Owner: decide when to close the PENDING_CLOSE projects (906ead, 97494b, 4e3292, 46185d, d356e8); give a satisfaction score when closing (feeds the upgrade gate).
-2. Owner: click through the exe once (goal -> report -> close) to confirm the human path.
-3. Observe a genuine usage-limit failover when one occurs (timeout policy stays: pause).
-4. Stronger isolation for generated code: dedicated low-privilege account + network block (needs Owner to create the account).
-5. AX Works seams per `INTEGRATION.md` once AX Works has real data.
+## Open, in priority order (see GAP_ANALYSIS.md)
+0. Owner: test the improved stock analyzer (P-20261003-bbad3c) and answer the two review questions.
+1. Reduce operator dependence: automatic recovery re-plan when a plan is proven misdirected (needs evidence of a reliable trigger).
+2. Record Owner review time (UNKNOWN today) to measure Owner Effort in minutes.
+3. Owner decisions: close finished projects; stronger isolation needs a dedicated Windows account (Owner action).
+4. Later: AI Intelligence digest ("what matters today"), AX Works seams once it has data.
