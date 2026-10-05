@@ -53,6 +53,7 @@ def main(argv=None):
     rv.add_argument('--no-run', action='store_true', help='record the feedback only; rebuild later with run')
     rp = sub.add_parser('replan'); rp.add_argument('id'); rp.add_argument('--reason', required=True)
     ap_ = sub.add_parser('approve'); ap_.add_argument('id'); ap_.add_argument('--network', choices=('yes', 'no'), required=True)
+    ap_.add_argument('--note', default='', help='your guidance for the CEO when declining')
     a = ap.parse_args(argv)
     try:
         return _dispatch(a)
@@ -102,7 +103,7 @@ def _dispatch(a):
         print(f"[{p['id']}] {p['state']} plan v{p['plan_version']} — CEO strategy reviewed; continue with: "
               f"python -m axbranch run {p['id']}")
     elif a.cmd == 'approve':
-        p = engine.decide_network(a.id, a.network == 'yes')
+        p = engine.decide_network(a.id, a.network == 'yes', a.note)
         print(f"[{p['id']}] external connection(s) {'approved' if a.network == 'yes' else 'declined'}; "
               f"continue with: python -m axbranch resume {p['id']}")
     elif a.cmd == 'effort':

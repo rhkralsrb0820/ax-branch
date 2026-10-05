@@ -99,7 +99,8 @@ Rules:
   not touch files outside its working directory, and must not use the network unless the access is
   declared in network_access.
 - network_access: every internet domain the DELIVERED program must contact at run time, with its
-  purpose ([] if none). Each new domain is an external connection that needs the Owner's approval;
+  purpose ([] if none). List ONLY what the finished program itself contacts; sites your research stages
+  read (stages with web=true) are not listed. Each new domain is an external connection that needs the Owner's approval;
   the build waits for it. Prefer no network when the goal can be met well without it; free public
   sources only (no API keys, no paid services). The self-test must not need the network.
 - {EXEC_CONTRACT}
@@ -737,8 +738,9 @@ class Engine:
             self.write_handoff(pid)
             return self.store.project(pid)
 
-    def decide_network(self, pid, approve):
-        """Owner decision on the pending external connections of this project's plan."""
+    def decide_network(self, pid, approve, note=''):
+        """Owner decision on the pending external connections of this project's plan. `note` (the Owner's
+        own words, e.g. which kinds of sources are acceptable) goes to the CEO with a decline."""
         with self.lock(pid):
             pending = self.store.approvals(pid, 'pending')
             if not pending:
@@ -749,8 +751,10 @@ class Engine:
                     self.store.decide_approval(pid, a['action'], a['subject'], approve)
                 if not approve:      # back to the CEO: deliver without that access
                     names = ', '.join(a['subject'] for a in pending)
-                    self.store.add_feedback(pid, p['iteration'], 'request',
-                                            f'Owner declined external connection(s) to {names}. Deliver without them.')
+                    text = f'Owner declined external connection(s) to {names}. Deliver without them.'
+                    if note.strip():
+                        text += ' Owner guidance: ' + note.strip()
+                    self.store.add_feedback(pid, p['iteration'], 'request', text)
                     self.store.update(pid, iteration=p['iteration'] + 1, resume_state='REWORK')
             self.write_handoff(pid)
             return self.store.project(pid)
