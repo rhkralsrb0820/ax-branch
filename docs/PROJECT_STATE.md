@@ -1,6 +1,6 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-03 · version **0.1.9** · repo `AX-Branch/ax-branch` (local git only, not pushed).
+Updated 2026-10-06 · version **0.1.10** · repo `AX-Branch/ax-branch` (private GitHub `rhkralsrb0820/ax-branch`).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
 

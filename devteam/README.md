@@ -32,3 +32,6 @@ Rules learned so far:
 |---|---|---|---|---|---|
 | browser-click-probes | codex | 272 | ok | 64 pass | approved, then **rework needed**: proxy forwarded its own Host; found by the lead in live use |
 | failed-call-observability | codex | 160 | ok | 68 pass | approved, no rework |
+| permission-reuse | codex | 169 | ok | host suite pass | approved; lead integrated into the approval gate |
+| owner-escape-metric | codex | 107 | ok | host suite pass | approved, no rework |
+| supervisor-acceptance | codex | 211 | ok | 3 expected failures | independent review: **found 3 supervisor defects** (no-op escalation when PAUSED, stale RECOVERING marker, launch while old lock held); lead fixed, tests now pass |

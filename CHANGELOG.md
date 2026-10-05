@@ -3,6 +3,47 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.10] - 2026-10-06
+
+Stabilization: the Owner is no longer the watchdog. Evidence of the 2 h 20 min non-converging run (v10–v15)
+and the fixes: `docs/evidence/2026-10-06-long-run-incident-and-supervisor.md`.
+
+### Added
+- `axbranch/supervisor.py`: deterministic execution status (ACTIVE / WAITING_FOR_OWNER / WAITING_FOR_PROVIDER /
+  STALLED / RECOVERING / FAILED / PAUSED / COMPLETED) with project, stage, agent, provider, worker pid, call
+  elapsed/timeout, heartbeat, last activity, checkpoint, retry count, failure signature, next action.
+  Engine heartbeat (`HEARTBEAT.json`). Bounded automatic recovery: resume → same signature → replan+resume →
+  NEEDS_DECISION (≤5 per project), whole-tree stop of a hung worker, no duplicate launch. The window runs it
+  every 30 s; `axbranch supervise [--watch]`.
+- Permission reuse (`axbranch/permissions.py`, Codex): approved public read-only domains are reused across
+  projects; api_key / login / paid / posting / trading / personal data / destructive / governance always ask.
+- OWNER_ESCAPE metric in `axbranch effort` (Owner actions through cli / developer_cli; in-app and dev mode
+  excluded) and automatic-recovery count; every Owner action records its channel.
+- Strategy reviews can revise the program's `network_access` (still through the approval gate).
+
+### Changed
+- The same failure signature twice in a row forces a strategy change ("continue" removed), once per signature.
+- A declined connection is explained to the CEO as "not these domains", not as a network ban.
+
+### Fixed
+- A domain proposed again after a decline waited forever for an approval nobody could give; it is now a new
+  pending request.
+- Owner rework before anything was built crashed (no artifact); rework now uses the latest real version.
+- Supervisor defects found by Codex's independent acceptance tests: escalation was a no-op on a PAUSED project;
+  a stale RECOVERING marker disabled the watchdog; a replacement could launch while the old lock was held.
+
+### Verification
+- 95 tests pass (`python -X utf8 -m unittest discover -s tests -t .`), including acceptance A (stalled worker
+  tree → stop → resume, no duplicate), B (provider wait left untouched), C/D (same-project rework for a
+  software project and a math-proof document with Korean feedback), E (permission reuse / re-ask on higher
+  risk), F (test-started processes all gone).
+- Live: supervisor recovered P-20261003-bbad3c (STALLED → resume → approval gate) without an Owner CLI step.
+
+### Known issues
+- P-20261003-bbad3c waits for the Owner's in-app decision on 5 runtime domains; its failure budget is used up,
+  so after one more FAIL it pauses and an in-app resume adds 3 rounds.
+- Codex's sandbox cannot run Python on this PC; delegated work is tested by the host.
+
 ## [0.1.9] - 2026-10-05
 
 Owner review redesign, governed external connections, and the fixes from a real continuity event
