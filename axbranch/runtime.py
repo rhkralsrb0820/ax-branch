@@ -13,8 +13,11 @@ Modes
   gui   start it and require it to stay up; the window itself is not exercised (recorded).
 """
 import http.client
+import http.server
+import json
 import re
 import socket
+import threading
 import time
 
 from . import sandbox
@@ -203,6 +206,95 @@ def _wait_port(proc, port):
     return False, START_TIMEOUT
 
 
+def _click_proxy(port, path, selectors):
+    """Forward the app through loopback, injecting clicks only into the requested HTML page."""
+    # Escape '<' so a selector can never terminate the injected script element.
+    encoded = json.dumps(selectors).replace('<', r'\u003c')
+    script = ('''<script>document.addEventListener('DOMContentLoaded', async () => {
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+for (const selector of SELECTORS) {
+    const deadline = performance.now() + 5000;
+    let element;
+    while (!(element = document.querySelector(selector)) && performance.now() < deadline)
+        await sleep(50);
+    if (!element) return;
+    element.click();
+    await sleep(300);
+}
+});</script>'''.replace('SELECTORS', encoded)).encode('ascii')
+
+    class Proxy(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def forward(self):
+            con = http.client.HTTPConnection('127.0.0.1', port, timeout=PROBE_TIMEOUT)
+            try:
+                # Preserve method, query, headers and body, including chunked request framing.
+                con.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=True)
+                for key, value in self.headers.items():
+                    con.putheader(key, value)
+                con.endheaders()
+                if self.headers.get('Transfer-Encoding', '').lower() == 'chunked':
+                    while True:
+                        line = self.rfile.readline()
+                        con.send(line)
+                        size = int(line.split(b';', 1)[0], 16)
+                        if not size:
+                            while True:
+                                line = self.rfile.readline()
+                                con.send(line)
+                                if line in (b'\r\n', b''):
+                                    break
+                            break
+                        con.send(self.rfile.read(size + 2))
+                elif self.headers.get('Content-Length'):
+                    con.send(self.rfile.read(int(self.headers['Content-Length'])))
+                response = con.getresponse()
+                body = response.read()
+                content_type = response.getheader('Content-Type', '').lower()
+                inject = (self.command == 'GET' and self.path == path
+                          and ('text/html' in content_type or (not content_type
+                               and re.search(br'<(?:html|body)\b', body, flags=re.I))))
+                if inject:
+                    import gzip
+                    import zlib
+                    encoding = response.getheader('Content-Encoding', '').lower()
+                    if encoding == 'gzip':
+                        body = gzip.decompress(body)
+                    elif encoding == 'deflate':
+                        body = zlib.decompress(body)
+                    elif encoding not in ('', 'identity'):
+                        inject = False
+                    if inject:
+                        body = re.sub(b'</body\\s*>', lambda m: script + m.group(), body, count=1, flags=re.I)
+                        if encoding == 'gzip':
+                            body = gzip.compress(body)
+                        elif encoding == 'deflate':
+                            body = zlib.compress(body)
+                self.send_response_only(response.status, response.reason)
+                for key, value in response.getheaders():
+                    if key.lower() == 'transfer-encoding' or (key.lower() == 'content-length' and inject):
+                        continue
+                    self.send_header(key, value)
+                if inject:
+                    self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                con.close()
+
+        def __getattr__(self, name):
+            if name.startswith('do_'):
+                return self.forward
+            raise AttributeError(name)
+
+    proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    return proxy, thread
+
+
 def _rendered(port, probe):
     """BROWSER probe: load the page in a real headless browser (scripts run, the page's own API calls
     happen) and check the RENDERED text — script source is stripped so code text cannot fake a match."""
@@ -215,18 +307,29 @@ def _rendered(port, probe):
         step.update(ok=False, problems=['no headless browser available on this PC (Edge/Chrome)'])
         return step
     profile = tempfile.mkdtemp(prefix='axb-browser-')
-    proc = sandbox.start([exe, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-                          '--disable-logging', '--log-level=3',
-                          f'--user-data-dir={profile}', '--virtual-time-budget=10000', '--dump-dom',
-                          f'http://127.0.0.1:{port}{path}'], profile, env=dict(os.environ), caps=False)
+    selectors = [s.strip() for s in (probe.get('http_body') or '').split('||') if s.strip()]
+    proxy, thread, proc = None, None, None
     try:
+        if selectors:
+            proxy, thread = _click_proxy(port, path, selectors)
+            port = proxy.server_port
+        budget = max(10000, len(selectors) * 5300 + 1000)
+        proc = sandbox.start([exe, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+                              '--disable-logging', '--log-level=3',
+                              f'--user-data-dir={profile}', f'--virtual-time-budget={budget}', '--dump-dom',
+                              f'http://127.0.0.1:{port}{path}'], profile, env=dict(os.environ), caps=False)
         if proc.wait(BROWSER_TIMEOUT) is None:
             step.update(ok=False, problems=[f'browser did not finish within {BROWSER_TIMEOUT}s'])
             return step
         dom = proc.output()
     finally:
-        proc.stop()
-        proc.cleanup()
+        if proc is not None:
+            proc.stop()
+            proc.cleanup()
+        if proxy is not None:
+            proxy.shutdown()
+            proxy.server_close()
+            thread.join()
     text = re.sub(r'<script\b.*?</script>', ' ', dom, flags=re.S | re.I)
     text = re.sub(r'<style\b.*?</style>', ' ', text, flags=re.S | re.I)
     missing = _contains(text, probe.get('expect_contains', []))

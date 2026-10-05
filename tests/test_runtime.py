@@ -113,6 +113,47 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(ev['ok'])
         self.assertIn('rendered page lacks', str(next(s for s in ev['steps'] if s['name'] == 'rendered analysis')['problems']))
 
+    @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
+    def test_browser_clicks_primary_flow_in_order(self):
+        page = ("<html><body><div id=r>loading</div><script>"
+                "document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{"
+                "const start=document.createElement('button'); start.id='start';"
+                "start.textContent='Start'; document.body.append(start);"
+                "start.onclick=()=>setTimeout(()=>{"
+                "const analyze=document.createElement('button'); analyze.id='analyze';"
+                "analyze.textContent='Analyze'; document.body.append(analyze);"
+                "analyze.onclick=()=>fetch('/api/analyze?t=DEMO').then(r=>r.json()).then(j=>{"
+                "document.getElementById('r').textContent='SMA '+j.sma+' rendered'});"
+                "},450);},600));</script></body></html>")
+        code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page.encode()))
+        code = code.replace('self.end_headers()',
+                            "self.send_header('Content-Type', 'text/html' if self.path == '/' else 'application/json'); "
+                            "self.send_header('Content-Length', str(len(body))); self.end_headers()")
+        browser_probe = {**probe('click analysis', '/', ['SMA 2 rendered']), 'http_method': 'BROWSER',
+                         'http_body': '#start || #analyze'}
+        ev = self.check(code, {**WEB, 'probes': [browser_probe]})
+        self.assertTrue(ev['ok'], ev)
+        self.assertIn('SMA 2 rendered', ev['steps'][1]['rendered_tail'])
+        ev = self.check(code, {**WEB, 'probes': [{**browser_probe, 'http_body': ''}]})
+        self.assertFalse(ev['ok'], ev)
+        self.assertIn('rendered page lacks', str(ev['steps'][1]['problems']))
+        self.assertEqual((self.tmp / 'app.py').read_text(encoding='utf-8'), code)
+
+    @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
+    def test_injected_click_script_cannot_satisfy_expect_contains(self):
+        page = b'<html><body><h1>Ready</h1></body></html>'
+        code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page))
+        needles = ['#only-in-injected-script', 'const deadline = performance.now() + 5000']
+        browser_probe = {**probe('script source is not evidence', '/', needles), 'http_method': 'BROWSER',
+                         'http_body': '#only-in-injected-script'}
+        ev = self.check(code, {**WEB, 'probes': [browser_probe]})
+        self.assertFalse(ev['ok'], ev)
+        step = ev['steps'][1]
+        self.assertEqual(step['problems'], [f'rendered page lacks {needles}'])
+        self.assertIn('Ready', step['rendered_tail'])
+        for needle in needles:
+            self.assertNotIn(needle, step['rendered_tail'])
+
     def test_window_must_stay_up(self):
         spec = {'mode': 'gui', 'owner_launch': 'double-click', 'launch_args': [], 'probes': []}
         self.assertTrue(self.check('import time\ntime.sleep(30)\n', spec)['ok'])
