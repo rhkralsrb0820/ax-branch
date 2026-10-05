@@ -51,7 +51,7 @@ class Script:
             v = self.verdicts.pop(0)
             return {'verdict': v, 'lenses_applied': ['se'], 'criteria': [{'criterion': 'add', 'met': v == 'PASS', 'evidence': 'e'}],
                     'findings': [] if v == 'PASS' else [{'severity': 'major', 'issue': 'wrong sum', 'evidence': 'a - b'}]}, prefer, []
-        if schema is E.STRATEGY:
+        if schema is E.STRATEGY or 'decision' in schema.get('properties', {}):
             return {'decision': self.strategy, 'rationale': 'r', 'pipeline': [],
                     'runtime': {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []}}, 'claude', []
         if schema is E.DIAGNOSIS:

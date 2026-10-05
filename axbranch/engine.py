@@ -221,6 +221,7 @@ class Engine:
                 if self.store.project(pid)['state'] == stop_at:
                     self.store.event(pid, 'session_end', at_state=stop_at, reason='controlled checkpoint')
                     break
+                self.beat(pid, f"step {self.store.project(pid)['state']}")
                 getattr(self, '_' + self.store.project(pid)['state'].lower())(pid)
                 self.write_handoff(pid)
         except (Rejected, providers.Rejected) as e:
@@ -243,6 +244,7 @@ class Engine:
         self.log(f'{who} -> {prefer}')
         p = self.store.project(pid)
         self.store.event(pid, 'call_start', who=who, preferred=prefer, state=p['state'], iteration=p['iteration'])
+        self.beat(pid, f'call {who} ({prefer})')
         activity = self.workspace / 'projects' / pid / 'ACTIVITY.json'
         base = {'project': pid, 'agent': who, 'state': p['state'], 'iteration': p['iteration'],
                 'preferred': prefer, 'started_at': time.strftime('%Y-%m-%d %H:%M:%S'), 'os_pid': os.getpid()}
@@ -268,6 +270,7 @@ class Engine:
         if notes:
             self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, notes=notes)
         self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started))
+        self.beat(pid, f'call done {who} ({used})')
         return result, used
 
     # ---- states
@@ -573,13 +576,35 @@ class Engine:
         with self.store.tx():
             self.store.update(pid, iteration=p['iteration'] + 1)
             self.store.set_state(pid, 'REWORK', reason=f'verification FAIL #{fails}')
-        if fails % gov.STRATEGY_EVERY == 0:
+        repeated = self._repeated_failure(pid)
+        if repeated and any(e['detail'].get('why') == repeated for e in self.store.events(pid, {'decision'})
+                            if e['detail'].get('what') == 'repeated failure signature'):
+            repeated = None          # already forced a change for this cause once; do not flip back and forth
+        if repeated:
+            # Same root cause twice in a row: retrying the same way is waste (v10-v15 on P-bbad3c).
+            self.store.event(pid, 'decision', what='repeated failure signature', why=repeated, by='engine')
+            self._strategy(pid, recovery_note=f'The same root cause failed twice in a row: {repeated}. '
+                                              'Continuing the same way is not allowed; change provider or approach.',
+                           forbid_continue=True)
+        elif fails % gov.STRATEGY_EVERY == 0:
             self._strategy(pid)
         if fails >= self.store.project(pid)['budget']:
             self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
                                   f'with more rounds (resume --rounds N), or change/stop the goal.')
 
-    def _strategy(self, pid, recovery_note=None):
+    def _repeated_failure(self, pid):
+        """The top blocking finding's signature when the last two FAILs share it, else None."""
+        from .supervisor import signature
+        fails = [v for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'][-2:]
+        if len(fails) < 2:
+            return None
+        sigs = []
+        for v in fails:
+            top = [f['issue'] for f in v['result'].get('findings', []) if f['severity'] in ('critical', 'major')]
+            sigs.append(signature(top[0])[:60] if top else None)
+        return sigs[0] if sigs[0] and sigs[0] == sigs[1] else None
+
+    def _strategy(self, pid, recovery_note=None, forbid_continue=False):
         p = self.store.project(pid)
         latest, confirmed = self._baselines(pid)
         context = {'owner_goal': p['goal'], 'plan': p['plan'],
@@ -594,8 +619,12 @@ class Engine:
                                             for v in self.store.verifications(pid)],
                    'available_providers': providers.available() or list(gov.PROVIDERS),
                    'provider_track_record': metrics.provider_record(self.store)}
+        schema = STRATEGY
+        if forbid_continue:
+            schema = json.loads(json.dumps(STRATEGY))
+            schema['properties']['decision']['enum'] = ['switch_provider', 'change_pipeline']
         decision, used = self._ask(pid, 'CEO', STRATEGY_SYSTEM, 'Review strategy after repeated failure.',
-                                   context, STRATEGY, prefer='claude')
+                                   context, schema, prefer='claude')
         plan = p['plan']
         with self.store.tx():
             if decision['decision'] == 'switch_provider':
@@ -640,6 +669,16 @@ class Engine:
             return self._owner_rework(pid)
         self.store.set_state(pid, 'STAFFING', reason='rebuild')
 
+    def beat(self, pid, detail):
+        """Engine heartbeat (deterministic): which process is working on what, and when it last moved."""
+        folder = self.workspace / 'projects' / pid
+        folder.mkdir(parents=True, exist_ok=True)
+        data = json.dumps({'os_pid': os.getpid(), 'at': time.time(), 'detail': detail,
+                           'state': self.store.project(pid)['state']}, ensure_ascii=False)
+        tmp = folder / 'HEARTBEAT.tmp'
+        tmp.write_text(data, encoding='utf-8')
+        os.replace(tmp, folder / 'HEARTBEAT.json')
+
     def _python(self):
         return sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
 
@@ -654,7 +693,9 @@ class Engine:
         with tempfile.TemporaryDirectory(prefix='axb-run-', ignore_cleanup_errors=True) as cwd:
             artifacts.materialize(artifact, cwd)
             rel = entry if artifact['kind'] == 'bundle' else Path(artifact['path']).name
-            return runtime.check(spec or runtime.DEFAULT, rel, python, cwd)
+            pid = artifact.get('project_id')
+            return runtime.check(spec or runtime.DEFAULT, rel, python, cwd,
+                                 on_step=(lambda detail: self.beat(pid, detail)) if pid else None)
 
     def _owner_rework(self, pid):
         """Owner reported a problem/change: reproduce, let the CEO diagnose, revise the SAME project's plan."""
@@ -751,7 +792,9 @@ class Engine:
                     self.store.decide_approval(pid, a['action'], a['subject'], approve)
                 if not approve:      # back to the CEO: deliver without that access
                     names = ', '.join(a['subject'] for a in pending)
-                    text = f'Owner declined external connection(s) to {names}. Deliver without them.'
+                    text = (f'Owner declined THESE SPECIFIC external connections: {names}. Do not use them. This is '
+                            'not a ban on all network access: follow the Owner guidance below and propose acceptable '
+                            'sources instead (they will be asked for approval).')
                     if note.strip():
                         text += ' Owner guidance: ' + note.strip()
                     self.store.add_feedback(pid, p['iteration'], 'request', text)

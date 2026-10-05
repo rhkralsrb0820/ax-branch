@@ -4,6 +4,7 @@ and always shows the persisted truth."""
 import gc
 import os
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
@@ -27,6 +28,7 @@ class App(tk.Tk):
         self.running = {}            # pid -> cancel Event
         self.selected = None
         self._notice = ['']           # set by worker threads, shown by the Tk thread
+        self._last_supervision = 0.0
 
         top = ttk.Frame(self, padding=8); top.pack(fill='x')
         ttk.Label(top, text='Goal', font=('Malgun Gothic', 11, 'bold')).pack(anchor='w')
@@ -86,6 +88,7 @@ class App(tk.Tk):
         if not goal:
             return
         self.selected = self.store.new_project(goal)
+        self._owner_action('new')
         self.goal.delete('1.0', 'end')
         self._launch(self.selected)
 
@@ -138,6 +141,7 @@ class App(tk.Tk):
         engine = self.engine_factory()
         try:
             engine.decide_network(self.selected, approve)
+            self._owner_action('approve')
         except Exception as e:
             messagebox.showwarning('AX Branch', str(e))
             return
@@ -152,6 +156,7 @@ class App(tk.Tk):
         engine = self.engine_factory()
         try:
             p = engine.owner_review(self.selected, works, text, finish)
+            self._owner_action('review')
         except Exception as e:
             messagebox.showwarning('AX Branch', str(e))
             return False
@@ -215,7 +220,30 @@ class App(tk.Tk):
                     self.list.selection_set(i)
         self.show()
         self.status.config(text=self._notice[0] or f'실행 중 {len(self.running)}건')
+        if time.monotonic() - self._last_supervision > 30:
+            self._last_supervision = time.monotonic()
+            self.supervise()
         self._tick = self.after(1500, self.refresh)
+
+    def supervise(self):
+        """The window is the supervisor while it is open: stalled or failed work is detected and recovered
+        here (bounded), so the Owner never has to diagnose a run in a terminal."""
+        from . import supervisor
+        engine = self.engine_factory()
+        try:
+            for pid in supervisor.candidates(engine.store):
+                if pid in self.running and supervisor.status(self.workspace, engine.store, pid)['status'] == 'ACTIVE':
+                    continue
+                supervisor.supervise(engine, pid, launch=self._launch,
+                                     stop=lambda p, w: supervisor.stop_worker(w, self.running, p))
+        except Exception as e:                       # supervision must never take the window down
+            self._notice[0] = f'supervisor: {type(e).__name__}: {e}'
+        finally:
+            engine.store.close()
+
+    def _owner_action(self, action):
+        if self.selected:
+            self.store.event(self.selected, 'owner_action', action=action, channel='app')
 
     def show(self):
         if not self.selected:

@@ -11,12 +11,14 @@
                                                  Owner review: does it work? / what next (plain language)
   python -m axbranch approve <id> --network yes|no   decide pending external connections
   python -m axbranch replan <id> --reason "..."  recovery: CEO strategy review for a stuck/misdirected project
+  python -m axbranch supervise [--watch]          automatic stall detection and bounded recovery
   python -m axbranch effort [<id>]                Owner Effort KPI (measured / estimated / unknown)
   python -m axbranch upgrade-proposal           draft only, and only if Owner satisfaction >= 90%
 """
 import argparse
 import json
 import sys
+import time
 
 from . import __version__
 from .engine import open_engine
@@ -43,6 +45,7 @@ def main(argv=None):
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
     sub.add_parser('upgrade-proposal')
     ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
+    sv = sub.add_parser('supervise'); sv.add_argument('--watch', action='store_true')
     rv = sub.add_parser('review'); rv.add_argument('id')
     gv = rv.add_mutually_exclusive_group()
     gv.add_argument('--works', action='store_true', help='it runs correctly')
@@ -63,6 +66,15 @@ def main(argv=None):
 
 
 def _dispatch(a):
+    if a.cmd in ('run', 'resume', 'review', 'approve', 'replan', 'finish') and getattr(a, 'id', None):
+        from .supervisor import channel
+        from .state import Store
+        from . import DB_PATH
+        s = Store(DB_PATH)
+        try:
+            s.event(a.id, 'owner_action', action=a.cmd, channel=channel())
+        finally:
+            s.close()
 
     if a.cmd in (None, 'gui'):
         from .gui import main as gui
@@ -106,6 +118,20 @@ def _dispatch(a):
         p = engine.decide_network(a.id, a.network == 'yes', a.note)
         print(f"[{p['id']}] external connection(s) {'approved' if a.network == 'yes' else 'declined'}; "
               f"continue with: python -m axbranch resume {p['id']}")
+    elif a.cmd == 'supervise':
+        from . import supervisor
+        while True:
+            for pid in supervisor.candidates(store):
+                rec = supervisor.status(engine.workspace, store, pid)
+                action = supervisor.supervise(engine, pid,
+                                              launch=lambda p: supervisor.launch_detached(engine.workspace, p),
+                                              stop=lambda p, w: supervisor.stop_worker(w, pid=p))
+                print(f"{pid} [{rec['status']}] {rec['reason'][:120]}" + (f' -> {action}' if action else ''))
+            if not a.watch or not any(supervisor.status(engine.workspace, store, p)['status'] in
+                                      ('ACTIVE', 'RECOVERING', 'STALLED', 'FAILED', 'WAITING_FOR_PROVIDER')
+                                      for p in supervisor.candidates(store)):
+                break
+            time.sleep(30)
     elif a.cmd == 'effort':
         from .metrics import effort
         print(json.dumps(effort(store, a.id), ensure_ascii=False, indent=2))

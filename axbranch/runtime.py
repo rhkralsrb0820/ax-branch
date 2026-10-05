@@ -90,7 +90,7 @@ def _contains(text, needles):
     return missing
 
 
-def check(spec, entry_path, python, cwd):
+def check(spec, entry_path, python, cwd, on_step=None):
     """Run the spec against the artifact copied in cwd. Returns an evidence dict with 'ok'."""
     spec, corrections = normalize(spec)
     mode = spec.get('mode', 'cli')
@@ -121,6 +121,8 @@ def check(spec, entry_path, python, cwd):
             problems += _present(out, probe)
             step.update(ok=not problems, problems=problems)
             ev['steps'].append(step)
+            if on_step:
+                on_step(f"runtime: {step['name']}")
         ev['ok'] = all(s['ok'] for s in ev['steps'])
         return ev
     port = free_port()
@@ -145,6 +147,8 @@ def check(spec, entry_path, python, cwd):
             probes = spec.get('probes', [])
             for probe in probes:
                 ev['steps'].append(_rendered(port, probe) if probe.get('http_method') == 'BROWSER' else _http(port, probe))
+                if on_step:
+                    on_step(f"runtime: {probe['name']}")
             first_http = next((pr for pr in probes if pr.get('http_method') != 'BROWSER'), None)
             if first_http:   # still serving after the flow, and the first page still answers
                 again = _http(port, {**first_http, 'name': f"{first_http['name']} (again after flow)"})
