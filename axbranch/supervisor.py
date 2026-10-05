@@ -29,6 +29,7 @@ HEARTBEAT_STALE = 600     # s without any engine heartbeat between provider call
 OUTPUT_STALE = 900        # s without CLI output while a provider call is in flight -> stalled
 TIMEOUT_GRACE = 300       # a call past its own timeout by this much means the timeout did not fire
 MAX_RECOVERIES = 5        # per project, all signatures together
+RECOVERING_STALE = 300    # s: a RECOVERING marker older than this was left by a crashed supervisor
 OWNER_STATES = ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL')
 
 
@@ -96,8 +97,11 @@ def _classify(p, rec, act, beat, folder, workspace, now):
         if reason.startswith(('Rejected', 'Internal error')):
             return 'FAILED', reason[:200]
         return 'PAUSED', reason[:200]
-    if (folder / 'RECOVERING').exists():
-        return 'RECOVERING', (folder / 'RECOVERING').read_text(encoding='utf-8')[:200]
+    marker = folder / 'RECOVERING'
+    if marker.exists():
+        if now - marker.stat().st_mtime < RECOVERING_STALE:
+            return 'RECOVERING', marker.read_text(encoding='utf-8')[:200]
+        marker.unlink(missing_ok=True)         # left by a crashed supervisor: never let it block recovery
     if not _held(workspace, p['id']):
         return 'STALLED', f'{state} but no engine session is running it (process gone)'
     if act:
@@ -129,8 +133,12 @@ def supervise(engine, pid, launch, stop):
         if p['state'] != 'PAUSED':
             stop(pid, rec['worker_pid'])
             _settle(engine, pid)
-        engine.store.pause(pid, f"NEEDS_DECISION: automatic recovery did not resolve '{sig}' "
-                                f"({len(seen)} same-signature attempts, {total} total). The Owner decides how to continue.")
+        reason = (f"NEEDS_DECISION: automatic recovery did not resolve '{sig}' "
+                  f"({len(seen)} same-signature attempts, {total} total). The Owner decides how to continue.")
+        if store.project(pid)['state'] == 'PAUSED':
+            store.update(pid, pause_reason=reason)      # pause() is a no-op on an already paused project
+        else:
+            store.pause(pid, reason)
         store.event(pid, 'recovery', signature=sig, action='needs_owner_decision', attempt=len(seen) + 1)
         return 'needs_owner_decision'
     (folder / 'RECOVERING').write_text(f"{rec['status']}: {rec['reason']} -> recovering", encoding='utf-8')
@@ -138,6 +146,10 @@ def supervise(engine, pid, launch, stop):
         if rec['status'] == 'STALLED' and _held(workspace, pid):
             stop(pid, rec['worker_pid'])             # hung worker: end its whole tree first
         _settle(engine, pid)
+        if _held(workspace, pid):
+            # The old worker has not let go yet: launching now would start a second session.
+            store.event(pid, 'recovery', signature=sig, action='waiting_for_stop', attempt=len(seen) + 1)
+            return 'waiting_for_stop'
         action = 'resume'
         if seen:                                     # same failure again: change the approach, not retry
             action = 'replan+resume'
