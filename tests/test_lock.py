@@ -55,6 +55,22 @@ class LockTests(unittest.TestCase):
         worker.join(10)
         self.assertEqual(self.store.project(pid)['state'], 'OWNER_REVIEW')
 
+    def test_liveness_labels_from_recorded_state(self):
+        ws = self.tmp / 'ws'
+        pid = self.store.new_project('make an add tool')
+        self.store.set_state(pid, 'PLANNING')
+        self.assertEqual(E.liveness(ws, self.store, pid)[0], 'STALLED')          # active, nobody running it
+        with run_lock(ws / 'projects' / pid / 'run.lock'):
+            self.assertEqual(E.liveness(ws, self.store, pid)[0], 'WORKING')      # a session holds it
+            (ws / 'projects' / pid / 'ACTIVITY.json').write_text(
+                '{"agent": "CEO", "provider": "claude", "waiting": "all 2 provider slots busy"}', encoding='utf-8')
+            self.assertEqual(E.liveness(ws, self.store, pid)[0], 'WAITING')
+            (ws / 'projects' / pid / 'ACTIVITY.json').write_text(
+                '{"agent": "CEO", "provider": "claude", "idle": 900, "elapsed": 950}', encoding='utf-8')
+            self.assertEqual(E.liveness(ws, self.store, pid)[0], 'STALLED')      # no output for 15 min
+        self.store.pause(pid, 'Owner stopped the run')
+        self.assertEqual(E.liveness(ws, self.store, pid)[0], 'PAUSED')
+
     def test_other_process_holds_lock_and_crash_releases_it(self):
         lock = self.tmp / 'run.lock'
         holder = subprocess.Popen([sys.executable, '-c', HOLD, str(lock), str(Path(__file__).resolve().parents[1])],

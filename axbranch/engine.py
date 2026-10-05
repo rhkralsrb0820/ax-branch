@@ -865,3 +865,35 @@ def git_state(repo=Path(__file__).resolve().parents[1]):
 
 def open_engine(workspace=WORKSPACE, **kwargs):
     return Engine(Store(Path(workspace) / 'axbranch.sqlite3'), workspace=workspace, **kwargs)
+
+
+STALL_AFTER = 600   # seconds without any CLI output while a call is in flight
+
+
+def liveness(workspace, store, pid):
+    """WORKING / WAITING / STALLED / FAILED / PAUSED / IDLE / DONE for one project, from recorded
+    state only (lock, live activity file, events) — no model involved. Returns (label, detail)."""
+    from .state import Busy, run_lock
+    p = store.project(pid)
+    if p['state'] == 'PAUSED':
+        failed = store.events(pid, {'call_failed'})
+        return ('FAILED' if failed and 'Rejected' in (p['pause_reason'] or '') else 'PAUSED'), (p['pause_reason'] or '')[:160]
+    if p['state'] not in ACTIVE:
+        return ('DONE' if p['state'] == 'CLOSED' else 'IDLE'), f"waiting for the Owner ({p['state']})"
+    try:
+        with run_lock(Path(workspace) / 'projects' / pid / 'run.lock'):
+            held = False
+    except Busy:
+        held = True
+    if not held:
+        return 'STALLED', f"state {p['state']} but no engine session is running it (run or resume it)"
+    a = activity(workspace, pid)
+    if a is None:
+        return 'WORKING', f"engine running ({p['state']}), between calls"
+    who = f"{a['agent']} on {a.get('provider')}"
+    if a.get('waiting'):
+        return 'WAITING', f"{who}: {a['waiting']}"
+    if (a.get('idle') or 0) > STALL_AFTER:
+        return 'STALLED', f"{who}: no output for {a['idle']} s (call {a.get('elapsed')} s, started {a.get('started_at')})"
+    return 'WORKING', (f"{who}: call started {a.get('started_at')}, {a.get('elapsed')} s, "
+                       f"last output {a.get('idle')} s ago, version v{p['iteration']}")

@@ -83,13 +83,11 @@ def _dispatch(a):
         if a.id:
             print(json.dumps(store.handoff(a.id), ensure_ascii=False, indent=2))
         else:
-            from .engine import activity
+            from .engine import liveness
             for p in store.projects():
-                print(f"{p['id']}  {p['state']:<25} v{p['iteration']}  {p['goal'][:70]}")
-                a = activity(engine.workspace, p['id'])
-                if a:
-                    print(f"    ▶ {a['agent']} on {a.get('provider')} (CLI pid {a.get('pid', '-')}): "
-                          f"{a.get('elapsed', 0)}s elapsed, {a.get('output_bytes', 0)} B output, last output {a.get('idle', 0)}s ago")
+                label, detail = liveness(engine.workspace, store, p['id'])
+                print(f"{p['id']}  {p['state']:<25} v{p['iteration']}  {p['goal'][:60]}")
+                print(f"    [{label}] {detail}")
     elif a.cmd == 'resume':
         store.resume(a.id, a.rounds)
         _show(engine.run(a.id))

@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
 from . import WORKSPACE, __version__
-from .engine import activity, open_engine
+from .engine import activity, liveness, open_engine
 from .state import Busy, Store
 
 FONT = ('Malgun Gothic', 10)
@@ -224,6 +224,8 @@ class App(tk.Tk):
         p = self.store.project(self.selected)
         lines = [f"[{h['project_id']}] {h['state']}" + (f"  ⏸ {h['pause_reason']}" if h['pause_reason'] else ''),
                  f"Goal: {h['goal']}", f"다음: {h['next_action']}"]
+        label, detail = liveness(self.workspace, self.store, self.selected)
+        lines.append(f"상태: [{label}] {detail}")
         a = activity(self.workspace, self.selected)
         if a:
             lines.append(f"▶ 진행 중: {a['agent']} · {a.get('provider')} (CLI pid {a.get('pid', '-')}) · 경과 {a.get('elapsed', 0)}초 · "
