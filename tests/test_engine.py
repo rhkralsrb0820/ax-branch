@@ -399,6 +399,30 @@ class EngineTests(unittest.TestCase):
         self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS'])   # no rebuild
         self.assertEqual(len(self.store.events(pid, {'harness_retry'})), 1)
 
+    def test_feedback_loop_is_generic_math_proof_document(self):
+        proof1 = '# Proof that sqrt(2) is irrational\n' + 'Step 1. Assume sqrt(2)=p/q in lowest terms.\n' * 8
+        proof2 = proof1 + 'Step 3 (re-verified by an independent method: infinite descent).\n' * 6
+        script = Script([proof1, proof2], ['PASS', 'PASS'])
+        base = Script.__call__
+
+        def as_document(self_, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
+            result = base(self_, prompt, schema, prefer, web, cancel, **kw)
+            if schema in (E.PLAN, E.DIAGNOSIS):
+                result[0].update(artifact_kind='markdown', artifact_filename='proof.md',
+                                 runtime={'mode': 'none', 'owner_launch': 'read it', 'launch_args': [], 'probes': []})
+            return result
+        with mock.patch.object(Script, '__call__', as_document):
+            eng = self.engine(script)
+            pid = self.store.new_project('수학 난제 하나 풀어봐')
+            self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+            p = eng.owner_review(pid, text='3번째 논리가 부족한 것 같은데 다른 방법으로 다시 검증해줘.')
+            self.assertEqual(p['state'], 'REWORK')
+            self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')     # same project, verified again
+        diagnosis = next(pr for s, _, pr in script.prompts if s is E.DIAGNOSIS)
+        self.assertIn('3번째 논리가 부족한', diagnosis)
+        self.assertEqual(len(self.store.projects()), 1)
+        self.assertIn('infinite descent', Path(self.store.artifacts(pid)[-1]['path']).read_text(encoding='utf-8'))
+
     def test_external_connection_waits_for_owner_approval(self):
         script = Script([GOOD], ['PASS'])
         script.network = [{'domain': 'query1.finance.example', 'purpose': 'daily prices'}]
