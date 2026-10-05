@@ -1,0 +1,12 @@
+{
+  "id": "failed-call-observability",
+  "task_type": "bounded bug fix across two modules + tests",
+  "goal": "Every provider call must leave an observable record, including calls that fail. Found 2026-10-05 on project P-20261003-bbad3c: (1) a Claude call and a Codex call each timed out after 1800 s, but only `call_start` events exist — no completion record with duration or failure; (2) the call preferred Claude, switched to Codex, and Codex then timed out: the reason Claude was skipped (likely a usage limit) was lost, because providers.call only returns switch notes on success.",
+  "task": "(a) In axbranch/providers.py: when every attempted provider fails, the raised exception must carry the switch notes collected so far. Keep the existing exception types (RateLimited when all were quota refusals; otherwise the original Rejected), but make the notes available, e.g. as an attribute `notes` on the raised exception and appended to its message. (b) In axbranch/engine.py Engine._ask: when self.llm raises, record a `call_failed` event with who, preferred provider, seconds elapsed, the error text (truncated to 500 chars) and the switch notes if present, then re-raise unchanged. Successful calls keep their existing `call` event. (c) Tests: providers.call with claude raising RateLimited and codex raising Rejected('timeout') -> the raised exception's notes mention claude's quota refusal; an engine run whose llm raises at BUILD produces a call_failed event with who/preferred/seconds/error, and the project still pauses as before.",
+  "relevant_files": ["axbranch/providers.py", "axbranch/engine.py", "tests/test_engine.py", "AGENTS.md"],
+  "allowed_files": ["axbranch/providers.py", "axbranch/engine.py", "tests/test_engine.py"],
+  "contract": "providers.call(prompt, schema, prefer, web, cancel, on_tick) -> (result, provider_used, notes) unchanged on success. Engine.run still pauses on Rejected/RateLimited exactly as before (no retry added, timeout policy unchanged: timeout -> pause). Event names `call_start` and `call` unchanged; add only `call_failed`.",
+  "constraints": "Standard library only. Minimal change; match surrounding style. No change to timeout values, provider order or failover rules. Do not touch other files.",
+  "acceptance_tests": ["python -X utf8 -m unittest tests.test_engine"],
+  "expected_output": "Failed calls produce call_failed events with duration and preserved switch notes; tests added and passing; full suite passing."
+}
