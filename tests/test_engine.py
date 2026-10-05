@@ -413,6 +413,29 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
         self.assertEqual(self.store.approvals(pid)[0]['status'], 'approved')
 
+    def test_approved_public_read_access_is_reused_by_a_later_project(self):
+        sec = {'domain': 'data.sec.gov', 'purpose': 'official company facts', 'risk': 'public_read'}
+        first = Script([GOOD], ['PASS'])
+        first.network = [sec]
+        eng = self.engine(first)
+        p1 = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(p1)['state'], 'PAUSED')                 # first time: the Owner is asked
+        eng.decide_network(p1, True)
+        self.store.resume(p1)
+        self.assertEqual(eng.run(p1)['state'], 'OWNER_REVIEW')
+        second = Script([GOOD], ['PASS'])
+        second.network = [dict(sec)]
+        eng.llm = second
+        p2 = self.store.new_project('another tool using the same public data')
+        self.assertEqual(eng.run(p2)['state'], 'OWNER_REVIEW')            # same low-risk scope: not asked again
+        self.assertEqual(len(self.store.events(p2, {'approval_reused'})), 1)
+        third = Script([GOOD], ['PASS'])
+        third.network = [{**sec, 'purpose': 'company facts with my API key'}]   # riskier: asks again
+        eng.llm = third
+        p3 = self.store.new_project('a tool that needs a key')
+        self.assertEqual(eng.run(p3)['state'], 'PAUSED')
+        self.assertIn('[api_key]', eng.store.project(p3)['pause_reason'])
+
     def test_declined_connection_goes_back_to_the_ceo(self):
         script = Script([GOOD], ['PASS'])
         script.network = [{'domain': 'query1.finance.example', 'purpose': 'daily prices'}]

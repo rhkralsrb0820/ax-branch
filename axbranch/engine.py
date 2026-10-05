@@ -17,7 +17,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, metrics, providers, runtime, sandbox
+from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, metrics, permissions, providers, runtime, sandbox
 from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
@@ -39,11 +39,11 @@ def ENUM(*values):
 STAGE = S(name=STR, agent_role=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
 PLAN = S(interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
-         runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR)), pipeline=ARR(STAGE))
+         runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE))
 DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=STR,
               artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
-              network_access=ARR(S(domain=STR, purpose=STR)), pipeline=ARR(STAGE))
+              network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE))
 WORK = S(output=STR, key_points=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), edits=ARR(S(path=STR, find=STR, replace=STR)),
           summary=STR, changes_from_previous=STR)
@@ -99,7 +99,8 @@ Rules:
   not touch files outside its working directory, and must not use the network unless the access is
   declared in network_access.
 - network_access: every internet domain the DELIVERED program must contact at run time, with its
-  purpose ([] if none). List ONLY what the finished program itself contacts; sites your research stages
+  purpose and risk ([] if none): risk = public_read (no login, no key, no payment, no personal data, no
+  posting), api_key, login, paid, personal_data or posting. List ONLY what the finished program itself contacts; sites your research stages
   read (stages with web=true) are not listed. Each new domain is an external connection that needs the Owner's approval;
   the build waits for it. Prefer no network when the goal can be met well without it; free public
   sources only (no API keys, no paid services). The self-test must not need the network.
@@ -323,10 +324,19 @@ class Engine:
     def _staffing(self, pid):
         plan = self.store.project(pid)['plan']
         waiting = []
+        # Permission reuse: public read-only domains the Owner already approved need no new approval;
+        # anything riskier (or new) still asks. Classification fails closed (permissions.py).
+        split = permissions.evaluate(self.store, plan.get('network_access') or [])
         with self.store.tx():
-            for access in plan.get('network_access') or []:
-                if self.store.request_approval(pid, 'external_connection', access['domain'], access['purpose']) != 'approved':
-                    waiting.append(f"{access['domain']} ({access['purpose']})")
+            for access in split['reused']:
+                if self.store.request_approval(pid, 'external_connection', access['domain'], access['purpose']) == 'pending':
+                    self.store.decide_approval(pid, 'external_connection', access['domain'], True)
+                    self.store.event(pid, 'approval_reused', domain=access['domain'], risk='public_read')
+            for access in split['ask']:
+                risk = permissions.classify(access)
+                if self.store.request_approval(pid, 'external_connection', access['domain'],
+                                               f"[{risk}] {access['purpose']}") != 'approved':
+                    waiting.append(f"{access['domain']} [{risk}] ({access['purpose']})")
         if waiting:
             # Governance: a new external connection of the delivered program needs the Owner.
             self.store.pause(pid, 'Owner approval needed (external_connection): the program would contact '
@@ -790,6 +800,9 @@ class Engine:
             with self.store.tx():
                 for a in pending:
                     self.store.decide_approval(pid, a['action'], a['subject'], approve)
+                if approve:          # public read-only approvals become reusable for later projects
+                    planned = {e['domain']: e for e in (p['plan'] or {}).get('network_access') or []}
+                    permissions.grant(self.store, pid, [planned[a['subject']] for a in pending if a['subject'] in planned])
                 if not approve:      # back to the CEO: deliver without that access
                     names = ', '.join(a['subject'] for a in pending)
                     text = (f'Owner declined THESE SPECIFIC external connections: {names}. Do not use them. This is '
