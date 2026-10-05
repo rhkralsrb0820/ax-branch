@@ -720,15 +720,17 @@ class Engine:
     def _owner_rework(self, pid):
         """Owner reported a problem/change: reproduce, let the CEO diagnose, revise the SAME project's plan."""
         p = self.store.project(pid)
-        plan, last = p['plan'], self.store.artifacts(pid)[-1]
+        plan, (last, _) = p['plan'], self._baselines(pid)        # latest REAL version (None if nothing built yet)
         old_entry = plan['artifact_filename']
-        before = self.runtime_evidence(last, plan.get('runtime'), old_entry)
+        nothing = {'ok': True, 'mode': 'none', 'steps': [], 'notes': ['nothing has been built yet']}
+        before = self.runtime_evidence(last, plan.get('runtime'), old_entry) if last else nothing
         feedback = self.store.feedback(pid)
         context = {'owner_goal': p['goal'], 'current_plan': plan,
                    'owner_confirmed_working_versions': sorted({f['iteration'] for f in feedback if f['verdict'] == 'works'}),
                    'owner_feedback': [{'round': f['iteration'], 'verdict': f['verdict'], 'text': f['text'],
                                        'new': f['handled_iteration'] is None} for f in feedback],
-                   'delivered_artifact': {'path': last['path'], 'content': artifacts.text_of(last)[:60000]},
+                   'delivered_artifact': ({'path': last['path'], 'content': artifacts.text_of(last)[:60000]}
+                                          if last else None),
                    'runtime_evidence_current': before,
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
                                              'findings': v['result']['findings']} for v in self.store.verifications(pid)],
@@ -741,7 +743,7 @@ class Engine:
                                                           'network_access', 'pipeline')}})
         # Reproduce: the revised acceptance run against the version the Owner has. If the problem is
         # real, this should fail now — and the rebuilt version must pass it.
-        repro = self.runtime_evidence(last, new['runtime'], old_entry)
+        repro = self.runtime_evidence(last, new['runtime'], old_entry) if last else nothing
         failed = [f"{s['name']}: {', '.join(s['problems'])}" for s in repro['steps'] if not s['ok']]
         dropped = sorted({pr['name'] for pr in (plan.get('runtime') or {}).get('probes', [])}
                          - {pr['name'] for pr in new['runtime'].get('probes', [])})
@@ -755,7 +757,7 @@ class Engine:
             self.store.update(pid, plan=new, plan_version=p['plan_version'] + 1, budget=fails + gov.MAX_ROUNDS)
             self.store.event(pid, 'decision', what='owner feedback diagnosis',
                              why=f"{d['diagnosis']} | root cause: {d['root_cause']}", by=used)
-            self.store.event(pid, 'reproduction', version=last['iteration'], current_spec_ok=before['ok'],
+            self.store.event(pid, 'reproduction', version=last and last['iteration'], current_spec_ok=before['ok'],
                              revised_spec_ok=repro['ok'], failures=failed[:10])
             if dropped:     # transparency: probes for earlier behaviour that the revised plan no longer checks
                 self.store.event(pid, 'decision', what='runtime probes dropped by revised plan',

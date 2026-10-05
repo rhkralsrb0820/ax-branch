@@ -312,7 +312,9 @@ class Store:
     def request_approval(self, pid, action, subject, purpose):
         known = self.db.execute('SELECT status FROM approvals WHERE project_id=? AND action=? AND subject=? '
                                 'ORDER BY id DESC LIMIT 1', (pid, action, subject)).fetchone()
-        if known is None:
+        if known is None or known['status'] == 'denied':
+            # A decline answers THAT request. If a later plan proposes the same connection again, it is a new
+            # request the Owner must see — otherwise the project waits for an approval nobody can give.
             self.db.execute('INSERT INTO approvals(project_id,action,subject,purpose,status,created) VALUES(?,?,?,?,?,?)',
                             (pid, action, subject, purpose, 'pending', time.time()))
             self.event(pid, 'approval_requested', action=action, subject=subject, purpose=purpose)

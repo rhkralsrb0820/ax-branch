@@ -64,7 +64,7 @@ class Script:
                                 'probes': [{'name': 'launch shows result', 'args': [], 'stdin': '', 'http_method': '',
                                             'http_path': '', 'http_body': '', 'expect_exit': 0, 'expect_status': 0,
                                             'expect_contains': ['result: 5']}]},
-                    'network_access': [],
+                    'network_access': self.network,
                     'pipeline': [{'name': 'build', 'agent_role': 'Developer', 'instructions': 'rebuild',
                                   'provider': 'claude', 'web': False}]}, 'claude', []
         if schema is E.REPORT:
@@ -423,6 +423,21 @@ class EngineTests(unittest.TestCase):
         self.assertIn('3번째 논리가 부족한', diagnosis)
         self.assertEqual(len(self.store.projects()), 1)
         self.assertIn('infinite descent', Path(self.store.artifacts(pid)[-1]['path']).read_text(encoding='utf-8'))
+
+    def test_declined_domain_proposed_again_can_be_approved(self):
+        script = Script([LAUNCHABLE], ['PASS'])
+        script.network = [{'domain': 'data.sec.gov', 'purpose': 'facts', 'risk': 'public_read'}]
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        eng.decide_network(pid, False, 'use official sources')              # declined once
+        self.store.resume(pid)
+        p = eng.run(pid)                                                    # CEO proposes it again
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertTrue(self.store.approvals(pid, 'pending'))              # a new request the Owner can answer
+        eng.decide_network(pid, True)
+        self.store.resume(pid)
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
 
     def test_external_connection_waits_for_owner_approval(self):
         script = Script([GOOD], ['PASS'])
