@@ -1,0 +1,12 @@
+{
+  "id": "owner-escape-metric",
+  "task_type": "bounded metric + tests in one module",
+  "goal": "OWNER_ESCAPE is the key Owner Effort signal: during NORMAL project use, every time the Owner had to leave the AX Branch app (developer CLI, plain CLI/PowerShell, manual recovery) to complete or revise a project, AX Branch failed. Target: 0. Development of AX Branch itself (channel 'dev') is never counted.",
+  "task": "Extend axbranch/metrics.py effort(store, pid=None): add to MEASURED an 'owner_escapes' dict computed from 'owner_action' events (detail: {action, channel}; channels: 'app', 'cli', 'developer_cli', 'dev'): {'total': count of owner_action events with channel in ('cli','developer_cli'), 'by_channel': {...}, 'by_action': {...}, 'in_app_actions': count with channel 'app', 'excluded_development': count with channel 'dev'}. Also count as escapes the manual recovery replans already measured ONLY when their owner_action channel is not 'dev' (do not double count: count owner_action events, not recovery_replan events). Add 'automatic_recoveries' = number of 'recovery' events (supervisor, not the Owner) to MEASURED. Keep all existing keys unchanged. Tests in tests/test_metrics.py: escapes counted for cli and developer_cli, not for app or dev; per-project scoping; automatic recoveries counted separately and not as escapes.",
+  "relevant_files": ["axbranch/metrics.py", "axbranch/supervisor.py", "axbranch/__main__.py", "tests/test_metrics.py", "AGENTS.md"],
+  "allowed_files": ["axbranch/metrics.py", "tests/test_metrics.py"],
+  "contract": "effort(store, pid=None) keeps its return shape {'scope','MEASURED','ESTIMATED','UNKNOWN'}; existing MEASURED keys unchanged; new keys added only. Events are read via store.db / store.events. Standard library only.",
+  "constraints": "Do not touch other files. Small, readable change.",
+  "acceptance_tests": ["python -X utf8 -m unittest tests.test_metrics"],
+  "expected_output": "metrics.py with owner_escapes and automatic_recoveries; tests passing; full suite passing."
+}
