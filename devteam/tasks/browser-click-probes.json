@@ -1,0 +1,12 @@
+{
+  "id": "browser-click-probes",
+  "task_type": "bounded feature in one module + tests",
+  "goal": "Runtime Acceptance must be able to exercise a web page's primary flow that starts with a click, not only URL-driven pages. Today a BROWSER probe loads a URL in headless Edge (--dump-dom) and checks the rendered text; a page whose analysis only appears after clicking a button can never be verified.",
+  "task": "Add an optional click step to BROWSER probes in axbranch/runtime.py. A BROWSER probe whose http_body is non-empty treats http_body as one or more CSS selectors separated by '||'; they are clicked in order (after DOMContentLoaded, waiting up to ~5 s for each element to appear and ~300 ms between clicks) before the DOM is dumped. Implement it without changing the artifact: run a small local proxy (http.server in a thread, 127.0.0.1, free port) that forwards every request to the real server unchanged, except the HTML document for the probe path, into which it injects one <script> before </body> that performs the clicks. Point Edge at the proxy. Stop the proxy afterwards. Keep script-source stripping so injected or page code text can never satisfy expect_contains. Add tests in tests/test_runtime.py: (1) a page whose result appears only after clicking a button passes with the click selector and fails without it; (2) the injected click script text cannot satisfy expect_contains by itself.",
+  "relevant_files": ["axbranch/runtime.py", "axbranch/sandbox.py", "tests/test_runtime.py", "AGENTS.md"],
+  "allowed_files": ["axbranch/runtime.py", "tests/test_runtime.py"],
+  "contract": "runtime.check(spec, entry_path, python, cwd) and the probe schema stay the same (no new fields: the selector travels in http_body for BROWSER probes). _rendered(port, probe) keeps its return shape {name, request, ok, problems, rendered_tail}. No new dependencies; standard library only; Edge is found by runtime.browser().",
+  "constraints": "Standard library only. Bind only 127.0.0.1. The proxy must not alter any response except the probe's HTML document. Skip new browser tests when runtime.browser() is None, like the existing browser test. Do not touch other files. Keep the change small and readable.",
+  "acceptance_tests": ["python -X utf8 -m unittest tests.test_runtime"],
+  "expected_output": "runtime.py with click support via the injecting proxy, two new passing tests, full suite passing."
+}
