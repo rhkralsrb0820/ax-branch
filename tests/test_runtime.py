@@ -169,6 +169,17 @@ class RuntimeTests(unittest.TestCase):
         for needle in needles:
             self.assertNotIn(needle, step['rendered_tail'])
 
+    def test_expect_absent_catches_a_fabricated_value_that_contains_the_expected_one(self):
+        # 2026-10-05: '103 104' was merged into 103104; a probe expecting '104' still passed.
+        code = SERVER.replace('MODE', OK_MODE).replace(
+            "json.dumps({'ticker': 'DEMO', 'sma': 2.0})", "json.dumps({'ticker': 'MIXED', 'close': [102, 103104]})")
+        probe_ = {**probe('mixed separators', '/api/analyze', ['MIXED', '104']), 'expect_absent': ['103104']}
+        ev = self.check(code, {**WEB, 'probes': [probe_]})
+        self.assertFalse(ev['ok'])
+        self.assertIn("must not contain ['103104']", str(ev['steps'][1]['problems']))
+        fixed = code.replace('[102, 103104]', '[102, 103, 104]')
+        self.assertTrue(self.check(fixed, {**WEB, 'probes': [probe_]})['ok'])
+
     def test_window_must_stay_up(self):
         spec = {'mode': 'gui', 'owner_launch': 'double-click', 'launch_args': [], 'probes': []}
         self.assertTrue(self.check('import time\ntime.sleep(30)\n', spec)['ok'])

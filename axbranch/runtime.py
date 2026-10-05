@@ -32,7 +32,8 @@ def _obj(**props):
 
 
 PROBE = _obj(name=STR, args=_ARR(STR), stdin=STR, http_method={'type': 'string', 'enum': ['', 'GET', 'POST', 'BROWSER']},
-             http_path=STR, http_body=STR, expect_exit=INT, expect_status=INT, expect_contains=_ARR(STR))
+             http_path=STR, http_body=STR, expect_exit=INT, expect_status=INT, expect_contains=_ARR(STR),
+             expect_absent=_ARR(STR))
 SPEC = _obj(mode={'type': 'string', 'enum': ['none', 'cli', 'web', 'gui']}, owner_launch=STR,
             launch_args=_ARR(STR), probes=_ARR(PROBE))
 
@@ -77,6 +78,13 @@ def free_port():
         return s.getsockname()[1]
 
 
+def _present(text, probe):
+    """Problems from expect_absent: text that must NOT appear (e.g. a fabricated value or a traceback).
+    'Must contain' alone could not tell '103 104' apart from the fabricated '103104' (2026-10-05)."""
+    found = [n for n in probe.get('expect_absent', []) if n and n in text]
+    return [f'must not contain {found}'] if found else []
+
+
 def _contains(text, needles):
     missing = [n for n in needles if n not in text]
     return missing
@@ -110,6 +118,7 @@ def check(spec, entry_path, python, cwd):
             missing = _contains(out, probe.get('expect_contains', []))
             if missing:
                 problems.append(f'output lacks {missing}')
+            problems += _present(out, probe)
             step.update(ok=not problems, problems=problems)
             ev['steps'].append(step)
         ev['ok'] = all(s['ok'] for s in ev['steps'])
@@ -340,7 +349,8 @@ def _rendered(port, probe):
     text = re.sub(r'<script\b.*?</script>', ' ', dom, flags=re.S | re.I)
     text = re.sub(r'<style\b.*?</style>', ' ', text, flags=re.S | re.I)
     missing = _contains(text, probe.get('expect_contains', []))
-    step.update(ok=not missing, problems=[f'rendered page lacks {missing}'] if missing else [],
+    absent = _present(text, probe)
+    step.update(ok=not missing and not absent, problems=([f'rendered page lacks {missing}'] if missing else []) + absent,
                 rendered_tail=re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text))[-800:])
     return step
 
@@ -365,6 +375,7 @@ def _http(port, probe):
         missing = _contains(text, probe.get('expect_contains', []))
         if missing:
             problems.append(f'response lacks {missing}')
+        problems += _present(text, probe)
     except (ConnectionResetError, ConnectionAbortedError, http.client.RemoteDisconnected, BrokenPipeError) as e:
         problems.append(f'connection lost: {type(e).__name__}: {e}')
     except (OSError, http.client.HTTPException) as e:
