@@ -1,4 +1,5 @@
 """End-to-end engine behaviour with a scripted provider (no subscription usage)."""
+import json
 import shutil
 import tempfile
 import threading
@@ -25,6 +26,7 @@ class Script:
     def __init__(self, builds, verdicts, strategy='continue', fail_on=None):
         self.builds, self.verdicts, self.strategy = list(builds), list(verdicts), strategy
         self.fail_on, self.prompts = fail_on, []
+        self.network = []
 
     def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
         self.prompts.append((schema, prefer, prompt))
@@ -36,6 +38,7 @@ class Script:
                     'artifact_filename': '../evil/add tool.py', 'acceptance_criteria': ['add(2,3)==5'],
                     'verification_lenses': ['software engineering'], 'required_tools': [],
                     'runtime': {'mode': 'cli', 'owner_launch': 'double-click', 'launch_args': [], 'probes': []},
+                    'network_access': self.network,
                     'pipeline': [{'name': 'design', 'agent_role': 'Architect', 'instructions': 'design',
                                   'provider': 'codex', 'web': False},
                                  {'name': 'build', 'agent_role': 'Developer', 'instructions': 'build',
@@ -59,6 +62,7 @@ class Script:
                                 'probes': [{'name': 'launch shows result', 'args': [], 'stdin': '', 'http_method': '',
                                             'http_path': '', 'http_body': '', 'expect_exit': 0, 'expect_status': 0,
                                             'expect_contains': ['result: 5']}]},
+                    'network_access': [],
                     'pipeline': [{'name': 'build', 'agent_role': 'Developer', 'instructions': 'rebuild',
                                   'provider': 'claude', 'web': False}]}, 'claude', []
         if schema is E.REPORT:
@@ -240,8 +244,8 @@ class EngineTests(unittest.TestCase):
         pid = self.store.new_project('make an add tool')
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
         with self.assertRaises(Rejected):
-            eng.owner_review(pid, 'problem', '   ')                      # a problem needs a description
-        self.assertEqual(eng.owner_review(pid, 'problem', 'double-click closes immediately')['state'], 'REWORK')
+            eng.owner_review(pid, works=False, text='   ')               # a problem needs a description
+        self.assertEqual(eng.owner_review(pid, works=False, text='double-click closes immediately')['state'], 'REWORK')
         p = eng.run(pid)
         self.assertEqual(p['state'], 'OWNER_REVIEW')                      # back to the Owner, same project
         self.assertEqual(len(self.store.projects()), 1)
@@ -260,7 +264,8 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(p['plan_version'], 2)
         builds = [pr for s, _, pr in script.prompts if s is E.BUILD]
         self.assertIn('owner_rework', builds[-1])
-        self.assertEqual(eng.owner_review(pid, 'works')['state'], 'PENDING_CLOSE')
+        self.assertEqual(eng.owner_review(pid, works=True)['state'], 'OWNER_REVIEW')   # confirmed, still open
+        self.assertEqual(eng.owner_review(pid, finish=True)['state'], 'PENDING_CLOSE')  # only an explicit finish
 
     def test_live_activity_is_visible_during_a_call_and_cleared_after(self):
         script = Script([GOOD], ['PASS'])
@@ -281,11 +286,102 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(starts and all('who' in e['detail'] for e in starts))
         self.assertTrue(all('seconds' in e['detail'] for e in self.store.events(pid, {'call'})))
 
+    def test_works_plus_plain_language_request_reopens_without_classification(self):
+        script = Script([LAUNCHABLE, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        with self.assertRaises(Rejected):
+            eng.owner_review(pid, works=True, text='more please', finish=True)   # contradictory
+        p = eng.owner_review(pid, works=True, text='숫자 두 개를 직접 입력할 수 있으면 좋겠어요. 설명도 붙여 주세요.')
+        self.assertEqual(p['state'], 'REWORK')
+        kinds = [(f['verdict'], f['handled_iteration']) for f in self.store.feedback(pid)]
+        self.assertEqual(kinds, [('works', 1), ('request', None)])       # confirmation never pending
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        diagnoses = [pr for s, _, pr in script.prompts if s is E.DIAGNOSIS]
+        self.assertEqual(len(diagnoses), 1)          # a later verification FAIL did not re-diagnose
+        self.assertIn('숫자 두 개를 직접 입력', diagnoses[0])
+        self.assertIn('"owner_confirmed_working_versions": [\n  1\n ]', diagnoses[0])
+        self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS', 'FAIL', 'PASS'])
+
+    def test_every_rework_stage_sees_the_current_version(self):
+        script = Script([LAUNCHABLE, LAUNCHABLE], ['PASS', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        original_diagnosis = Script.__call__
+
+        def two_stage(self_, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
+            result = original_diagnosis(self_, prompt, schema, prefer, web, cancel, **kw)
+            if schema is E.DIAGNOSIS:
+                result[0]['pipeline'] = [{'name': 'design', 'agent_role': 'Architect', 'instructions': 'design',
+                                          'provider': 'codex', 'web': False}] + result[0]['pipeline']
+            return result
+        with unittest.mock.patch.object(Script, '__call__', two_stage):
+            eng.owner_review(pid, works=True, text='please add an explanation line')
+            eng.run(pid)
+        notes = [pr for s, _, pr in script.prompts if s is E.WORK]
+        self.assertIn("print('result:', add(2, 3))", notes[-1].replace('\\n', '\n'))   # v1 source given to design
+        self.assertIn('please add an explanation line', notes[-1])
+
+    def test_empty_build_fails_without_verification_and_never_becomes_the_baseline(self):
+        script = Script([LAUNCHABLE, '', LAUNCHABLE], ['PASS', 'PASS'])     # v2 build comes back empty
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        eng.owner_review(pid, works=True, text='add an explanation line')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual(len(self.store.events(pid, {'build_rejected'})), 1)
+        self.assertEqual(sum(s is E.VERDICT for s, _, _ in script.prompts), 2)      # empty build: no verifier call
+        self.assertEqual([a['iteration'] for a in self.store.artifacts(pid)], [1, 3])   # no empty artifact stored
+        rebuild = [pr for s, _, pr in script.prompts if s is E.BUILD][-1]
+        self.assertIn("print('result:', add(2, 3))", rebuild.replace('\\n', '\n'))      # baseline = real v1
+
+    def test_recovery_replan_reviews_strategy_and_keeps_history(self):
+        script = Script([GOOD], ['PASS'], fail_on=E.BUILD)              # interrupted mid-build -> PAUSED
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'PAUSED')
+        p = eng.replan(pid, 'earlier stages lacked the source; use the best candidate')
+        self.assertEqual(p['state'], 'REWORK')
+        strategy = [pr for s, _, pr in script.prompts if s is E.STRATEGY][-1]
+        self.assertIn('earlier stages lacked the source', strategy)
+        self.assertIn('best_candidate_version', strategy)
+        self.assertEqual(len(self.store.events(pid, {'recovery_replan'})), 1)
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+
+    def test_external_connection_waits_for_owner_approval(self):
+        script = Script([GOOD], ['PASS'])
+        script.network = [{'domain': 'query1.finance.example', 'purpose': 'daily prices'}]
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertEqual((p['state'], p['resume_state']), ('PAUSED', 'STAFFING'))
+        self.assertIn('external_connection', p['pause_reason'])
+        self.assertFalse(any(s is E.BUILD for s, _, _ in script.prompts))      # nothing built before approval
+        eng.decide_network(pid, True)
+        self.store.resume(pid)
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        self.assertEqual(self.store.approvals(pid)[0]['status'], 'approved')
+
+    def test_declined_connection_goes_back_to_the_ceo(self):
+        script = Script([GOOD], ['PASS'])
+        script.network = [{'domain': 'query1.finance.example', 'purpose': 'daily prices'}]
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        p = eng.decide_network(pid, False)
+        self.assertEqual(p['resume_state'], 'REWORK')
+        self.assertIn('declined', self.store.feedback(pid)[-1]['text'])
+        self.assertEqual(self.store.approvals(pid)[0]['status'], 'denied')
+
     def test_review_only_for_delivered_projects(self):
         eng = self.engine(Script([GOOD], ['PASS']))
         pid = self.store.new_project('make an add tool')
         with self.assertRaises(Rejected):
-            eng.owner_review(pid, 'works')
+            eng.owner_review(pid, works=True)
 
     def test_illegal_transition(self):
         pid = self.store.new_project('x')
@@ -314,6 +410,16 @@ class ProviderTests(unittest.TestCase):
                 mock.patch.object(providers.shutil, 'which', return_value='x'):
             with self.assertRaises(providers.Rejected):
                 providers.call('p', {}, prefer='claude')     # a non-quota fault never spends the other plan
+
+    def test_claude_stream_result_is_found_and_quota_still_detected(self):
+        ok = ('{"type":"system","subtype":"init"}\n{"type":"stream_event","event":{"delta":"x"}}\n'
+              '{"type":"result","subtype":"success","is_error":false,"structured_output":{"a":1}}\n')
+        self.assertEqual(json.loads(providers._claude_result(ok))['structured_output'], {'a': 1})
+        limited = ('{"type":"system"}\n{"type":"result","is_error":true,'
+                   '"result":"You\'ve hit your session limit - resets 9:10pm"}\n')
+        with self.assertRaises(providers.RateLimited):
+            providers._check_rate_limit(providers._claude_failure_text(providers._claude_result(limited)))
+        self.assertIn('boom', providers._claude_result('not json at all: boom'))
 
     def test_gai_read_only(self):
         import sqlite3

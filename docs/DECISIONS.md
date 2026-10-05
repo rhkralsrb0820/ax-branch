@@ -47,3 +47,12 @@ also requires the artifact to work when launched the way the Owner launches it. 
 **D14 (0.1.8) Owner feedback reopens the same project.** History, agents and knowledge are kept; the
 engine reproduces the problem and the CEO diagnoses before any rebuild. Normal rework never spawns a
 new project.
+
+**D15 (0.1.9) "Does it work?" and "What next?" are separate questions.** A working version can still
+be improved; confirming it works must not close or freeze the project. The Owner writes plain
+language and the CEO interprets it into requirements, pipeline and agents. Closure only on an explicit
+finish.
+
+**D16 (0.1.9) A delivered program's new external connections need the Owner.** Added
+`external_connection` to the Owner-only actions (tightening, per the Owner's governance list). The CEO
+declares domains; the engine waits for approval before building.

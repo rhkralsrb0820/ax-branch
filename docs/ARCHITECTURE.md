@@ -28,8 +28,11 @@ Owner ── GUI / CLI ──► Engine (淸月 AI CEO driver) ──► provide
 ## Lifecycle
 
 `CREATED → PLANNING → STAFFING → EXECUTING → VERIFYING → (REWORK → STAFFING → EXECUTING → VERIFYING)* → OWNER_REVIEW → PENDING_CLOSE → ARCHIVE_PENDING_APPROVAL → ARCHIVING → CLOSED`;
-**Owner review loop (0.1.8):** in OWNER_REVIEW the Owner reports *works* (→ PENDING_CLOSE), *problem* or
-*change* (→ REWORK on the same project, history kept). In REWORK with new Owner feedback the engine first
+**Owner review loop (0.1.8, redesigned 0.1.9):** OWNER_REVIEW asks two separate questions:
+(1) does it work? (works / does not work / not tested) and (2) what next? — free text in the Owner's own
+words (changes, features, improvements; no classification) or an explicit *finish*. *works* alone records
+the confirmation and keeps the project open; any text or *does not work* reopens the SAME project at
+REWORK (history kept); only *finish* (or the close dialog) moves toward PENDING_CLOSE. In REWORK with new Owner feedback the engine first
 runs Runtime Acceptance on the delivered version (reproduction), the CEO diagnoses from the feedback and
 that evidence and revises criteria / runtime spec / pipeline (plan_version+1), the revised acceptance is
 run against the old version (it should fail if the problem is real), then the normal build → verify loop
@@ -55,6 +58,10 @@ Production agents get no shell and no file writes (CLI flags); they return conte
 engine writes the artifact. Web access only for stages the CEO marks `web`.
 
 ## Safety rails
+
+- External connections: a plan lists every domain the delivered program would contact
+  (`network_access`); each needs Owner approval (`axbranch approve <id> --network yes|no`, window
+  buttons). The build pauses before STAFFING until decided; a decline goes back to the CEO as feedback.
 
 - One session per project (`run.lock`, OS file lock). Refused sessions exit 2 / show in the GUI.
 - Unexpected errors pause the project with the reason; traceback in `workspace/logs/engine-errors.log`.

@@ -81,7 +81,14 @@ def problems(artifact):
     return out
 
 
-def text_of(artifact, cap=120_000):
+def is_empty(artifact):
+    """True when the artifact holds no content at all (0.1.9: two empty builds were each sent to verification)."""
+    if artifact.get('manifest'):
+        return not any(f['bytes'] for f in json.loads(artifact['manifest'])['files'])
+    return artifact['sha256'] == sha(b'')
+
+
+def text_of(artifact, cap=400_000):
     files = files_of(artifact)
     if not artifact.get('manifest'):
         return files[0][1].read_bytes().decode('utf-8')

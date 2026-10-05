@@ -28,7 +28,7 @@ def _obj(**props):
     return {'type': 'object', 'additionalProperties': False, 'properties': props, 'required': list(props)}
 
 
-PROBE = _obj(name=STR, args=_ARR(STR), stdin=STR, http_method={'type': 'string', 'enum': ['', 'GET', 'POST']},
+PROBE = _obj(name=STR, args=_ARR(STR), stdin=STR, http_method={'type': 'string', 'enum': ['', 'GET', 'POST', 'BROWSER']},
              http_path=STR, http_body=STR, expect_exit=INT, expect_status=INT, expect_contains=_ARR(STR))
 SPEC = _obj(mode={'type': 'string', 'enum': ['none', 'cli', 'web', 'gui']}, owner_launch=STR,
             launch_args=_ARR(STR), probes=_ARR(PROBE))
@@ -37,7 +37,16 @@ SPEC = _obj(mode={'type': 'string', 'enum': ['none', 'cli', 'web', 'gui']}, owne
 DEFAULT = {'mode': 'cli', 'owner_launch': 'double-click the file (python <file>, no arguments)',
            'launch_args': [], 'probes': []}
 
-START_TIMEOUT, PROBE_TIMEOUT, CLI_TIMEOUT, GUI_ALIVE = 25, 15, 60, 6
+START_TIMEOUT, PROBE_TIMEOUT, CLI_TIMEOUT, GUI_ALIVE, BROWSER_TIMEOUT = 25, 15, 60, 6, 90
+EDGE_PATHS = (r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+              r'C:\Program Files\Microsoft\Edge\Application\msedge.exe')
+
+
+def browser():
+    """A local headless browser that executes page JavaScript (Edge ships with Windows), or None."""
+    import os
+    import shutil
+    return next((p for p in EDGE_PATHS if os.path.isfile(p)), None) or shutil.which('msedge') or shutil.which('chrome')
 
 
 def normalize(spec):
@@ -123,9 +132,10 @@ def check(spec, entry_path, python, cwd):
         if up:
             probes = spec.get('probes', [])
             for probe in probes:
-                ev['steps'].append(_http(port, probe))
-            if probes:   # still serving after the flow, and the first page still answers
-                again = _http(port, {**probes[0], 'name': f"{probes[0]['name']} (again after flow)"})
+                ev['steps'].append(_rendered(port, probe) if probe.get('http_method') == 'BROWSER' else _http(port, probe))
+            first_http = next((pr for pr in probes if pr.get('http_method') != 'BROWSER'), None)
+            if first_http:   # still serving after the flow, and the first page still answers
+                again = _http(port, {**first_http, 'name': f"{first_http['name']} (again after flow)"})
                 ev['steps'].append(again)
             alive = proc.alive()
             ev['steps'].append({'name': 'server survived', 'ok': alive,
@@ -169,8 +179,8 @@ def _exact_owner_launch(base, cwd, spec):
         if not up:
             step.update(ok=False, problems=[f'nothing listening on {port}'], output_tail=proc.output()[-800:])
             return step
-        probes = spec.get('probes') or [{'name': 'page', 'http_method': 'GET', 'http_path': '/', 'expect_status': 200,
-                                          'expect_contains': []}]
+        probes = [pr for pr in spec.get('probes', []) if pr.get('http_method') != 'BROWSER'] or [
+            {'name': 'page', 'http_method': 'GET', 'http_path': '/', 'expect_status': 200, 'expect_contains': []}]
         first = _http(port, {**probes[0], 'name': 'first page'})
         step.update(ok=first['ok'] and proc.alive(), problems=first['problems'] + ([] if proc.alive() else ['server exited']),
                     status=first.get('status'))
@@ -191,6 +201,38 @@ def _wait_port(proc, port):
         except OSError:
             time.sleep(0.25)
     return False, START_TIMEOUT
+
+
+def _rendered(port, probe):
+    """BROWSER probe: load the page in a real headless browser (scripts run, the page's own API calls
+    happen) and check the RENDERED text — script source is stripped so code text cannot fake a match."""
+    import os
+    import tempfile
+    path = probe.get('http_path') or '/'
+    step = {'name': probe['name'], 'request': f'BROWSER {path}'}
+    exe = browser()
+    if exe is None:
+        step.update(ok=False, problems=['no headless browser available on this PC (Edge/Chrome)'])
+        return step
+    profile = tempfile.mkdtemp(prefix='axb-browser-')
+    proc = sandbox.start([exe, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+                          '--disable-logging', '--log-level=3',
+                          f'--user-data-dir={profile}', '--virtual-time-budget=10000', '--dump-dom',
+                          f'http://127.0.0.1:{port}{path}'], profile, env=dict(os.environ), caps=False)
+    try:
+        if proc.wait(BROWSER_TIMEOUT) is None:
+            step.update(ok=False, problems=[f'browser did not finish within {BROWSER_TIMEOUT}s'])
+            return step
+        dom = proc.output()
+    finally:
+        proc.stop()
+        proc.cleanup()
+    text = re.sub(r'<script\b.*?</script>', ' ', dom, flags=re.S | re.I)
+    text = re.sub(r'<style\b.*?</style>', ' ', text, flags=re.S | re.I)
+    missing = _contains(text, probe.get('expect_contains', []))
+    step.update(ok=not missing, problems=[f'rendered page lacks {missing}'] if missing else [],
+                rendered_tail=re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text))[-800:])
+    return step
 
 
 def _http(port, probe):

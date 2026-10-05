@@ -15,12 +15,13 @@ CHECK_TIMEOUT = 120            # seconds a generated program may run during veri
 # engine can reach (tool installs, destructive close) stop and ask.
 REQUIRES_OWNER = frozenset({
     'payment', 'paid_api', 'plan_upgrade', 'destructive', 'publish', 'external_contact',
-    'sensitive_data', 'governance_change', 'install_tool', 'close_without_save',
+    'sensitive_data', 'governance_change', 'install_tool', 'close_without_save', 'external_connection',
 })
 
 SUMMARY = ('Governance (fixed; the CEO cannot change it): no payments, paid APIs, paid plans, '
-           'publication, external contact or sensitive data movement. Missing tools and destructive '
-           'closes need the Owner. Verification standards never drop after repeated failure.')
+           'publication, external contact or sensitive data movement. Missing tools, destructive closes '
+           'and any new external connection a delivered program would make need the Owner. Verification '
+           'standards never drop after repeated failure.')
 
 
 def upgrade_proposal_allowed(satisfactions):

@@ -95,6 +95,24 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(ev['steps'][-1]['ok'])
         self.assertEqual(ev['steps'][-1]['name'], 'exact Owner launch (no arguments)')
 
+    @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
+    def test_rendered_page_is_checked_not_just_served(self):
+        page = ("<html><body><div id=r>loading</div><script>"
+                "fetch('/api/analyze?t=DEMO').then(r=>r.json()).then(j=>{"
+                "document.getElementById('r').textContent='SMA '+j.sma+' rendered'})</script></body></html>")
+        code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page.encode()))
+        browser_probe = {'name': 'rendered analysis', 'args': [], 'stdin': '', 'http_method': 'BROWSER',
+                         'http_path': '/', 'http_body': '', 'expect_exit': -1, 'expect_status': 0,
+                         'expect_contains': ['SMA 2 rendered']}
+        spec = {**WEB, 'probes': [probe('analysis api', '/api/analyze?t=DEMO', ['"sma"']), browser_probe]}
+        ev = self.check(code, spec)
+        self.assertTrue(ev['ok'], ev)
+        # The same words present only inside <script> (never rendered) must not count.
+        broken = code.replace("textContent='SMA '+j.sma+' rendered'", "textContent='error'; var s='SMA 2 rendered'")
+        ev = self.check(broken, spec)
+        self.assertFalse(ev['ok'])
+        self.assertIn('rendered page lacks', str(next(s for s in ev['steps'] if s['name'] == 'rendered analysis')['problems']))
+
     def test_window_must_stay_up(self):
         spec = {'mode': 'gui', 'owner_launch': 'double-click', 'launch_args': [], 'probes': []}
         self.assertTrue(self.check('import time\ntime.sleep(30)\n', spec)['ok'])

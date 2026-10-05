@@ -17,7 +17,7 @@ TRANSITIONS = {
     'CREATED': {'PLANNING'},
     'PLANNING': {'STAFFING'},
     'STAFFING': {'EXECUTING'},
-    'EXECUTING': {'VERIFYING'},
+    'EXECUTING': {'VERIFYING', 'REWORK'},     # REWORK: the producer delivered nothing (no verification needed)
     'VERIFYING': {'REWORK', 'OWNER_REVIEW'},
     'REWORK': {'STAFFING'},
     # The Owner tries the verified artifact: works -> PENDING_CLOSE; problem / change -> REWORK (same project).
@@ -68,12 +68,17 @@ CREATE TABLE IF NOT EXISTS owner_feedback(
   id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL REFERENCES projects(id),
   iteration INTEGER NOT NULL, verdict TEXT NOT NULL, text TEXT NOT NULL, created REAL NOT NULL,
   handled_iteration INTEGER);
+CREATE TABLE IF NOT EXISTS approvals(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL REFERENCES projects(id),
+  action TEXT NOT NULL, subject TEXT NOT NULL, purpose TEXT NOT NULL, status TEXT NOT NULL,
+  created REAL NOT NULL, decided REAL);
 CREATE TABLE IF NOT EXISTS events(
   id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, at REAL NOT NULL, kind TEXT NOT NULL,
   detail TEXT NOT NULL);
 '''
 _JSON = ('plan', 'report')
-SCHEMA_VERSION = 3   # 1 = 0.1.0-0.1.4 (no marker), 2 = artifacts.manifest (0.1.5), 3 = owner_feedback (0.1.8)
+SCHEMA_VERSION = 4   # 1 = 0.1.0-0.1.4 (no marker), 2 = artifacts.manifest (0.1.5), 3 = owner_feedback (0.1.8),
+                     # 4 = approvals (0.1.9)
 
 
 class Rejected(Exception):
@@ -287,9 +292,12 @@ class Store:
         return [r for r in rows if kinds is None or r['kind'] in kinds]
 
     # ---- Owner review
-    def add_feedback(self, pid, iteration, verdict, text):
-        self.db.execute('INSERT INTO owner_feedback(project_id,iteration,verdict,text,created) VALUES(?,?,?,?,?)',
-                        (pid, iteration, verdict, text, time.time()))
+    def add_feedback(self, pid, iteration, verdict, text, handled=None):
+        """verdict: works (runtime confirmed) | problem (does not work) | request (natural-language change,
+        feature or improvement) | finish. Only problem/request are rework input; the others are stored
+        handled so they can never trigger a diagnosis later."""
+        self.db.execute('INSERT INTO owner_feedback(project_id,iteration,verdict,text,created,handled_iteration) '
+                        'VALUES(?,?,?,?,?,?)', (pid, iteration, verdict, text, time.time(), handled))
         self.event(pid, 'owner_feedback', verdict=verdict, iteration=iteration, text=text[:2000])
 
     def feedback(self, pid, pending_only=False):
@@ -299,6 +307,29 @@ class Store:
     def mark_feedback_handled(self, pid, iteration):
         self.db.execute('UPDATE owner_feedback SET handled_iteration=? WHERE project_id=? AND handled_iteration IS NULL',
                         (iteration, pid))
+
+    # ---- Owner approvals (governance)
+    def request_approval(self, pid, action, subject, purpose):
+        known = self.db.execute('SELECT status FROM approvals WHERE project_id=? AND action=? AND subject=? '
+                                'ORDER BY id DESC LIMIT 1', (pid, action, subject)).fetchone()
+        if known is None:
+            self.db.execute('INSERT INTO approvals(project_id,action,subject,purpose,status,created) VALUES(?,?,?,?,?,?)',
+                            (pid, action, subject, purpose, 'pending', time.time()))
+            self.event(pid, 'approval_requested', action=action, subject=subject, purpose=purpose)
+            return 'pending'
+        return known['status']
+
+    def decide_approval(self, pid, action, subject, approve):
+        status = 'approved' if approve else 'denied'
+        changed = self.db.execute("UPDATE approvals SET status=?, decided=? WHERE project_id=? AND action=? AND subject=? "
+                                  "AND status='pending'", (status, time.time(), pid, action, subject)).rowcount
+        if changed:
+            self.event(pid, 'approval_decided', action=action, subject=subject, status=status, by='Owner')
+        return changed
+
+    def approvals(self, pid, status=None):
+        sql = 'SELECT * FROM approvals WHERE project_id=?' + (' AND status=?' if status else '')
+        return [dict(r) for r in self.db.execute(sql + ' ORDER BY id', (pid, status) if status else (pid,))]
 
     def discard_context(self, pid):
         """Agent working context (stage outputs). Artifacts and verdicts stay as the audit record."""
@@ -335,6 +366,8 @@ class Store:
             'owner_feedback': [{k: f[k] for k in ('iteration', 'verdict', 'text', 'handled_iteration')}
                                for f in self.feedback(pid)],
             'runtime_spec': plan.get('runtime'),
+            'owner_confirmed_working_versions': sorted({f['iteration'] for f in self.feedback(pid) if f['verdict'] == 'works'}),
+            'approvals': [{k: a[k] for k in ('action', 'subject', 'purpose', 'status')} for a in self.approvals(pid)],
             'constraints': gov.SUMMARY,
             'continue_with': f'python -m axbranch run {pid}   (from the ax-branch folder; any engine)',
         }

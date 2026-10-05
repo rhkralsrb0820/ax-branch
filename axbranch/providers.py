@@ -10,6 +10,7 @@ WHOLE tree dies. Terminating only the process we started was not enough on Windo
 is npm's cmd.exe wrapper, and the real node/codex.exe/claude kept running (proven 2026-10-04).
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -26,10 +27,80 @@ from cheongwol.policy import Rejected, canonical  # noqa: E402
 
 from . import sandbox  # noqa: E402
 from .governance import PROVIDERS  # noqa: E402
+from .state import Busy, run_lock  # noqa: E402
 
 TIMEOUT = 1800   # a full-file build+review turn measured >15 min live (2026-10-03)
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)   # the windowed exe must not flash consoles
 LABEL = {'claude': 'Claude Code', 'codex': 'Codex'}
+# Resource-aware autonomy: provider CLIs are heavy (node + CLI, often hundreds of MB). Machine-wide —
+# every AX Branch process on this PC (window, CLI, Codex session) shares these slots.
+MAX_PARALLEL_CLI = 2
+SLOT_DIR = Path(tempfile.gettempdir()) / 'axbranch-provider-slots'
+MIN_FREE_MB, MEMORY_WAIT = 1024, 300
+SLEEP_GAP = 30          # a poll gap longer than this means the PC slept / the process was suspended
+
+
+def free_memory_mb():
+    """Available physical memory in MB (None if unknown on this OS)."""
+    if os.name != 'nt':
+        try:
+            return os.sysconf('SC_AVPHYS_PAGES') * os.sysconf('SC_PAGE_SIZE') // 2**20
+        except (ValueError, OSError, AttributeError):
+            return None
+    import ctypes
+
+    class MEMORYSTATUSEX(ctypes.Structure):
+        _fields_ = [('dwLength', ctypes.c_ulong), ('dwMemoryLoad', ctypes.c_ulong),
+                    ('ullTotalPhys', ctypes.c_ulonglong), ('ullAvailPhys', ctypes.c_ulonglong),
+                    ('ullTotalPageFile', ctypes.c_ulonglong), ('ullAvailPageFile', ctypes.c_ulonglong),
+                    ('ullTotalVirtual', ctypes.c_ulonglong), ('ullAvailVirtual', ctypes.c_ulonglong),
+                    ('ullAvailExtendedVirtual', ctypes.c_ulonglong)]
+    status = MEMORYSTATUSEX()
+    status.dwLength = ctypes.sizeof(status)
+    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+    return status.ullAvailPhys // 2**20
+
+
+def _acquire_slot(name, cancel, on_tick):
+    """Hold one of MAX_PARALLEL_CLI machine-wide slots (OS file locks: a crashed holder frees its slot)."""
+    started = time.monotonic()
+    while True:
+        for i in range(MAX_PARALLEL_CLI):
+            lock = run_lock(SLOT_DIR / f'slot-{i}.lock')
+            try:
+                lock.__enter__()
+                return lock
+            except Busy:
+                continue
+        if cancel is not None and cancel.is_set():
+            raise Rejected(f'{LABEL[name]}: 오너가 중단했습니다.')
+        _tick(on_tick, {'provider': name, 'waiting': f'all {MAX_PARALLEL_CLI} provider slots busy',
+                        'elapsed': round(time.monotonic() - started), 'output_bytes': 0, 'idle': 0})
+        time.sleep(2)
+
+
+def _ensure_memory(name, cancel, on_tick):
+    started = time.monotonic()
+    while True:
+        free = free_memory_mb()
+        if free is None or free >= MIN_FREE_MB:
+            return free
+        if time.monotonic() - started > MEMORY_WAIT:
+            raise Rejected(f'{LABEL[name]}: 사용 가능한 메모리가 {free} MB로 부족해 실행하지 않았습니다 '
+                           f'(최소 {MIN_FREE_MB} MB). PC를 보호하기 위해 일시 정지합니다.')
+        if cancel is not None and cancel.is_set():
+            raise Rejected(f'{LABEL[name]}: 오너가 중단했습니다.')
+        _tick(on_tick, {'provider': name, 'waiting': f'low memory: {free} MB free (< {MIN_FREE_MB} MB)',
+                        'elapsed': round(time.monotonic() - started), 'output_bytes': 0, 'idle': 0})
+        time.sleep(5)
+
+
+def _tick(on_tick, info):
+    if on_tick is not None:
+        try:
+            on_tick(info)
+        except Exception:
+            pass      # visibility must never break the call
 
 
 def available():
@@ -37,47 +108,71 @@ def available():
 
 
 def _contained(name, args, prompt, cwd, cancel, on_tick):
-    """Run one CLI turn with whole-tree kill and live activity. Returns (exit code, stdout+stderr)."""
-    proc = sandbox.start(args, cwd, prompt, env=_subscription_env(), caps=False)
-    started = last_change = time.monotonic()
-    size = 0
+    """Run one CLI turn with whole-tree kill and live activity. Returns (exit code, stdout+stderr).
+    Waits for a free machine-wide slot and enough memory first; time the PC spends asleep is not
+    counted against the timeout (2026-10-04: 13.7 h of sleep turned into a false timeout)."""
+    slot = _acquire_slot(name, cancel, on_tick)
     try:
-        while True:
-            code = proc.wait(1)
-            now = time.monotonic()
-            grown = proc.log.stat().st_size
-            if grown != size:
-                size, last_change = grown, now
-            if on_tick is not None:
-                try:
-                    on_tick({'provider': name, 'pid': proc.proc.pid, 'elapsed': round(now - started),
-                             'output_bytes': size, 'idle': round(now - last_change)})
-                except Exception:
-                    pass      # visibility must never break the call
-            if code is not None:
-                return code, proc.output()
-            if cancel is not None and cancel.is_set():
-                raise Rejected(f'{LABEL[name]}: 오너가 중단했습니다. 프로세스 트리 전체를 종료했습니다.')
-            if now - started > TIMEOUT:
-                raise Rejected(f'{LABEL[name]}: 시간 초과({TIMEOUT}초). 프로세스 트리 전체를 종료했습니다. '
-                               '자동 재시도하지 않습니다.')
+        free = _ensure_memory(name, cancel, on_tick)
+        proc = sandbox.start(args, cwd, prompt, env=_subscription_env(), caps=False)
+        started = last_change = prev = time.monotonic()
+        size, slept = 0, 0.0
+        try:
+            while True:
+                code = proc.wait(1)
+                now = time.monotonic()
+                if now - prev > SLEEP_GAP:
+                    slept += now - prev - 1
+                prev = now
+                grown = proc.log.stat().st_size
+                if grown != size:
+                    size, last_change = grown, now
+                _tick(on_tick, {'provider': name, 'pid': proc.proc.pid, 'elapsed': round(now - started - slept),
+                                'output_bytes': size, 'idle': round(now - last_change), 'slept': round(slept),
+                                'free_memory_mb': free})
+                if code is not None:
+                    return code, proc.output()
+                if cancel is not None and cancel.is_set():
+                    raise Rejected(f'{LABEL[name]}: 오너가 중단했습니다. 프로세스 트리 전체를 종료했습니다.')
+                if now - started - slept > TIMEOUT:
+                    raise Rejected(f'{LABEL[name]}: 시간 초과({TIMEOUT}초). 프로세스 트리 전체를 종료했습니다. '
+                                   '자동 재시도하지 않습니다.')
+        finally:
+            proc.stop()          # whole tree, every exit path
+            proc.cleanup()
     finally:
-        proc.stop()          # whole tree, every exit path
-        proc.cleanup()
+        slot.__exit__(None, None, None)
+
+
+def _claude_result(stream):
+    """The final 'result' event of a stream-json run, as JSON text; the raw tail if there is none
+    (CLI noise / errors), so failure classification still sees what happened."""
+    for line in reversed(stream.strip().splitlines()):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get('type') == 'result':
+            return line
+    return stream.strip()[-4000:]
 
 
 def run_claude(prompt, schema, web=False, cancel=None, on_tick=None):
     binary = shutil.which('claude')
     tools = 'WebSearch,WebFetch' if web else ''
     blocked = 'Bash,Write,Edit,NotebookEdit,Task' + ('' if web else ',WebFetch,WebSearch')
-    args = [binary, '-p', '--output-format', 'json', '--restricted', '--disallowedTools', blocked,
+    # stream-json + partial messages: output grows while Claude generates, so the Owner's activity view
+    # shows real progress (plain json printed nothing until the very end). The final 'result' event is
+    # the same envelope the plain json mode returned.
+    args = [binary, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+            '--restricted', '--disallowedTools', blocked,
             '--permission-mode', 'dontAsk', '--tools', tools, *(['--allowedTools', tools] if tools else []),
             '--json-schema', canonical(schema), '--setting-sources', '', '--strict-mcp-config',
             '--mcp-config', '{"mcpServers":{}}', '--no-session-persistence']
     scratch = Path(tempfile.mkdtemp(prefix='axb-claude-'))
     try:
-        code, raw = _contained('claude', args, prompt, str(scratch), cancel, on_tick)
-        raw = raw.strip()
+        code, stream = _contained('claude', args, prompt, str(scratch), cancel, on_tick)
+        raw = _claude_result(stream)
         if code != 0:
             _check_rate_limit(_claude_failure_text(raw))
             raise Rejected(f'Claude Code exited {code}: {raw[-300:]}')

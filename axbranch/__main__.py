@@ -7,7 +7,10 @@
   python -m axbranch check <id>                  SQLite <-> disk consistency (exit 1 if unsafe)
   python -m axbranch resume <id> [--rounds N]    resume a PAUSED project
   python -m axbranch finish <id> [--save|--pause|--discard --confirm] [--satisfaction N]
-  python -m axbranch review <id> --works | --problem "..." | --change "..."   Owner verdict; problem/change rebuild
+  python -m axbranch review <id> [--works | --broken "what happened"] [--request "what you want"] [--finish]
+                                                 Owner review: does it work? / what next (plain language)
+  python -m axbranch approve <id> --network yes|no   decide pending external connections
+  python -m axbranch replan <id> --reason "..."  recovery: CEO strategy review for a stuck/misdirected project
   python -m axbranch upgrade-proposal           draft only, and only if Owner satisfaction >= 90%
 """
 import argparse
@@ -39,9 +42,15 @@ def main(argv=None):
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
     sub.add_parser('upgrade-proposal')
     rv = sub.add_parser('review'); rv.add_argument('id')
-    gv = rv.add_mutually_exclusive_group(required=True)
-    gv.add_argument('--works', action='store_true'); gv.add_argument('--problem'); gv.add_argument('--change')
+    gv = rv.add_mutually_exclusive_group()
+    gv.add_argument('--works', action='store_true', help='it runs correctly')
+    gv.add_argument('--broken', '--problem', dest='broken', metavar='TEXT', help='it does not work: what happened')
+    rv.add_argument('--request', '--change', dest='request', metavar='TEXT',
+                    help='anything you want changed, added or improved, in your own words')
+    rv.add_argument('--finish', action='store_true', help='done: move toward closing the project')
     rv.add_argument('--no-run', action='store_true', help='record the feedback only; rebuild later with run')
+    rp = sub.add_parser('replan'); rp.add_argument('id'); rp.add_argument('--reason', required=True)
+    ap_ = sub.add_parser('approve'); ap_.add_argument('id'); ap_.add_argument('--network', choices=('yes', 'no'), required=True)
     a = ap.parse_args(argv)
     try:
         return _dispatch(a)
@@ -83,11 +92,19 @@ def _dispatch(a):
         store.resume(a.id, a.rounds)
         _show(engine.run(a.id))
     elif a.cmd == 'review':
-        verdict, text = ('works', '') if a.works else ('problem', a.problem) if a.problem else ('change', a.change)
-        p = engine.owner_review(a.id, verdict, text)
-        print(f"[{p['id']}] {p['state']} — Owner feedback recorded ({verdict})")
+        works = True if a.works else False if a.broken else None
+        p = engine.owner_review(a.id, works, a.broken or a.request or '', a.finish)
+        print(f"[{p['id']}] {p['state']} — Owner review recorded")
         if p['state'] == 'REWORK' and not a.no_run:
             _show(engine.run(a.id))
+    elif a.cmd == 'replan':
+        p = engine.replan(a.id, a.reason)
+        print(f"[{p['id']}] {p['state']} plan v{p['plan_version']} — CEO strategy reviewed; continue with: "
+              f"python -m axbranch run {p['id']}")
+    elif a.cmd == 'approve':
+        p = engine.decide_network(a.id, a.network == 'yes')
+        print(f"[{p['id']}] external connection(s) {'approved' if a.network == 'yes' else 'declined'}; "
+              f"continue with: python -m axbranch resume {p['id']}")
     elif a.cmd == 'upgrade-proposal':
         from . import providers, upgrade
         status, result = upgrade.propose(store, engine.workspace, providers.call)
@@ -118,7 +135,8 @@ def _show(p):
             print(' -', step)
         if p['state'] == 'OWNER_REVIEW':
             print(f"\n테스트 방법: {r.get('how_to_test') or '-'}\n"
-                  f"결과 알려주기: python -m axbranch review {p['id']} --works | --problem \"...\" | --change \"...\"")
+                  f"1) 작동하나요?  python -m axbranch review {p['id']} --works   (안 되면 --broken \"무슨 일이 있었는지\")\n"
+                  f"2) 더 원하는 것이 있나요?  --request \"자유롭게\"   /  마무리하려면 --finish")
     if p.get('archive_note'):
         print('Obsidian:', p['archive_note'])
 

@@ -21,6 +21,13 @@ def _buttons(widget):
         yield from _buttons(child)
 
 
+def _radios(widget):
+    for child in widget.winfo_children():
+        if isinstance(child, ttk.Radiobutton):
+            yield child
+        yield from _radios(child)
+
+
 def _press(widget, text):
     button = next(b for b in _buttons(widget) if b.cget('text') == text)
     button.invoke()
@@ -65,8 +72,12 @@ class GuiTests(unittest.TestCase):
         self.assertIn('검증 1회차: FAIL', shown)
         self.assertIn('검증 2회차: PASS', shown)
 
-        _press(self.app, '작동함')                         # Owner tried it: works
+        _press(self.app, '리뷰 / 피드백…')                 # Q1 works? Q2 what next? -> finish
+        dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
+        next(r for r in _radios(dialog) if r.cget('text') == '작동함').invoke()
+        _press(dialog, '마무리(프로젝트 끝내기)')
         self.assertEqual(self.app.store.project(pid)['state'], 'PENDING_CLOSE')
+        self.assertEqual([f['verdict'] for f in self.app.store.feedback(pid)], ['works', 'finish'])
         _press(self.app, '프로젝트 종료…')
         dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
         _press(dialog, 'A. SAVE & CLOSE')
@@ -81,11 +92,16 @@ class GuiTests(unittest.TestCase):
         _press(self.app, '淸月 CEO에게 맡기기')
         pid = self.app.selected
         self.pump_until(lambda: self.app.store.project(pid)['state'] == 'OWNER_REVIEW' and not self.app.running)
-        self.app.review('problem', 'double-click closes immediately')   # text the dialog would collect
+        _press(self.app, '리뷰 / 피드백…')
+        dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
+        next(r for r in _radios(dialog) if r.cget('text') == '작동하지 않음').invoke()
+        dialog.feedback_text.insert('1.0', 'double-click closes immediately')
+        _press(dialog, '보내기')
         self.pump_until(lambda: self.app.store.project(pid)['state'] == 'OWNER_REVIEW' and not self.app.running
                         and len(self.app.store.artifacts(pid)) == 2)
         self.assertEqual(self.app.store.projects()[0]['id'], pid)            # same project, not a new one
-        self.pump_until(lambda: 'Owner 피드백 1회차 (problem)' in self.app.detail.get('1.0', 'end'))
+        self.pump_until(lambda: 'Owner 피드백 1회차 (problem): double-click closes immediately'
+                        in self.app.detail.get('1.0', 'end'))
 
     def test_busy_project_is_reported_not_run(self):
         pid = self.app.store.new_project('make an add tool')

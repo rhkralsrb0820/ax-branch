@@ -39,10 +39,11 @@ def ENUM(*values):
 STAGE = S(name=STR, agent_role=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
 PLAN = S(interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
-         runtime=runtime.SPEC, pipeline=ARR(STAGE))
+         runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR)), pipeline=ARR(STAGE))
 DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=STR,
               artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
-              acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC, pipeline=ARR(STAGE))
+              acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
+              network_access=ARR(S(domain=STR, purpose=STR)), pipeline=ARR(STAGE))
 WORK = S(output=STR, key_points=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), summary=STR, changes_from_previous=STR)
 VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
@@ -66,6 +67,10 @@ RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the
   must be e.g. ["--port", "{port}", "--no-browser"] (the engine substitutes a free port); probes are
   HTTP requests (http_method/path/body, expect_status, expect_contains) that walk the primary user flow
   end to end, including the requests the page itself makes (e.g. its API calls).
+  For any page, also add http_method "BROWSER" probes: the engine loads the page in a real headless
+  browser (its JavaScript runs and makes its own requests) and checks expect_contains against the
+  RENDERED text. Clicking is not available, so make the primary flow reachable by URL (e.g.
+  /?sample=uptrend shows that analysis) and probe that URL.
   Probes must use realistic input and check meaningful output, not just that something answered."""
 
 CEO_SYSTEM = f"""You are 淸月 AI CEO, the executive of AX Branch. The Owner gave a Goal.
@@ -78,12 +83,22 @@ Rules:
   is then the relative path of the python entry file that runs the bundle's self-test). Earlier stages produce notes
   (research, design, analysis) that are handed to later stages. Use as few stages as the goal
   truly needs (1-{gov.MAX_STAGES}).
+- Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
+  Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
+  sign off: production agents cannot execute anything, and independent verification is done afterwards
+  by the engine (self-test, Runtime Acceptance incl. rendered-page checks) and the permanent
+  Verification Agent. The LAST stage must be a producer who writes the complete deliverable.
 - Pick a provider per stage from available_providers. Set web=true only for stages that must
   research the public web.
 - Acceptance criteria must be concrete and checkable by an independent reviewer.
 - python artifacts: a single standard-library-only file with a self-test under
   `if __name__ == '__main__':` that asserts the behavior and exits non-zero on failure. It must
-  not use the network or touch files outside its working directory.
+  not touch files outside its working directory, and must not use the network unless the access is
+  declared in network_access.
+- network_access: every internet domain the DELIVERED program must contact at run time, with its
+  purpose ([] if none). Each new domain is an external connection that needs the Owner's approval;
+  the build waits for it. Prefer no network when the goal can be met well without it; free public
+  sources only (no API keys, no paid services). The self-test must not need the network.
 - {EXEC_CONTRACT}
 {RUNTIME_RULES}
 - Production agents cannot execute code, use a shell or write files; never instruct them to run
@@ -122,24 +137,38 @@ REPORT_SYSTEM = """You are 淸月 AI CEO. Production agents delivered an artifac
 Verification Agent PASSED it. Give the Owner a concise executive report: what was achieved,
 your judgment of its value and limits (from the evidence shown, not optimism), and next steps."""
 
-DIAGNOSE_SYSTEM = """You are 淸月 AI CEO. The Owner tested the delivered, verified artifact and reported
-a problem or requested a change (owner_feedback). Treat the Owner's report as ground truth about their
-experience even though verification passed: verification missed something. runtime_evidence_current
-shows the current artifact launched the way the Owner launches it — use it to reproduce and diagnose.
-Find the root cause, including gaps in the previous acceptance criteria or runtime spec that let the
-problem pass. Return a revised plan for the SAME project: interpretation, the complete acceptance
-criteria (add ones that would have caught this), a runtime spec whose probes would FAIL on the current
-artifact if the problem is real, and the pipeline (reuse suitable roles). Never drop or weaken existing
-requirements unless the Owner asked for that change."""
+DIAGNOSE_SYSTEM = """You are 淸月 AI CEO. The Owner tested the delivered, verified artifact and wrote
+feedback in plain language (owner_feedback; 'new' = not yet acted on). It may report something that
+does not work, ask for changes, new features or improvements, or several of these at once — the Owner
+does not classify it; you interpret it into concrete requirements. Treat the Owner's experience as
+ground truth. runtime_evidence_current shows the current version launched the way the Owner launches
+it. owner_confirmed_working_versions lists versions the Owner confirmed work: keep that behaviour
+unless the Owner asked to change it (no regressions). Return a revised plan for the SAME project:
+interpretation, the complete acceptance criteria (existing still-valid ones plus new ones), a runtime
+spec whose probes exercise the new requirements end to end (they should FAIL on the current version
+if it lacks them) while keeping probes for confirmed behaviour, network_access, and the pipeline
+(reuse suitable roles; add the specialists the new requirements need). Never drop or weaken existing
+requirements unless the Owner asked for that change.
+- Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
+  Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
+  sign off: production agents cannot execute anything, and independent verification is done afterwards
+  by the engine (self-test, Runtime Acceptance incl. rendered-page checks) and the permanent
+  Verification Agent. The LAST stage must be a producer who writes the complete deliverable."""
 
-OWNER_REWORK = """The Owner tested the previous version and reported a problem or change (owner_rework:
-feedback, CEO diagnosis, reproduction evidence). Build a NEW complete version that resolves it under
-the runtime acceptance spec, keeping every still-valid requirement."""
+OWNER_REWORK = """The Owner tested the previous version and gave feedback (owner_rework: the Owner's
+words, the CEO's interpretation and the baseline evidence). Build a NEW complete version that meets the
+revised requirements under the runtime acceptance spec, keeping every still-valid requirement and all
+behaviour the Owner confirmed works."""
 
 STRATEGY_SYSTEM = """You are 淸月 AI CEO. The artifact keeps FAILING independent verification. The
 standard will not be lowered. Decide: continue (same team, findings are fixable), switch_provider
 (the final-stage engine is the problem), or change_pipeline (approach/agents are wrong: return
-a full new pipeline). Return pipeline=[] unless change_pipeline."""
+a full new pipeline). Return pipeline=[] unless change_pipeline.
+- Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
+  Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
+  sign off: production agents cannot execute anything, and independent verification is done afterwards
+  by the engine (self-test, Runtime Acceptance incl. rendered-page checks) and the permanent
+  Verification Agent. The LAST stage must be a producer who writes the complete deliverable."""
 
 
 def _prompt(system, task, context):
@@ -278,6 +307,17 @@ class Engine:
 
     def _staffing(self, pid):
         plan = self.store.project(pid)['plan']
+        waiting = []
+        with self.store.tx():
+            for access in plan.get('network_access') or []:
+                if self.store.request_approval(pid, 'external_connection', access['domain'], access['purpose']) != 'approved':
+                    waiting.append(f"{access['domain']} ({access['purpose']})")
+        if waiting:
+            # Governance: a new external connection of the delivered program needs the Owner.
+            self.store.pause(pid, 'Owner approval needed (external_connection): the program would contact '
+                                  + '; '.join(waiting) + '. Approve: axbranch approve <id> --network yes|no',
+                             resume_state='STAFFING')
+            return
         with self.store.tx():
             staffed = {(a['role'], a['provider']) for a in self.store.agents(pid)}
             for stage in plan['pipeline']:
@@ -295,13 +335,25 @@ class Engine:
         plan, it, pv = p['plan'], p['iteration'], p['plan_version']
         *notes_stages, final = plan['pipeline']
         upstream = []
+        # Every stage of a rework sees the real baseline: the latest NON-EMPTY version and the version the
+        # Owner confirmed works (0.1.9: stages were given nothing, then an empty v6, and design had to guess).
+        latest, confirmed = self._baselines(pid)
+        baseline = {}
+        if latest is not None:
+            baseline['current_version'] = {'version': latest['iteration'], 'content': artifacts.text_of(latest)}
+        if confirmed is not None and confirmed is not latest:
+            baseline['owner_confirmed_version'] = {'version': confirmed['iteration'],
+                                                   'content': artifacts.text_of(confirmed)}
         for idx, stage in enumerate(notes_stages):
             done = self.store.output(pid, idx, pv)      # reused across rework rounds of the same plan
             if done is None:
+                stage_context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
+                                 'stage': stage['name'], 'previous_stages': upstream}
+                stage_context.update(baseline)
+                if plan.get('owner_rework'):
+                    stage_context['owner_rework'] = plan['owner_rework']
                 out, used = self._ask(pid, stage['agent_role'], WORKER_SYSTEM.format(role=stage['agent_role']),
-                                      stage['instructions'],
-                                      {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
-                                       'stage': stage['name'], 'previous_stages': upstream},
+                                      stage['instructions'], stage_context,
                                       WORK, prefer=stage['provider'], web=stage['web'])
                 self.store.save_output(pid, it, pv, idx, self._agent(pid, stage), used, out)
                 done = {'output': out}
@@ -321,15 +373,19 @@ class Engine:
         if plan.get('owner_rework'):
             context['owner_rework'] = plan['owner_rework']
             system += '\n\n' + OWNER_REWORK
+        context.update({k: v for k, v in baseline.items() if k == 'owner_confirmed_version'})
         if history:
-            last = self.store.artifacts(pid)[-1]
-            context['previous_artifact'] = artifacts.text_of(last)
+            if latest is not None:
+                context['previous_artifact'] = baseline['current_version']['content']
             context['verification_findings'] = [{'round': v['iteration'], 'criteria': v['result']['criteria'],
                                                  'findings': v['result']['findings'], 'checks': v['checks']}
                                                 for v in history[-2:]]
             system += '\n\n' + REWORK
         build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context, BUILD,
                                 prefer=final['provider'], web=final['web'])
+        texts = [f.get('content') or '' for f in build['files']] + [build['content'] or '']
+        if not any(text.strip() for text in texts):
+            return self._no_deliverable(pid, final, used, build)
         folder = self.workspace / 'projects' / pid / 'artifacts' / f'v{it}'
         folder.mkdir(parents=True, exist_ok=True)
         manifest = None
@@ -447,6 +503,32 @@ class Engine:
         if passed:
             return self._deliver(pid, artifact, text, result)
 
+        self._after_fail(pid, p)
+
+    def _baselines(self, pid):
+        """(latest non-empty artifact, latest artifact the Owner confirmed works) — either may be None."""
+        real = [a for a in self.store.artifacts(pid) if not artifacts.is_empty(a)]
+        works = {f['iteration'] for f in self.store.feedback(pid) if f['verdict'] == 'works'}
+        latest = real[-1] if real else None
+        confirmed = next((a for a in reversed(real) if a['iteration'] in works), None)
+        return latest, confirmed
+
+    def _no_deliverable(self, pid, final, used, build):
+        """The producing stage returned nothing: a deterministic FAIL, no artifact and no verification call."""
+        p = self.store.project(pid)
+        finding = {'severity': 'critical', 'issue': f"The final production stage ({final['agent_role']}, {used}) "
+                   'delivered no content.', 'evidence': (build.get('summary') or '')[:600]}
+        with self.store.tx():
+            self.store.event(pid, 'build_rejected', agent=final['agent_role'], provider=used,
+                             reason='empty deliverable', summary=(build.get('summary') or '')[:600])
+            self.store.add_verification(pid, '', p['iteration'], 'FAIL',
+                                        {'verdict': 'FAIL', 'lenses_applied': ['deterministic'], 'criteria': [],
+                                         'findings': [finding]},
+                                        {'ok': False, 'ran': ['deliverable present'], 'output': 'empty deliverable'},
+                                        'engine')
+        self._after_fail(pid, p)
+
+    def _after_fail(self, pid, p):
         fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
         with self.store.tx():
             self.store.update(pid, iteration=p['iteration'] + 1)
@@ -457,9 +539,16 @@ class Engine:
             self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
                                   f'with more rounds (resume --rounds N), or change/stop the goal.')
 
-    def _strategy(self, pid):
+    def _strategy(self, pid, recovery_note=None):
         p = self.store.project(pid)
+        latest, confirmed = self._baselines(pid)
         context = {'owner_goal': p['goal'], 'plan': p['plan'],
+                   'versions': [{'version': a['iteration'], 'empty': artifacts.is_empty(a), 'bytes':
+                                 sum(Path(path).stat().st_size for _, path, _ in artifacts.files_of(a) if Path(path).exists())}
+                                for a in self.store.artifacts(pid)],
+                   'best_candidate_version': latest and latest['iteration'],
+                   'owner_confirmed_version': confirmed and confirmed['iteration'],
+                   **({'recovery_note': recovery_note} if recovery_note else {}),
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
                                              'findings': v['result']['findings'], 'checks_ok': v['checks']['ok']}
                                             for v in self.store.verifications(pid)],
@@ -479,6 +568,22 @@ class Engine:
                 self.store.end_agents(pid, 'replaced')
                 self.store.update(pid, plan=plan, plan_version=p['plan_version'] + 1)
             self.store.event(pid, 'decision', what=f"strategy: {decision['decision']}", why=decision['rationale'], by=used)
+
+    def replan(self, pid, reason):
+        """Recovery: send a stuck/misdirected project back to the CEO for a strategy review (counted as a
+        manual recovery action in Owner Effort). Completed versions and history are kept."""
+        with self.lock(pid):
+            p = self.store.project(pid)
+            if p['state'] not in ('PAUSED', 'REWORK'):
+                raise Rejected(f"Project is {p['state']}; replan is for a PAUSED or REWORK project.")
+            with self.store.tx():
+                self.store.event(pid, 'recovery_replan', reason=reason, by='Owner/operator')
+                if p['state'] == 'PAUSED':
+                    self.store.update(pid, resume_state='REWORK')
+                    self.store.resume(pid)
+            self._strategy(pid, recovery_note=reason)
+            self.write_handoff(pid)
+            return self.store.project(pid)
 
     def _rework(self, pid):
         if self.store.feedback(pid, pending_only=True):
@@ -509,6 +614,7 @@ class Engine:
         before = self.runtime_evidence(last, plan.get('runtime'), old_entry)
         feedback = self.store.feedback(pid)
         context = {'owner_goal': p['goal'], 'current_plan': plan,
+                   'owner_confirmed_working_versions': sorted({f['iteration'] for f in feedback if f['verdict'] == 'works'}),
                    'owner_feedback': [{'round': f['iteration'], 'verdict': f['verdict'], 'text': f['text'],
                                        'new': f['handled_iteration'] is None} for f in feedback],
                    'delivered_artifact': {'path': last['path'], 'content': artifacts.text_of(last)[:60000]},
@@ -520,12 +626,15 @@ class Engine:
                             context, DIAGNOSIS, prefer='claude')
         new = self._sanitize({**plan, **{k: d[k] for k in ('interpretation', 'artifact_kind', 'artifact_filename',
                                                           'acceptance_criteria', 'verification_lenses', 'runtime',
-                                                          'pipeline')}})
+                                                          'network_access', 'pipeline')}})
         # Reproduce: the revised acceptance run against the version the Owner has. If the problem is
         # real, this should fail now — and the rebuilt version must pass it.
         repro = self.runtime_evidence(last, new['runtime'], old_entry)
         failed = [f"{s['name']}: {', '.join(s['problems'])}" for s in repro['steps'] if not s['ok']]
-        new['owner_rework'] = {'feedback': [f['text'] for f in feedback if f['handled_iteration'] is None],
+        dropped = sorted({pr['name'] for pr in (plan.get('runtime') or {}).get('probes', [])}
+                         - {pr['name'] for pr in new['runtime'].get('probes', [])})
+        new['owner_rework'] = {'feedback': [f['text'] for f in feedback if f['handled_iteration'] is None
+                                            and f['verdict'] in ('problem', 'request')],
                                'diagnosis': d['diagnosis'], 'root_cause': d['root_cause'],
                                'change_summary': d['change_summary'],
                                'reproduced_on_previous_version': not repro['ok'], 'reproduction_failures': failed[:10]}
@@ -536,28 +645,63 @@ class Engine:
                              why=f"{d['diagnosis']} | root cause: {d['root_cause']}", by=used)
             self.store.event(pid, 'reproduction', version=last['iteration'], current_spec_ok=before['ok'],
                              revised_spec_ok=repro['ok'], failures=failed[:10])
+            if dropped:     # transparency: probes for earlier behaviour that the revised plan no longer checks
+                self.store.event(pid, 'decision', what='runtime probes dropped by revised plan',
+                                 why=', '.join(dropped), by=used)
             self.store.mark_feedback_handled(pid, p['iteration'])
             self.store.set_state(pid, 'STAFFING', reason='rebuild for Owner feedback')
 
     # ---- Owner review
-    def owner_review(self, pid, verdict, text=''):
-        """verdict: 'works' | 'problem' | 'change'. Problem/change reopen the SAME project at REWORK."""
+    def owner_review(self, pid, works=None, text='', finish=False):
+        """The Owner's review of a delivered version — two separate questions:
+        1. works: True (runs correctly) / False (does not work) / None (not tested or no answer);
+        2. text: anything they want next, in plain language (changes, features, improvements —
+           no classification needed), or finish=True to move toward closing.
+        Any text, or works=False, reopens the SAME project at REWORK; the CEO interprets it.
+        works=True alone confirms the version and keeps the project open in OWNER_REVIEW."""
+        text = (text or '').strip()
         with self.lock(pid):
             p = self.store.project(pid)
-            if verdict not in ('works', 'problem', 'change'):
-                raise Rejected(f'Unknown review verdict {verdict!r}.')
             if p['state'] not in ('OWNER_REVIEW', 'PENDING_CLOSE'):
                 raise Rejected(f"Project is {p['state']}; the Owner reviews a delivered project (OWNER_REVIEW).")
-            if verdict != 'works' and not text.strip():
-                raise Rejected('Describe the problem or the change you want, so the CEO can act on it.')
+            if works is False and not text:
+                raise Rejected('Describe what does not work (how you ran it, what you saw), so the CEO can act on it.')
+            if finish and (text or works is False):
+                raise Rejected('Finishing and asking for more work at the same time is contradictory; choose one.')
+            it = p['iteration']
             with self.store.tx():
-                self.store.add_feedback(pid, p['iteration'], verdict, text.strip() or 'works as expected')
-                if verdict == 'works':
+                if works is True:
+                    self.store.add_feedback(pid, it, 'works', 'Owner confirmed this version works', handled=it)
+                if works is False:
+                    self.store.add_feedback(pid, it, 'problem', text)
+                elif text:
+                    self.store.add_feedback(pid, it, 'request', text)
+                if works is False or text:
+                    self.store.update(pid, iteration=it + 1)
+                    self.store.set_state(pid, 'REWORK', reason='Owner feedback: ' + ('does not work' if works is False
+                                                                                     else 'wants changes / more'))
+                elif finish:
+                    self.store.add_feedback(pid, it, 'finish', 'Owner chose to finish', handled=it)
                     if p['state'] == 'OWNER_REVIEW':
-                        self.store.set_state(pid, 'PENDING_CLOSE', reason='Owner: works')
-                else:
-                    self.store.update(pid, iteration=p['iteration'] + 1)
-                    self.store.set_state(pid, 'REWORK', reason=f'Owner: {verdict}')
+                        self.store.set_state(pid, 'PENDING_CLOSE', reason='Owner chose to finish')
+            self.write_handoff(pid)
+            return self.store.project(pid)
+
+    def decide_network(self, pid, approve):
+        """Owner decision on the pending external connections of this project's plan."""
+        with self.lock(pid):
+            pending = self.store.approvals(pid, 'pending')
+            if not pending:
+                raise Rejected('No external connection is waiting for approval on this project.')
+            p = self.store.project(pid)
+            with self.store.tx():
+                for a in pending:
+                    self.store.decide_approval(pid, a['action'], a['subject'], approve)
+                if not approve:      # back to the CEO: deliver without that access
+                    names = ', '.join(a['subject'] for a in pending)
+                    self.store.add_feedback(pid, p['iteration'], 'request',
+                                            f'Owner declined external connection(s) to {names}. Deliver without them.')
+                    self.store.update(pid, iteration=p['iteration'] + 1, resume_state='REWORK')
             self.write_handoff(pid)
             return self.store.project(pid)
 

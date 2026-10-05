@@ -4,7 +4,7 @@ and always shows the persisted truth."""
 import os
 import threading
 import tkinter as tk
-from tkinter import messagebox, scrolledtext, simpledialog, ttk
+from tkinter import messagebox, scrolledtext, ttk
 
 from . import WORKSPACE, __version__
 from .engine import activity, open_engine
@@ -40,8 +40,8 @@ class App(tk.Tk):
         body.add(self.detail, weight=3)
 
         bar = ttk.Frame(self, padding=8); bar.pack(fill='x')
-        for text, cmd in (('작동함', lambda: self.review('works')), ('문제 있음…', lambda: self.review('problem')),
-                          ('수정 요청…', lambda: self.review('change')),
+        for text, cmd in (('리뷰 / 피드백…', self.review_dialog), ('외부 연결 승인', lambda: self.network(True)),
+                          ('외부 연결 거절', lambda: self.network(False)),
                           ('계속 실행 / 재개', self.resume), ('중단', self.stop), ('프로젝트 종료…', self.finish),
                           ('폴더 열기', self.open_folder)):
             ttk.Button(bar, text=text, command=cmd).pack(side='left', padx=3)
@@ -104,26 +104,57 @@ class App(tk.Tk):
         if self.selected in self.running:
             self.running[self.selected].set()
 
-    def review(self, verdict, text=None):
-        """Owner's verdict on a delivered artifact. Problem/change reopen the same project and rebuild it."""
+    def review_dialog(self):
+        """Two separate questions: does it work? / what do you want next (plain language) or finish."""
         if not self.selected:
             return
-        if verdict != 'works' and text is None:
-            prompt = ('무엇이 작동하지 않나요? 어떻게 실행했고 무엇이 보였는지 적어 주세요.' if verdict == 'problem'
-                      else '무엇을 바꾸고 싶은지 적어 주세요.')
-            text = simpledialog.askstring('AX Branch — Owner review', prompt, parent=self)
-            if not text:
-                return
+        win = tk.Toplevel(self); win.title('AX Branch — Owner review'); win.grab_set()
+        ttk.Label(win, text='1. 실행해 보니 제대로 작동하나요?', font=FONT, padding=(10, 8, 10, 2)).pack(anchor='w')
+        works = tk.StringVar(value='unknown')
+        for label, value in (('작동함', 'yes'), ('작동하지 않음', 'no'), ('아직 확인 안 함', 'unknown')):
+            ttk.Radiobutton(win, text=label, value=value, variable=works).pack(anchor='w', padx=24)
+        ttk.Label(win, text='2. 바꾸거나 더하고 싶은 점이 있나요? 자유롭게 적어 주세요 (없으면 비워 두세요).\n'
+                            '   작동하지 않으면 어떻게 실행했고 무엇이 보였는지도 적어 주세요.',
+                  font=FONT, padding=(10, 10, 10, 2)).pack(anchor='w')
+        box = tk.Text(win, height=7, width=72, font=FONT, wrap='word'); box.pack(padx=10, fill='both', expand=True)
+        win.feedback_text = box                      # reachable by tests
+        row = ttk.Frame(win, padding=8); row.pack(fill='x')
+
+        def send(finish=False):
+            answer = {'yes': True, 'no': False}.get(works.get())
+            if self.review(answer, box.get('1.0', 'end').strip(), finish):
+                win.destroy()
+        ttk.Button(row, text='보내기', command=send).pack(side='right', padx=3)
+        ttk.Button(row, text='마무리(프로젝트 끝내기)', command=lambda: send(True)).pack(side='right', padx=3)
+
+    def network(self, approve):
+        if not self.selected:
+            return
         engine = self.engine_factory()
         try:
-            p = engine.owner_review(self.selected, verdict, text or '')
+            engine.decide_network(self.selected, approve)
         except Exception as e:
             messagebox.showwarning('AX Branch', str(e))
             return
         finally:
             engine.store.close()
+        self.resume()
+
+    def review(self, works=None, text='', finish=False):
+        """Record the Owner's review; anything that needs work reopens the same project and rebuilds it."""
+        if not self.selected:
+            return False
+        engine = self.engine_factory()
+        try:
+            p = engine.owner_review(self.selected, works, text, finish)
+        except Exception as e:
+            messagebox.showwarning('AX Branch', str(e))
+            return False
+        finally:
+            engine.store.close()
         if p['state'] == 'REWORK':
             self._launch(self.selected)
+        return True
 
     def finish(self):
         if not self.selected:
@@ -209,6 +240,8 @@ class App(tk.Tk):
             lines += [f"  [{f['severity']}] {f['issue']}" for f in v['result']['findings']]
         for f in self.store.feedback(self.selected):
             lines.append(f"■ Owner 피드백 {f['iteration']}회차 ({f['verdict']}): {f['text']}")
+        for ap in self.store.approvals(self.selected):
+            lines.append(f"■ 외부 연결 {ap['subject']} — {ap['purpose']}: {ap['status']}")
         if p['report']:
             r = p['report']
             lines += ['', '■ 淸月 AI CEO 보고', r['summary'], '', f"판단: {r['judgment']}", f"산출물: {r['artifact']}",
