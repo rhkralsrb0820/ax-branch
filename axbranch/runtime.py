@@ -232,7 +232,14 @@ for (const selector of SELECTORS) {
             try:
                 # Preserve method, query, headers and body, including chunked request framing.
                 con.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=True)
+                upstream = f'127.0.0.1:{port}'
                 for key, value in self.headers.items():
+                    # The app must see its own address: apps that guard Host/Origin (anti DNS rebinding)
+                    # rejected every proxied request (found live on the stock analyzer).
+                    if key.lower() == 'host':
+                        value = upstream
+                    elif key.lower() in ('origin', 'referer'):
+                        value = re.sub(r'^(https?://)[^/]+', lambda m: m.group(1) + upstream, value)
                     con.putheader(key, value)
                 con.endheaders()
                 if self.headers.get('Transfer-Encoding', '').lower() == 'chunked':

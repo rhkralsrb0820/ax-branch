@@ -140,6 +140,21 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual((self.tmp / 'app.py').read_text(encoding='utf-8'), code)
 
     @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
+    def test_click_proxy_works_with_apps_that_guard_their_host(self):
+        # Like the real stock analyzer: requests whose Host is not 127.0.0.1:<own port> are refused.
+        page = ("<html><body><div id=r>loading</div><button id=go>Go</button><script>"
+                "document.getElementById('go').onclick=()=>fetch('/api/analyze?t=DEMO').then(r=>r.json())"
+                ".then(j=>{document.getElementById('r').textContent='SMA '+j.sma+' rendered'});</script></body></html>")
+        guard = ("if self.headers.get('Host') != '127.0.0.1:%d' % self.server.server_port:\n"
+                 "            self.send_response(403); self.end_headers(); self.wfile.write(b'bad host'); return")
+        code = SERVER.replace('MODE', guard).replace("b'<h1>Stock dashboard</h1>'", repr(page.encode()))
+        code = code.replace('self.end_headers()\n', "self.send_header('Content-Type', 'text/html' if self.path == '/' "
+                                                     "else 'application/json'); self.end_headers()\n", 1)
+        browser_probe = {**probe('guarded click', '/', ['SMA 2 rendered']), 'http_method': 'BROWSER', 'http_body': '#go'}
+        ev = self.check(code, {**WEB, 'probes': [browser_probe]})
+        self.assertTrue(ev['ok'], ev)
+
+    @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
     def test_injected_click_script_cannot_satisfy_expect_contains(self):
         page = b'<html><body><h1>Ready</h1></body></html>'
         code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page))
