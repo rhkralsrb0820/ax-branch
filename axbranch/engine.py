@@ -499,6 +499,12 @@ class Engine:
         rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
         checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
         checks['runtime'] = self.runtime_evidence(artifact, plan.get('runtime'), plan['artifact_filename'])
+        failing = [s for s in checks['runtime']['steps'] if not s['ok']]
+        if failing and all(all(pr.startswith('browser did not finish') for pr in s.get('problems', [])) for s in failing):
+            # The verification harness itself failed (headless browser hang), not the artifact. 2026-10-05:
+            # this alone sent a working v7 back to rework and cost a rebuild. Re-check once, and say so.
+            self.store.event(pid, 'harness_retry', steps=[s['name'] for s in failing])
+            checks['runtime'] = self.runtime_evidence(artifact, plan.get('runtime'), plan['artifact_filename'])
         if not checks['runtime']['ok']:
             checks['ok'] = False
             checks['output'] = (checks.get('output', '') + '\nRUNTIME ACCEPTANCE FAILED: '

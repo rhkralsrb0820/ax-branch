@@ -10,6 +10,10 @@ Owner review redesign, governed external connections, and the fixes from a real 
 `docs/evidence/2026-10-05-recovery-continuity.md`; analysis: `docs/GAP_ANALYSIS.md`.
 
 ### Added
+- Development team mode: `devteam/delegate.py` (bounded Claude→Codex handoff, deterministic scope/test
+  check, `devteam/DEV_LOG.jsonl`); BROWSER probes can click (via an injecting loopback proxy);
+  `expect_absent` (forbidden text, e.g. fabricated values); `call_failed` events and preserved switch
+  reasons; WORKING/WAITING/STALLED/FAILED/PAUSED status from recorded state; `harness_retry`.
 - OWNER_REVIEW asks two separate questions: does it work? / what next? Plain-language feedback (no
   classification), `works` alone keeps the project open, only an explicit finish moves toward closing.
   CLI `review <id> [--works | --broken T] [--request T] [--finish]`; window dialog "리뷰 / 피드백…".
@@ -38,10 +42,20 @@ Owner review redesign, governed external connections, and the fixes from a real 
 - GUI could abort (`Tcl_AsyncDelete`) when the cyclic GC freed dialog objects on a worker thread.
 
 ### Verification
-- VERIFICATION_PLACEHOLDER
+- 71 unit tests pass (exit code checked, twice).
+- P-20261003-bbad3c recovered without restarting: v4 kept as base after deterministic checks; one
+  reproduced defect (`103 104` → 103104) fixed by **edit-based builds on Codex** (84 s and 50 s; the two
+  previous whole-file attempts timed out at 1 800 s). v8 PASS (24/24 criteria, self-test exit 0, 20/20
+  runtime steps incl. click-driven rendered analysis and exact Owner launch) → OWNER_REVIEW.
+- Independent check of v8: the reported inputs parse to distinct prices; real-browser click on a sample shows
+  the one-line interpretation, evidence, risks and the not-investment-advice notice.
+- Development by delegation: Codex implemented the click-probe proxy (272 s; needed one rework found in
+  review) and failed-call observability (160 s; no rework) via `devteam/delegate.py`.
 
 ### Known issues
-- Clicks are not exercised by BROWSER probes; flows must be reachable by URL.
+- v7 was failed by a headless-Edge hang (harness, not the product) and rebuilt once; fixed afterwards
+  (`harness_retry`), but the hang's root cause is unknown. `effort` still counts that FAIL as a caught defect.
+- BROWSER probes can click but not type; typed-input flows are covered by HTTP probes only.
 - While Claude emits its final structured deliverable, streamed output may pause for minutes.
 - Experience improves engine choice only through the track record shown to the CEO; nothing else learns.
 

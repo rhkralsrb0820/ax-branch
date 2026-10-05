@@ -382,6 +382,23 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(self.store.events(pid, {'recovery_replan'})), 1)
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
 
+    def test_harness_hang_is_rechecked_not_sent_to_rework(self):
+        eng = self.engine(Script([GOOD], ['PASS']))
+        real = eng.runtime_evidence
+        calls = []
+
+        def flaky(*args):
+            calls.append(1)
+            if len(calls) == 1:          # first run: the browser hung, the artifact is not at fault
+                return {'ok': False, 'mode': 'web', 'notes': [], 'steps': [
+                    {'name': 'BROWSER: home', 'ok': False, 'problems': ['browser did not finish within 90s (2 attempts)']}]}
+            return real(*args)
+        eng.runtime_evidence = flaky
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS'])   # no rebuild
+        self.assertEqual(len(self.store.events(pid, {'harness_retry'})), 1)
+
     def test_external_connection_waits_for_owner_approval(self):
         script = Script([GOOD], ['PASS'])
         script.network = [{'domain': 'query1.finance.example', 'purpose': 'daily prices'}]

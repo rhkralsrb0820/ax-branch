@@ -33,7 +33,7 @@ covers the *development* of AX Branch itself.
 | Drives a project as the session (`python -m axbranch run`) | live-proven | **live-proven** (2026-10-03, see `evidence/`) |
 
 ## Live projects (OWNER_REVIEW / PENDING_CLOSE wait for the Owner)
-- `P-20261003-bbad3c` — stock analyzer, repaired via the Owner review loop (v3 PASS). **OWNER_REVIEW — Owner to test again.**
+- `P-20261003-bbad3c` — stock analyzer, improved per Owner feedback (v8 PASS: no CSV needed, beginner explanations, one-line interpretation with evidence/risks). **OWNER_REVIEW — Owner to test.**
 - `P-20261003-906ead` — business-registration-number validator (v2 PASS). **PENDING_CLOSE — Owner: keep open; do not close.**
 - `P-20261003-d356e8` — Hangul won → integer (packaged-exe run, reused 06983b knowledge, v2 PASS). PENDING_CLOSE.
 - `P-20261003-97494b` — venv guide (packaged-exe run, v2 PASS). PENDING_CLOSE.

@@ -52,3 +52,12 @@ The same root cause (no source given to producers) failed twice in a row (v5, v6
 - v4 was kept as the base: it passes its self-test and 20 of 23 original probes, and its real-browser click flow renders
   the one-line interpretation, evidence, risks and disclaimer.
 - The remaining work was narrowed to one reproduced defect, fixed by edits.
+
+## Outcome (2026-10-05 evening)
+| Ver | Producer (engine) | Result | Note |
+|---|---|---|---|
+| v7 | edit-based fix on v4 (codex, 84 s, 4 edits) | FAIL | **harness flake**: headless Edge hung twice on the home probe; v7's page loads in 2–3 s (3/3 re-runs). Wasted one rebuild → `harness_retry` added |
+| v8 | 4 more edits on v7 (codex, 50 s) | **PASS** | 24/24 criteria; 20/20 runtime steps; independently confirmed |
+
+Not repeated: planning, the design/spec stages, v4's working code. Claude today: 8 calls (CEO re-plans,
+verification, report; ~826 s); Codex: 2 product calls (134 s) + 2 development delegations (432 s).
