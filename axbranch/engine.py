@@ -17,7 +17,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, providers, runtime, sandbox
+from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, metrics, providers, runtime, sandbox
 from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
@@ -45,11 +45,13 @@ DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
               network_access=ARR(S(domain=STR, purpose=STR)), pipeline=ARR(STAGE))
 WORK = S(output=STR, key_points=ARR(STR))
-BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), summary=STR, changes_from_previous=STR)
+BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), edits=ARR(S(path=STR, find=STR, replace=STR)),
+          summary=STR, changes_from_previous=STR)
 VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
             criteria=ARR(S(criterion=STR, met=BOOL, evidence=STR)),
             findings=ARR(S(severity=ENUM('critical', 'major', 'minor'), issue=STR, evidence=STR)))
-STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE))
+STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE),
+             runtime=runtime.SPEC)
 REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR))
 
 EXEC_CONTRACT = ("The engine runs `python <file> --self-test` with empty stdin in an empty temp dir; that "
@@ -88,7 +90,8 @@ Rules:
   sign off: production agents cannot execute anything, and independent verification is done afterwards
   by the engine (self-test, Runtime Acceptance incl. rendered-page checks) and the permanent
   Verification Agent. The LAST stage must be a producer who writes the complete deliverable.
-- Pick a provider per stage from available_providers. Set web=true only for stages that must
+- Pick a provider per stage from available_providers, using provider_track_record (measured history on
+  this PC: verified final builds, empty builds, timeouts, turn durations) as evidence, not habit. Set web=true only for stages that must
   research the public web.
 - Acceptance criteria must be concrete and checkable by an independent reviewer.
 - python artifacts: a single standard-library-only file with a self-test under
@@ -163,7 +166,9 @@ behaviour the Owner confirmed works."""
 STRATEGY_SYSTEM = """You are 淸月 AI CEO. The artifact keeps FAILING independent verification. The
 standard will not be lowered. Decide: continue (same team, findings are fixable), switch_provider
 (the final-stage engine is the problem), or change_pipeline (approach/agents are wrong: return
-a full new pipeline). Return pipeline=[] unless change_pipeline.
+a full new pipeline). Return pipeline=[] unless change_pipeline. Always return the runtime spec
+that should prove usability from now on (the current one if unchanged); if usability is unproven,
+strengthen it (e.g. BROWSER probes for rendered pages).
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
@@ -269,7 +274,8 @@ class Engine:
         context = {'goal': goal, 'available_providers': providers.available() or list(gov.PROVIDERS),
                    'available_tools': tools,
                    'prior_knowledge': knowledge.retrieve(self.vault, goal),
-                   'intelligence': knowledge.intel(self.gai_db, goal)}
+                   'intelligence': knowledge.intel(self.gai_db, goal),
+                   'provider_track_record': metrics.provider_record(self.store)}
         # Provenance: exactly which prior knowledge and intelligence the CEO was shown.
         self.store.event(pid, 'context_used', vault_notes=[n['note'] for n in context['prior_knowledge']],
                          intelligence=[f"{i['title']} <{i['url']}>" for i in context['intelligence']])
@@ -365,6 +371,13 @@ class Engine:
                    'content_rule': ('files = every file of the bundle as {path (relative), content}; content = ""'
                                     if plan['artifact_kind'] == 'bundle' else
                                     'content = the complete file text, nothing else; files = []'),
+                   'edit_rule': ('When previous_artifact exists and the change is localized, return edits instead '
+                                 'of the whole deliverable (content="" and files=[]): each edit is {path, find, '
+                                 'replace}; find = an EXACT snippet copied from previous_artifact that occurs exactly '
+                                 'once (include enough surrounding lines), replace = its new text; edits apply in '
+                                 'order. The engine applies them to the previous version byte-exactly and rejects '
+                                 'the build if any find is missing or ambiguous. Return the complete deliverable only '
+                                 'when most of it changes. Otherwise edits=[].'),
                    'execution_check': (EXEC_CONTRACT.replace('<file>', plan['artifact_filename'])
                                        if plan['artifact_kind'] != 'markdown' else 'document must be substantive'),
                    'runtime_acceptance': runtime.normalize(plan.get('runtime'))[0]}
@@ -383,6 +396,20 @@ class Engine:
             system += '\n\n' + REWORK
         build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context, BUILD,
                                 prefer=final['provider'], web=final['web'])
+        edits = build.get('edits') or []
+        if edits and not (build['content'] or build['files']):
+            # Edit-based build: localized changes applied to the latest real version (0.1.9: regenerating a
+            # 150 KB file for a few fixes took 26 min once and exceeded 30 min the next time).
+            if latest is None:
+                return self._no_deliverable(pid, final, used, build, 'edits returned but there is no previous version')
+            applied, error = artifacts.apply_edits(latest, edits)
+            if error:
+                return self._no_deliverable(pid, final, used, build, error)
+            if plan['artifact_kind'] == 'bundle':
+                build = {**build, 'files': [{'path': k, 'content': v} for k, v in applied.items()]}
+            else:
+                build = {**build, 'content': next(iter(applied.values()))}
+            self.store.event(pid, 'edits_applied', count=len(edits), base_version=latest['iteration'])
         texts = [f.get('content') or '' for f in build['files']] + [build['content'] or '']
         if not any(text.strip() for text in texts):
             return self._no_deliverable(pid, final, used, build)
@@ -513,18 +540,19 @@ class Engine:
         confirmed = next((a for a in reversed(real) if a['iteration'] in works), None)
         return latest, confirmed
 
-    def _no_deliverable(self, pid, final, used, build):
-        """The producing stage returned nothing: a deterministic FAIL, no artifact and no verification call."""
+    def _no_deliverable(self, pid, final, used, build, reason='empty deliverable'):
+        """No usable deliverable (empty, or edits that do not apply): a deterministic FAIL, no artifact and
+        no verification call. The reason goes back to the producer as a finding."""
         p = self.store.project(pid)
         finding = {'severity': 'critical', 'issue': f"The final production stage ({final['agent_role']}, {used}) "
-                   'delivered no content.', 'evidence': (build.get('summary') or '')[:600]}
+                   f'delivered no usable deliverable: {reason}.', 'evidence': (build.get('summary') or '')[:600]}
         with self.store.tx():
             self.store.event(pid, 'build_rejected', agent=final['agent_role'], provider=used,
-                             reason='empty deliverable', summary=(build.get('summary') or '')[:600])
+                             reason=reason, summary=(build.get('summary') or '')[:600])
             self.store.add_verification(pid, '', p['iteration'], 'FAIL',
                                         {'verdict': 'FAIL', 'lenses_applied': ['deterministic'], 'criteria': [],
                                          'findings': [finding]},
-                                        {'ok': False, 'ran': ['deliverable present'], 'output': 'empty deliverable'},
+                                        {'ok': False, 'ran': ['deliverable present'], 'output': reason},
                                         'engine')
         self._after_fail(pid, p)
 
@@ -552,7 +580,8 @@ class Engine:
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
                                              'findings': v['result']['findings'], 'checks_ok': v['checks']['ok']}
                                             for v in self.store.verifications(pid)],
-                   'available_providers': providers.available() or list(gov.PROVIDERS)}
+                   'available_providers': providers.available() or list(gov.PROVIDERS),
+                   'provider_track_record': metrics.provider_record(self.store)}
         decision, used = self._ask(pid, 'CEO', STRATEGY_SYSTEM, 'Review strategy after repeated failure.',
                                    context, STRATEGY, prefer='claude')
         plan = p['plan']
@@ -567,6 +596,15 @@ class Engine:
                 plan = self._sanitize(plan)
                 self.store.end_agents(pid, 'replaced')
                 self.store.update(pid, plan=plan, plan_version=p['plan_version'] + 1)
+            if decision.get('runtime', {}).get('probes'):
+                # A strategy review may strengthen how usability is proven (e.g. add rendered-page probes);
+                # it never silently weakens it: probes the old spec had stay unless the CEO renamed them.
+                old = {pr['name'] for pr in (plan.get('runtime') or {}).get('probes', [])}
+                plan['runtime'] = runtime.normalize(decision['runtime'])[0]
+                dropped = old - {pr['name'] for pr in plan['runtime']['probes']}
+                self.store.update(pid, plan=plan)
+                if dropped:
+                    self.store.event(pid, 'decision', what='runtime probes dropped by strategy', why=', '.join(sorted(dropped)), by=used)
             self.store.event(pid, 'decision', what=f"strategy: {decision['decision']}", why=decision['rationale'], by=used)
 
     def replan(self, pid, reason):
@@ -621,7 +659,8 @@ class Engine:
                    'runtime_evidence_current': before,
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
                                              'findings': v['result']['findings']} for v in self.store.verifications(pid)],
-                   'available_providers': providers.available() or list(gov.PROVIDERS)}
+                   'available_providers': providers.available() or list(gov.PROVIDERS),
+                   'provider_track_record': metrics.provider_record(self.store)}
         d, used = self._ask(pid, 'CEO', DIAGNOSE_SYSTEM, 'Diagnose the Owner feedback and revise this project.',
                             context, DIAGNOSIS, prefer='claude')
         new = self._sanitize({**plan, **{k: d[k] for k in ('interpretation', 'artifact_kind', 'artifact_filename',

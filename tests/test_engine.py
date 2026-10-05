@@ -52,7 +52,8 @@ class Script:
             return {'verdict': v, 'lenses_applied': ['se'], 'criteria': [{'criterion': 'add', 'met': v == 'PASS', 'evidence': 'e'}],
                     'findings': [] if v == 'PASS' else [{'severity': 'major', 'issue': 'wrong sum', 'evidence': 'a - b'}]}, prefer, []
         if schema is E.STRATEGY:
-            return {'decision': self.strategy, 'rationale': 'r', 'pipeline': []}, 'claude', []
+            return {'decision': self.strategy, 'rationale': 'r', 'pipeline': [],
+                    'runtime': {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []}}, 'claude', []
         if schema is E.DIAGNOSIS:
             return {'diagnosis': 'owner saw it close', 'root_cause': 'no usable launch', 'change_summary': 'add probe',
                     'interpretation': 'Build an add() helper usable by double-click', 'artifact_kind': 'python',

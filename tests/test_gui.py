@@ -50,7 +50,7 @@ class GuiTests(unittest.TestCase):
         self.app.withdraw()
 
     def tearDown(self):
-        self.app.destroy()
+        self.app.destroy()           # App.destroy collects Tk cycles on this (the Tk) thread
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def pump_until(self, condition, seconds=30):

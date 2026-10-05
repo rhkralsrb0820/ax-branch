@@ -3,6 +3,48 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.9] - 2026-10-05
+
+Owner review redesign, governed external connections, and the fixes from a real continuity event
+(genuine Claude usage limit + 13.7 h PC sleep + host interruption). Evidence:
+`docs/evidence/2026-10-05-recovery-continuity.md`; analysis: `docs/GAP_ANALYSIS.md`.
+
+### Added
+- OWNER_REVIEW asks two separate questions: does it work? / what next? Plain-language feedback (no
+  classification), `works` alone keeps the project open, only an explicit finish moves toward closing.
+  CLI `review <id> [--works | --broken T] [--request T] [--finish]`; window dialog "리뷰 / 피드백…".
+- External-connection approval gate: plans declare `network_access`; the build waits for the Owner
+  (`approve <id> --network yes|no`, window buttons); a decline goes back to the CEO. `external_connection`
+  added to Owner-only actions (tightening).
+- Rendered-page Runtime Acceptance: `BROWSER` probes load the page in headless Edge (scripts run) and
+  check rendered text (script source excluded).
+- Resource awareness: machine-wide limit of 2 concurrent provider CLIs (OS file-lock slots), 1 GB free
+  memory floor before launch, sleep-aware provider timeouts.
+- `axbranch effort [<id>]`: Owner Effort KPI split into MEASURED / ESTIMATED / UNKNOWN.
+- Provider track record (measured per engine) given to the CEO when planning, re-planning, diagnosing.
+- `axbranch replan <id> --reason …` recovery: CEO strategy review for a stuck/misdirected project.
+- Claude runs stream progress (stream-json), so live activity shows real output growth.
+
+### Changed
+- Every rework stage receives the latest non-empty version and the Owner-confirmed version in full
+  (was: final stage only; notes stages ≤ 60 000 chars).
+- Pipelines are production-only; the final stage must be the producer of the whole deliverable.
+- A strategy review can revise the runtime spec (never silently weakening it).
+
+### Fixed
+- Empty builds were stored and sent to verification; now rejected deterministically (no call).
+- Rework baseline could be an empty artifact.
+- PC sleep was counted as provider work (false timeout after 13.7 h).
+- GUI could abort (`Tcl_AsyncDelete`) when the cyclic GC freed dialog objects on a worker thread.
+
+### Verification
+- VERIFICATION_PLACEHOLDER
+
+### Known issues
+- Clicks are not exercised by BROWSER probes; flows must be reachable by URL.
+- While Claude emits its final structured deliverable, streamed output may pause for minutes.
+- Experience improves engine choice only through the track record shown to the CEO; nothing else learns.
+
 ## [0.1.8] - 2026-10-04
 
 Owner acceptance found a delivered program that was unusable (closed 0.3 s after a double-click; no

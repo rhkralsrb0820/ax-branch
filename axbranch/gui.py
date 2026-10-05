@@ -1,6 +1,7 @@
 """Minimal Owner window. The engine runs in worker threads with their own SQLite
 connection; this window only reads the database on a timer, so it never blocks
 and always shows the persisted truth."""
+import gc
 import os
 import threading
 import tkinter as tk
@@ -124,6 +125,10 @@ class App(tk.Tk):
             answer = {'yes': True, 'no': False}.get(works.get())
             if self.review(answer, box.get('1.0', 'end').strip(), finish):
                 win.destroy()
+                # Closed dialogs leave Tk objects in reference cycles; collect them HERE, on the Tk thread.
+                # Left to chance, the cyclic GC may run on an engine worker thread and abort Python
+                # ("Tcl_AsyncDelete: async handler deleted by the wrong thread").
+                gc.collect()
         ttk.Button(row, text='보내기', command=send).pack(side='right', padx=3)
         ttk.Button(row, text='마무리(프로젝트 끝내기)', command=lambda: send(True)).pack(side='right', padx=3)
 
@@ -182,7 +187,7 @@ class App(tk.Tk):
                 engine.close(p['id'], choice, confirm, sat.get())
             except Exception as e:
                 messagebox.showerror('AX Branch', str(e), parent=win)
-            win.destroy(); engine.store.close()
+            win.destroy(); engine.store.close(); gc.collect()   # Tk cycles freed on the Tk thread
         for text, choice in (('A. SAVE & CLOSE', 'save'), ('B. PAUSE', 'pause'), ('C. CLOSE WITHOUT SAVE', 'discard')):
             ttk.Button(win, text=text, command=lambda c=choice: choose(c)).pack(fill='x', padx=12, pady=3)
 
@@ -260,6 +265,7 @@ class App(tk.Tk):
             self.after_cancel(self._tick)       # no refresh callback firing into a destroyed window
         self.store.close()
         super().destroy()
+        gc.collect()                            # same reason: never let a worker thread free Tk objects
 
     def quit_app(self):
         if self.running and not messagebox.askyesno('AX Branch', '실행 중인 프로젝트가 있습니다. 중단하고 닫을까요? '

@@ -96,6 +96,30 @@ def text_of(artifact, cap=400_000):
     return '\n\n'.join(parts)[:cap]
 
 
+def apply_edits(artifact, edits):
+    """Apply exact search/replace edits to an artifact's files. Returns ({relpath: text}, None) or
+    (None, reason). Each `find` must occur exactly once in its file at the time it is applied, so an
+    edit can never land somewhere unintended; any problem rejects the whole build."""
+    files = {rel: path.read_bytes().decode('utf-8') for rel, path, _ in files_of(artifact)}
+    only = next(iter(files)) if len(files) == 1 else None
+    for i, edit in enumerate(edits, 1):
+        rel = only or safe_relpath(edit.get('path'))     # single file: the path is informational
+        if rel is None:
+            return None, f'edit {i}: unsafe or missing path {edit.get("path")!r}'
+        if rel not in files:
+            if edit.get('find'):
+                return None, f'edit {i}: file {edit.get("path")!r} is not in the current version'
+            files[rel] = edit.get('replace') or ''       # empty find on a new path = create the file
+            continue
+        find, text = edit.get('find') or '', files[rel]
+        hits = text.count(find) if find else 0
+        if hits != 1:
+            return None, (f'edit {i} ({rel}): the text to replace occurs {hits} times in the current version; '
+                          'it must occur exactly once (copy a longer, exact snippet)')
+        files[rel] = text.replace(find, edit.get('replace') or '', 1)
+    return files, None
+
+
 def materialize(artifact, folder):
     """Copy the artifact's files into folder (for running checks away from the original)."""
     for rel, path, _ in files_of(artifact):

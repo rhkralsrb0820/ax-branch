@@ -11,6 +11,7 @@
                                                  Owner review: does it work? / what next (plain language)
   python -m axbranch approve <id> --network yes|no   decide pending external connections
   python -m axbranch replan <id> --reason "..."  recovery: CEO strategy review for a stuck/misdirected project
+  python -m axbranch effort [<id>]                Owner Effort KPI (measured / estimated / unknown)
   python -m axbranch upgrade-proposal           draft only, and only if Owner satisfaction >= 90%
 """
 import argparse
@@ -41,6 +42,7 @@ def main(argv=None):
         g.add_argument('--' + choice, dest='choice', action='store_const', const=choice)
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
     sub.add_parser('upgrade-proposal')
+    ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
     rv = sub.add_parser('review'); rv.add_argument('id')
     gv = rv.add_mutually_exclusive_group()
     gv.add_argument('--works', action='store_true', help='it runs correctly')
@@ -105,6 +107,9 @@ def _dispatch(a):
         p = engine.decide_network(a.id, a.network == 'yes')
         print(f"[{p['id']}] external connection(s) {'approved' if a.network == 'yes' else 'declined'}; "
               f"continue with: python -m axbranch resume {p['id']}")
+    elif a.cmd == 'effort':
+        from .metrics import effort
+        print(json.dumps(effort(store, a.id), ensure_ascii=False, indent=2))
     elif a.cmd == 'upgrade-proposal':
         from . import providers, upgrade
         status, result = upgrade.propose(store, engine.workspace, providers.call)

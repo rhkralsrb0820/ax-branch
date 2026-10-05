@@ -1,0 +1,103 @@
+"""Owner Effort — AX Branch's primary product KPI — computed only from recorded state.
+
+MEASURED   counted from SQLite events/rows; exact.
+ESTIMATED  derived with a stated rule; may be wrong.
+UNKNOWN    not recorded anywhere; never guessed or converted into "time saved".
+"""
+import json
+
+
+def _sessions(db, where, args):
+    """Who started each engine session, attributed by the CLI environment the process ran in."""
+    out = {'owner_or_app': 0, 'claude_code_operator': 0, 'codex_session': 0}
+    for (detail,) in db.execute(f"SELECT detail FROM events WHERE kind='session' {where}", args):
+        env = json.loads(detail).get('env') or []
+        if any(k.startswith('CODEX_SESSION') or k.startswith('CODEX_THREAD') for k in env):
+            out['codex_session'] += 1
+        elif 'CLAUDECODE' in env:
+            out['claude_code_operator'] += 1
+        else:
+            out['owner_or_app'] += 1
+    return out
+
+
+def effort(store, pid=None):
+    db = store.db
+    where, args = ('AND project_id=?', (pid,)) if pid else ('', ())
+    count = lambda sql: db.execute(sql + ' ' + where, args).fetchone()[0]
+    feedback = {v: n for v, n in db.execute(f'SELECT verdict, COUNT(*) FROM owner_feedback WHERE 1=1 {where} '
+                                            'GROUP BY verdict', args)}
+    events = lambda kind: count(f"SELECT COUNT(*) FROM events WHERE kind='{kind}'")
+    resumes = count("SELECT COUNT(*) FROM events WHERE kind='state' AND detail LIKE '%Owner resumed%'")
+    projects = 1 if pid else db.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
+    owner_instructions = projects + feedback.get('problem', 0) + feedback.get('request', 0)
+    calls = events('call')
+    # A FAIL on an empty / missing deliverable is AX Branch's own pipeline failure, not a product defect caught.
+    from . import artifacts
+    empty = {a['id'] for a in (dict(r) for r in db.execute(f'SELECT * FROM artifacts WHERE 1=1 {where}', args))
+             if artifacts.is_empty(a)}
+    fail_rows = [r[0] for r in db.execute(f"SELECT artifact_id FROM verifications WHERE verdict='FAIL' {where}", args)]
+    pipeline_failures = sum(1 for a in fail_rows if a == '' or a in empty)
+    fails = len(fail_rows) - pipeline_failures
+    passes = count("SELECT COUNT(*) FROM verifications WHERE verdict='PASS'")
+    escaped = feedback.get('problem', 0)
+    return {
+        'scope': pid or 'all projects',
+        'MEASURED': {
+            'owner_instructions (goals + problem reports + change requests)': owner_instructions,
+            'owner_confirmations (works / finish)': feedback.get('works', 0) + feedback.get('finish', 0),
+            'owner_approval_decisions': events('approval_decided'),
+            'owner_resumes': resumes,
+            'manual_recovery_replans': events('recovery_replan'),
+            'engine_sessions_started_by': _sessions(db, where, args),
+            'ai_agent_turns_run_by_ax_branch': calls,
+            'ai_turns_per_owner_instruction': round(calls / owner_instructions, 1) if owner_instructions else None,
+            'automatic_provider_switches (no Owner relay)': events('provider_handoff'),
+            'defects_caught_before_owner (verification FAIL on a real build)': fails,
+            'ax_branch_pipeline_failures (empty / no deliverable)': pipeline_failures,
+            'verified_deliveries (PASS)': passes,
+            'problems_found_by_owner_after_PASS': escaped,
+        },
+        'ESTIMATED': {
+            'manual_ai_relays_avoided': {
+                'value': events('provider_handoff') + calls,
+                'rule': 'each AX Branch agent turn and provider switch is a prompt/handoff the Owner would otherwise '
+                        'have typed or relayed when driving the AI directly; assumes one prompt per turn',
+            },
+        },
+        'UNKNOWN': [
+            'Owner minutes spent reviewing, testing or writing feedback (not recorded)',
+            'time the same result would take with direct Claude/ChatGPT/Gemini use (no baseline measured)',
+            'business value of the delivered artifacts',
+        ],
+    }
+
+
+def provider_record(store):
+    """Measured history per execution engine on this PC, for the CEO's engine choices (experience ->
+    better routing, without training). Final builds are judged by their verification outcome."""
+    db = store.db
+    rec = {}
+    for name in ('claude', 'codex'):
+        secs = sorted(json.loads(d).get('seconds') for (d,) in db.execute(
+            "SELECT detail FROM events WHERE kind='call' AND detail LIKE ?", (f'%"provider": "{name}"%',))
+            if json.loads(d).get('seconds') is not None)
+        builds = db.execute(
+            "SELECT v.verdict FROM verifications v JOIN artifacts a ON a.id = v.artifact_id "
+            "JOIN agents g ON g.id = a.agent_id WHERE g.provider = ?", (name,)).fetchall()
+        empty = db.execute("SELECT COUNT(*) FROM events WHERE kind='build_rejected' AND detail LIKE ?",
+                           (f'%"provider": "{name}"%',)).fetchone()[0]
+        label = 'Claude Code' if name == 'claude' else 'Codex'
+        timeouts = db.execute("SELECT COUNT(*) FROM events WHERE kind='state' AND detail LIKE ? AND detail LIKE ?",
+                              (f'%{label}:%', '%초과%')).fetchone()[0]
+        quota = db.execute("SELECT COUNT(*) FROM events WHERE kind='provider_handoff' AND detail LIKE ?",
+                           (f'%"preferred": "{name}"%',)).fetchone()[0]
+        rec[name] = {'turns_with_duration': len(secs),
+                     'median_turn_seconds': secs[len(secs) // 2] if secs else None,
+                     'longest_turn_seconds': secs[-1] if secs else None,
+                     'final_builds_verified': len(builds),
+                     'final_builds_passed': sum(v == 'PASS' for (v,) in builds),
+                     'empty_final_builds_rejected': empty,
+                     'timeouts': timeouts,
+                     'usage_limit_switches_away': quota}
+    return rec

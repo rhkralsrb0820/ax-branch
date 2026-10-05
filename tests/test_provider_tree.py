@@ -23,6 +23,11 @@ class ProviderTreeTests(unittest.TestCase):
                          f"    pathlib.Path(r'{self.marker}').write_text(str(i))\n    time.sleep(1)\n", encoding='utf-8')
         self.wrapper = self.tmp / 'fakecli.cmd'
         self.wrapper.write_text(f'@echo off\r\n"{sys.executable}" "{child}"\r\n', encoding='utf-8')
+        # Independent of this machine's live state: own slot folder, memory floor not in play.
+        for patcher in (mock.patch.object(providers, 'SLOT_DIR', self.tmp / 'slots'),
+                        mock.patch.object(providers, 'free_memory_mb', return_value=10**6)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
