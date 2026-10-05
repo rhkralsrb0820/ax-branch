@@ -311,19 +311,12 @@ for (const selector of SELECTORS) {
     return proxy, thread
 
 
-def _rendered(port, probe):
-    """BROWSER probe: load the page in a real headless browser (scripts run, the page's own API calls
-    happen) and check the RENDERED text — script source is stripped so code text cannot fake a match."""
+def _dump_dom(exe, port, path, selectors):
+    """One headless-browser load (through the click proxy when selectors are given): the DOM, or None
+    if the browser did not finish in time."""
     import os
     import tempfile
-    path = probe.get('http_path') or '/'
-    step = {'name': probe['name'], 'request': f'BROWSER {path}'}
-    exe = browser()
-    if exe is None:
-        step.update(ok=False, problems=['no headless browser available on this PC (Edge/Chrome)'])
-        return step
     profile = tempfile.mkdtemp(prefix='axb-browser-')
-    selectors = [s.strip() for s in (probe.get('http_body') or '').split('||') if s.strip()]
     proxy, thread, proc = None, None, None
     try:
         if selectors:
@@ -335,9 +328,8 @@ def _rendered(port, probe):
                               f'--user-data-dir={profile}', f'--virtual-time-budget={budget}', '--dump-dom',
                               f'http://127.0.0.1:{port}{path}'], profile, env=dict(os.environ), caps=False)
         if proc.wait(BROWSER_TIMEOUT) is None:
-            step.update(ok=False, problems=[f'browser did not finish within {BROWSER_TIMEOUT}s'])
-            return step
-        dom = proc.output()
+            return None
+        return proc.output()
     finally:
         if proc is not None:
             proc.stop()
@@ -346,6 +338,29 @@ def _rendered(port, probe):
             proxy.shutdown()
             proxy.server_close()
             thread.join()
+
+
+def _rendered(port, probe):
+    """BROWSER probe: load the page in a real headless browser (scripts run, the page's own API calls
+    happen) and check the RENDERED text — script source is stripped so code text cannot fake a match."""
+    path = probe.get('http_path') or '/'
+    step = {'name': probe['name'], 'request': f'BROWSER {path}'}
+    exe = browser()
+    if exe is None:
+        step.update(ok=False, problems=['no headless browser available on this PC (Edge/Chrome)'])
+        return step
+    selectors = [s.strip() for s in (probe.get('http_body') or '').split('||') if s.strip()]
+    # One retry, only when the browser itself did not finish: headless Edge occasionally hangs under
+    # heavy load (seen once in a full test run; the same probe then took 3 s). A page that really
+    # hangs the browser fails both attempts; a content mismatch is never retried.
+    for attempt in (1, 2):
+        dom = _dump_dom(exe, port, path, selectors)
+        if dom is not None:
+            break
+    step['attempts'] = attempt
+    if dom is None:
+        step.update(ok=False, problems=[f'browser did not finish within {BROWSER_TIMEOUT}s (2 attempts)'])
+        return step
     text = re.sub(r'<script\b.*?</script>', ' ', dom, flags=re.S | re.I)
     text = re.sub(r'<style\b.*?</style>', ' ', text, flags=re.S | re.I)
     missing = _contains(text, probe.get('expect_contains', []))
