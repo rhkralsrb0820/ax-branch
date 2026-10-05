@@ -51,7 +51,7 @@ VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
             criteria=ARR(S(criterion=STR, met=BOOL, evidence=STR)),
             findings=ARR(S(severity=ENUM('critical', 'major', 'minor'), issue=STR, evidence=STR)))
 STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE),
-             runtime=runtime.SPEC)
+             runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))))
 REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR))
 
 EXEC_CONTRACT = ("The engine runs `python <file> --self-test` with empty stdin in an empty temp dir; that "
@@ -170,7 +170,9 @@ standard will not be lowered. Decide: continue (same team, findings are fixable)
 (the final-stage engine is the problem), or change_pipeline (approach/agents are wrong: return
 a full new pipeline). Return pipeline=[] unless change_pipeline. Always return the runtime spec
 that should prove usability from now on (the current one if unchanged); if usability is unproven,
-strengthen it (e.g. BROWSER probes for rendered pages).
+strengthen it (e.g. BROWSER probes for rendered pages). Always return network_access: every domain the
+finished program contacts at run time with its risk (the current list if unchanged); new ones go to the
+Owner for approval before the build.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
@@ -647,6 +649,14 @@ class Engine:
                 plan = self._sanitize(plan)
                 self.store.end_agents(pid, 'replaced')
                 self.store.update(pid, plan=plan, plan_version=p['plan_version'] + 1)
+            access = decision.get('network_access')
+            if access is not None and access != (plan.get('network_access') or []):
+                # The program's external connections may change on re-plan; the approval gate before
+                # STAFFING asks the Owner for anything not already approved or reusable.
+                plan['network_access'] = access
+                self.store.update(pid, plan=plan)
+                self.store.event(pid, 'decision', what='network access revised by strategy',
+                                 why=', '.join(f"{a['domain']} [{a['risk']}]" for a in access) or 'none', by=used)
             if decision.get('runtime', {}).get('probes'):
                 # A strategy review may strengthen how usability is proven (e.g. add rendered-page probes);
                 # it never silently weakens it: probes the old spec had stay unless the CEO renamed them.

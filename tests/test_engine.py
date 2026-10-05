@@ -53,7 +53,8 @@ class Script:
                     'findings': [] if v == 'PASS' else [{'severity': 'major', 'issue': 'wrong sum', 'evidence': 'a - b'}]}, prefer, []
         if schema is E.STRATEGY or 'decision' in schema.get('properties', {}):
             return {'decision': self.strategy, 'rationale': 'r', 'pipeline': [],
-                    'runtime': {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []}}, 'claude', []
+                    'runtime': {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []},
+                    'network_access': self.network}, 'claude', []
         if schema is E.DIAGNOSIS:
             return {'diagnosis': 'owner saw it close', 'root_cause': 'no usable launch', 'change_summary': 'add probe',
                     'interpretation': 'Build an add() helper usable by double-click', 'artifact_kind': 'python',
