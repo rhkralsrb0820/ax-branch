@@ -21,6 +21,25 @@ def _sessions(db, where, args):
     return out
 
 
+def _owner_escapes(db, where, args):
+    out = {'total': 0, 'by_channel': {'cli': 0, 'developer_cli': 0}, 'by_action': {},
+           'in_app_actions': 0, 'excluded_development': 0}
+    for (detail,) in db.execute(f"SELECT detail FROM events WHERE kind='owner_action' {where}", args):
+        action = json.loads(detail)
+        channel = action.get('channel')
+        if channel in out['by_channel']:
+            # Replans count once here, never again from their recovery_replan events.
+            out['total'] += 1
+            out['by_channel'][channel] += 1
+            name = action['action']
+            out['by_action'][name] = out['by_action'].get(name, 0) + 1
+        elif channel == 'app':
+            out['in_app_actions'] += 1
+        elif channel == 'dev':
+            out['excluded_development'] += 1
+    return out
+
+
 def effort(store, pid=None):
     db = store.db
     where, args = ('AND project_id=?', (pid,)) if pid else ('', ())
@@ -49,6 +68,8 @@ def effort(store, pid=None):
             'owner_approval_decisions': events('approval_decided'),
             'owner_resumes': resumes,
             'manual_recovery_replans': events('recovery_replan'),
+            'owner_escapes': _owner_escapes(db, where, args),
+            'automatic_recoveries': events('recovery'),
             'engine_sessions_started_by': _sessions(db, where, args),
             'ai_agent_turns_run_by_ax_branch': calls,
             'ai_turns_per_owner_instruction': round(calls / owner_instructions, 1) if owner_instructions else None,
