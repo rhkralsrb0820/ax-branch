@@ -237,4 +237,11 @@ def call(prompt, schema, prefer='claude', web=False, cancel=None, on_tick=None):
             return RUN[name](prompt, schema, web, cancel, on_tick), name, notes
         except RateLimited as e:
             notes.append(f'{name}: {e}')
-    raise RateLimited('No provider available: ' + ' / '.join(notes))
+        except Rejected as e:
+            e.notes = notes
+            if notes:
+                e.args = (str(e) + ' / ' + ' / '.join(notes), *e.args[1:])
+            raise
+    error = RateLimited('No provider available: ' + ' / '.join(notes))
+    error.notes = notes
+    raise error

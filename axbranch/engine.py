@@ -257,6 +257,11 @@ class Engine:
         try:
             result, used, notes = self.llm(_prompt(system, task, context), schema, prefer=prefer, web=web,
                                            cancel=self.cancel, on_tick=tick)
+        except Exception as e:
+            self.store.event(pid, 'call_failed', who=who, preferred=prefer,
+                             seconds=round(time.monotonic() - started), error=str(e)[:500],
+                             notes=getattr(e, 'notes', []))
+            raise
         finally:
             activity.unlink(missing_ok=True)
         if notes:

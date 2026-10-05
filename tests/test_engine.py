@@ -141,6 +141,35 @@ class EngineTests(unittest.TestCase):
             store2.close()
         self.assertEqual(sum(s is E.PLAN for s, _, _ in script.prompts), 1)   # no re-planning
 
+    def test_failed_build_records_duration_error_and_notes_then_pauses(self):
+        for error in (providers.Rejected('timeout: ' + 'x' * 600),
+                      providers.RateLimited('usage limit')):
+            with self.subTest(error=type(error).__name__):
+                script = Script([GOOD], ['PASS'])
+                error.notes = ['claude: usage limit']
+
+                def failing(prompt, schema, **kw):
+                    if schema is E.BUILD:
+                        clock.return_value = 1900
+                        raise error
+                    return script(prompt, schema, **kw)
+                eng = self.engine(failing)
+                pid = self.store.new_project('make an add tool')
+                with mock.patch.object(E.time, 'monotonic', return_value=100) as clock:
+                    p = eng.run(pid)
+                self.assertEqual((p['state'], p['resume_state']), ('PAUSED', 'EXECUTING'))
+                self.assertEqual(p['pause_reason'], f'{type(error).__name__}: {error}')
+                failed = self.store.events(pid, {'call_failed'})
+                self.assertEqual(len(failed), 1)
+                self.assertEqual(failed[0]['detail'], {
+                    'who': 'Developer', 'preferred': 'claude', 'seconds': 1800,
+                    'error': str(error)[:500], 'notes': error.notes})
+                self.assertIsNone(E.activity(self.tmp / 'ws', pid))
+                self.assertEqual(len(self.store.events(pid, {'call_start'})), 3)
+                calls = self.store.events(pid, {'call'})
+                self.assertEqual(len(calls), 2)
+                self.assertFalse(any(e['detail']['who'] == 'Developer' for e in calls))
+
     def test_budget_pauses_without_lowering_bar_and_strategy_switches(self):
         old = gov.MAX_ROUNDS
         script = Script([BROKEN] * 3, ['FAIL'] * 3, strategy='switch_provider')
@@ -411,6 +440,31 @@ class ProviderTests(unittest.TestCase):
                 mock.patch.object(providers.shutil, 'which', return_value='x'):
             with self.assertRaises(providers.Rejected):
                 providers.call('p', {}, prefer='claude')     # a non-quota fault never spends the other plan
+
+    def test_quota_then_timeout_preserves_switch_notes_and_original_exception(self):
+        error = providers.Rejected('timeout')
+        claude = mock.Mock(side_effect=providers.RateLimited('usage limit'))
+        codex = mock.Mock(side_effect=error)
+        with mock.patch.dict(providers.RUN, {'claude': claude, 'codex': codex}), \
+                mock.patch.object(providers.shutil, 'which', return_value='x'):
+            with self.assertRaises(providers.Rejected) as raised:
+                providers.call('p', {}, prefer='claude')
+        self.assertIs(raised.exception, error)
+        self.assertEqual(error.notes, ['claude: usage limit'])
+        self.assertEqual(str(error), 'timeout / claude: usage limit')
+        claude.assert_called_once()
+        codex.assert_called_once()
+
+    def test_all_quota_refusals_preserve_notes(self):
+        with mock.patch.dict(providers.RUN, {
+                'claude': mock.Mock(side_effect=providers.RateLimited('usage limit')),
+                'codex': mock.Mock(side_effect=providers.RateLimited('quota exhausted'))}), \
+                mock.patch.object(providers.shutil, 'which', return_value='x'):
+            with self.assertRaises(providers.RateLimited) as raised:
+                providers.call('p', {}, prefer='claude')
+        self.assertEqual(raised.exception.notes, ['claude: usage limit', 'codex: quota exhausted'])
+        for note in raised.exception.notes:
+            self.assertIn(note, str(raised.exception))
 
     def test_claude_stream_result_is_found_and_quota_still_detected(self):
         ok = ('{"type":"system","subtype":"init"}\n{"type":"stream_event","event":{"delta":"x"}}\n'
