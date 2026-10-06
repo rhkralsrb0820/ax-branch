@@ -35,3 +35,5 @@ Rules learned so far:
 | permission-reuse | codex | 169 | ok | host suite pass | approved; lead integrated into the approval gate |
 | owner-escape-metric | codex | 107 | ok | host suite pass | approved, no rework |
 | supervisor-acceptance | codex | 211 | ok | 3 expected failures | independent review: **found 3 supervisor defects** (no-op escalation when PAUSED, stale RECOVERING marker, launch while old lock held); lead fixed, tests now pass |
+| live-execution-view | codex | 1012 | ok | host suite pass | approved; lead tightened running-stage rule, then extended (agent cards, records) |
+| review-p0-p1 | codex | 168 | ok (no edits) | host suite pass | independent review: **8 defects**, 7 fixed by the lead, 1 recorded |

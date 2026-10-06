@@ -3,6 +3,55 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.11] - 2026-10-07
+
+Visible execution and the lifecycle fixes found by running Test Project #1 (P-20261003-bbad3c) for real.
+The US-stock analyzer is 淸月's Test Project #1; its features are not extended — it validates the lifecycle.
+
+### Added
+- Live execution view in the window (`axbranch/live.py`, implemented by Codex, reviewed by the lead): project
+  header (stage, real status, agent, engine, worker/provider pid, elapsed/timeout, last activity, version,
+  recovery count, next action), agent table 淸月 CEO → hired agents → Verification → Runtime Acceptance (LOCAL)
+  → OWNER_REVIEW with why hired / engine / task / status / last activity / result, and per-agent explicit
+  records (claim, evidence, counterargument, decisions, verification, runtime steps, Owner feedback) plus a
+  timeline. Everything is read from local state; opening or browsing makes no AI call. Hidden reasoning is
+  neither stored nor shown.
+- Plans state `why` each specialist is hired; workers record `evidence` and `counterpoints`.
+- Development view: `devteam/devview.cmd` opens an observe-only pane (Claude Code dev CLI ACTIVE/IDLE by CPU,
+  Codex task + live output, AX Branch project workers); `delegate.py` streams Codex output there and opens it
+  automatically. No prompt relay.
+
+### Changed
+- Project runs are background processes (also from AXBranch.exe: `AXBranch.exe run <id>`); closing the window
+  no longer stops them. Stop = end the worker tree + PAUSE ("Owner stopped"), never auto-resumed.
+- The final build of a large single-file deliverable (>40k chars) uses an edits-only schema.
+- An Owner action (resume, review, approve, stop …) starts a fresh automatic-recovery budget; workers started
+  by the app/supervisor are not Owner actions.
+
+### Fixed
+- Regenerating a 115-164 KB file per call timed out or came back empty (v10-v21 of Test Project #1).
+- Windows refused the heartbeat/activity `os.replace`/`unlink` while the window read the file → project
+  PAUSED with an internal error or a hung worker.
+- The liveness probe briefly took the run lock; a starting session could exit "Busy".
+- Closing the window cancelled runs ("오너가 중단했습니다"), and the supervisor then auto-resumed them.
+- Codex's independent review (8 findings, 7 fixed): failed re-plan escaped the recovery cap / left a dead
+  end; Owner resume not recorded; stop on a failed-paused project auto-resumed; stop missed a worker waiting
+  for a provider slot; edits-only could not delete a bundle file; looking at a project created files.
+- A windowed-exe worker blocked forever on the uncaught-exception dialog; it now logs and exits.
+- GUI tests silently skipped on any Tcl error; they skip only without a display.
+
+### Verification
+- 114 tests pass (`python -X utf8 -m unittest discover -s tests -t .`), none skipped; GUI tests repeated 6×
+  with no flake after the race fixes.
+- AXBranch.exe: window opens with no provider child except the supervisor's recovery worker; the packaged
+  worker exits with code 1 and a log on error (no dialog).
+- Live: opening AXBranch.exe recovered the STALLED Test Project #1 by itself and started its final build.
+
+### Known issues
+- Codex review #7: two stages with the same agent_role in one plan share one call history in the view.
+- D-AUTO-1: with the window closed, nothing restarts a worker that dies (no OS-level supervisor yet).
+- Test Project #1 has not reached OWNER_REVIEW yet (see the release note for its live state).
+
 ## [0.1.10] - 2026-10-06
 
 Stabilization: the Owner is no longer the watchdog. Evidence of the 2 h 20 min non-converging run (v10–v15)
