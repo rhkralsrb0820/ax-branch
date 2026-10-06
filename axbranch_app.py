@@ -11,8 +11,19 @@ from axbranch.gui import main
 if __name__ == '__main__':
     args = sys.argv[1:]
     if args and args[0] == 'run':                 # background project worker started by the window
-        from axbranch.__main__ import main as cli
-        sys.exit(cli(args))
+        # A windowed exe shows a modal dialog on an uncaught exception; a hidden worker would wait on it
+        # forever. Log the error and exit instead (the supervisor sees the stopped worker).
+        try:
+            from axbranch.__main__ import main as cli
+            code = cli(args)
+        except BaseException:
+            import traceback
+            from axbranch import WORKSPACE
+            (WORKSPACE / 'logs').mkdir(parents=True, exist_ok=True)
+            with (WORKSPACE / 'logs' / 'worker-errors.log').open('a', encoding='utf-8') as log:
+                log.write(f"--- AXBranch.exe {' '.join(args)}\n{traceback.format_exc()}\n")
+            code = 1
+        sys.exit(code)
 
     def opt(name):
         return args[args.index(name) + 1] if name in args[:-1] else None
