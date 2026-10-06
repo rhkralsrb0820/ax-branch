@@ -1,0 +1,12 @@
+{
+ "id": "review-p0-p1",
+ "task_type": "independent review (no code changes)",
+ "goal": "Independent review of the lead's P0/P1 changes before release. AX Branch must run the whole lifecycle inside the app: runs must survive the window, an Owner stop must never be auto-resumed, automatic recovery must stay bounded, large deliverables must be built by edits, and the live view must show only real state with zero LLM calls.",
+ "task": "Review the diff `git diff a52fa9b~1..HEAD -- axbranch axbranch_app.py` (commits a52fa9b, 960a84, 957f9d6). Do NOT modify any file. Look for concrete defects only (no style): (1) supervisor.since_owner + AXB_SUPERVISED: can automatic recovery loop forever, or can an Owner action be lost/miscounted? (2) gui._launch detached + gui.stop: duplicate workers, a stop that leaves a running tree, a stop that the supervisor resumes, frozen exe (`AXBranch.exe run <id>`) dispatch problems; (3) run_lock(wait=2) and engine._status_write: can a real second session now start, or can a status write still crash the engine? (4) BUILD_EDITS / EDITS_ONLY_ABOVE in engine._executing: cases where a needed full rebuild becomes impossible, or the edit_rule text is wrong; (5) live.view/live.records: any path that shows a stage as running when it is not, any exception on old plans (no 'why', missing keys), any write or LLM call. For each defect give file:line, a concrete failing scenario, and the minimal fix. If you find none in an area, say so explicitly.",
+ "relevant_files": ["axbranch/supervisor.py", "axbranch/gui.py", "axbranch/engine.py", "axbranch/state.py", "axbranch/live.py", "axbranch/__main__.py", "axbranch_app.py", "tests/test_supervisor.py", "tests/test_live.py", "tests/test_edits.py", "AGENTS.md"],
+ "allowed_files": [],
+ "contract": "Review only. No file changes. Findings must be concrete and verifiable from the code.",
+ "constraints": "Do not edit, create or delete files. Do not commit. Be specific and brief.",
+ "acceptance_tests": [],
+ "expected_output": "Report with sections FINDINGS (numbered: severity, file:line, scenario, fix) and NO-DEFECT AREAS."
+}
