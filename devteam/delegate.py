@@ -83,8 +83,7 @@ def main(task_file):
     devview.ensure_pane()
     started = time.time()
     with (LIVE / 'codex.log').open('w', encoding='utf-8') as log:
-        log.write(f"[{time.strftime('%H:%M:%S')}] task {task['id']}: {task['goal']}
-"); log.flush()
+        log.write(f"[{time.strftime('%H:%M:%S')}] task {task['id']}: {task['goal']}\n"); log.flush()
         proc = subprocess.Popen([codex, 'exec', '-s', 'workspace-write', '-C', str(REPO), '--skip-git-repo-check',
                                  '-o', str(out), '-'], stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
                                 text=True, encoding='utf-8', errors='replace')
