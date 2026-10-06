@@ -13,6 +13,8 @@ from .engine import open_engine
 from .state import Busy, Store
 
 FONT = ('Malgun Gothic', 10)
+COLUMNS = {'engine': ('엔진', 70), 'task': ('현재 작업', 170), 'status': ('상태', 230), 'last': ('마지막 활동', 90),
+           'why': ('고용 이유', 220), 'result': ('결과', 260)}
 
 
 class App(tk.Tk):
@@ -42,12 +44,25 @@ class App(tk.Tk):
         body.add(self.list, weight=1)
         right = ttk.PanedWindow(body, orient='vertical')
         body.add(right, weight=3)
-        # Live execution view: who works, on which engine, really active or not — read from local state
-        # (supervisor status, heartbeat/activity files, SQLite events) every refresh; never an AI call.
-        self.live = scrolledtext.ScrolledText(right, font=FONT, wrap='word', state='disabled', height=24)
-        right.add(self.live, weight=3)
-        self.detail = scrolledtext.ScrolledText(right, font=FONT, wrap='word', state='disabled')
-        right.add(self.detail, weight=2)
+        # Live execution view: project -> 淸月 CEO -> hired agents -> verification -> Owner review, read
+        # from local state (supervisor status, heartbeat/activity files, SQLite) every refresh; no AI call.
+        self.live = tk.Text(right, font=FONT, wrap='word', state='disabled', height=8)
+        right.add(self.live, weight=0)
+        self.agents = ttk.Treeview(right, columns=tuple(COLUMNS), show='tree headings', height=8, selectmode='browse')
+        self.agents.heading('#0', text='Agent')
+        self.agents.column('#0', width=230, stretch=False)
+        for col, (title, width) in COLUMNS.items():
+            self.agents.heading(col, text=title)
+            self.agents.column(col, width=width, stretch=col in ('why', 'result'))
+        self.agents.bind('<<TreeviewSelect>>', lambda _e: self.show())
+        right.add(self.agents, weight=1)
+        tabs = ttk.Notebook(right)
+        right.add(tabs, weight=2)
+        self.records = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
+        self.timeline = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
+        self.detail = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
+        for widget, title in ((self.records, 'Agent 기록'), (self.timeline, '타임라인'), (self.detail, '프로젝트')):
+            tabs.add(widget, text=title)
 
         bar = ttk.Frame(self, padding=8); bar.pack(fill='x')
         for text, cmd in (('리뷰 / 피드백…', self.review_dialog), ('외부 연결 승인', lambda: self.network(True)),
@@ -286,7 +301,21 @@ class App(tk.Tk):
         lines = [f"[{h['project_id']}] {h['state']}" + (f"  ⏸ {h['pause_reason']}" if h['pause_reason'] else ''),
                  f"Goal: {h['goal']}", f"다음: {h['next_action']}"]
         lines.append('')
-        _put(self.live, live.render(live.view(self.workspace, self.store, self.selected)))
+        view = live.view(self.workspace, self.store, self.selected)
+        _put(self.live, '\n'.join(f'{k}: {v}' for k, v in view['header'] if k not in ('목표', '다음 작업'))
+             + f"\n다음: {dict(view['header'])['다음 작업']}")
+        rows = {r['key']: r for r in view['pipeline']}
+        if list(self.agents.get_children()) != list(rows):
+            self.agents.delete(*self.agents.get_children())
+            for key in rows:
+                self.agents.insert('', 'end', iid=key)
+        for key, r in rows.items():
+            self.agents.item(key, text=f"{r['mark']} {r['title']}",
+                             values=(r['engine'], r['task'], r['detail'], r['last'], r['why'], r['result']))
+        chosen = self.agents.selection()
+        _put(self.records, live.records(self.store, self.selected, chosen[0]) if chosen
+             else 'Agent를 선택하면 그 Agent의 주장 · 근거 · 반론 · 결정 · 검증 기록이 표시됩니다.')
+        _put(self.timeline, '\n'.join(f"[{t['at']}] {t['actor']}  {t['text']}" for t in reversed(view['timeline'])))
         if h['interpretation']:
             lines += ['■ CEO 해석', h['interpretation'], '', '■ 수용 기준', *[f'  - {c}' for c in h['acceptance_criteria']], '',
                       '■ 파이프라인', *[f"  {i + 1}. {s['name']} — {s['agent_role']} ({s['provider']}{', web' if s['web'] else ''})"

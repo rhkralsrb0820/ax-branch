@@ -48,6 +48,25 @@ class LiveTests(unittest.TestCase):
         self.store.add_verification(self.pid, '', 1, verdict, {}, {
             'runtime': {'ok': ok, 'steps': [{'ok': True}, {'ok': ok}]}}, 'claude')
 
+    def test_agent_card_why_and_explicit_records(self):
+        self.store.update(self.pid, plan_version=1, plan={'interpretation': 'build it', 'pipeline': [
+            {'agent_role': 'Analyst', 'provider': 'claude', 'name': 'analysis', 'why': 'knows the domain',
+             'instructions': 'analyse'},
+            {'agent_role': 'Builder', 'provider': 'codex', 'name': 'build', 'why': 'writes the code',
+             'instructions': 'build'}]})
+        self.store.save_output(self.pid, 1, 1, 0, None, 'claude', {
+            'output': 'Use the official API', 'key_points': ['official source'],
+            'evidence': ['documented, free'], 'counterpoints': ['rate limits: cached for 10 min']})
+        self.store.event(self.pid, 'call', who='Analyst', provider='claude', seconds=266)
+        v = self.view()
+        card = next(r for r in v['pipeline'] if r['key'] == 'stage:0')
+        self.assertEqual((card['mark'], card['why'], card['result']), ('✓', 'knows the domain', 'official source'))
+        text = live.records(self.store, self.pid, 'stage:0')
+        for part in ('고용 이유 (Why hired): knows the domain', 'Use the official API', '근거 (Evidence)',
+                     'documented, free', '반론 · 위험 (Counterargument)', 'rate limits: cached for 10 min'):
+            self.assertIn(part, text)
+        self.assertIn('Analyst (Claude): knows the domain', live.records(self.store, self.pid, 'ceo'))
+
     def test_active_call(self):
         self.start()
         with run_lock(self.folder / 'run.lock'):

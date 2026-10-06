@@ -46,6 +46,8 @@ class GuiTests(unittest.TestCase):
         try:
             self.app = App(workspace=self.ws, engine_factory=factory)
         except tk.TclError as e:
+            if 'display' not in str(e).lower():      # only a missing display is a reason to skip
+                raise
             self.skipTest(f'no display: {e}')
         self.app.withdraw()
 
@@ -73,9 +75,17 @@ class GuiTests(unittest.TestCase):
         shown = self.app.detail.get('1.0', 'end')
         self.assertIn('검증 1회차: FAIL', shown)
         self.assertIn('검증 2회차: PASS', shown)
-        board = self.app.live.get('1.0', 'end')            # live view: from local state, no AI call
-        for text in ('━ 파이프라인 ━', '● OWNER_REVIEW', 'hired', 'Assigned engine', '✓ Verification Agent'):
-            self.assertIn(text, board)
+        # Live view, from local state only: agent cards, records on click, timeline.
+        cards = {k: self.app.agents.item(k, 'text') for k in self.app.agents.get_children()}
+        self.assertEqual(cards['owner'], '● OWNER_REVIEW')
+        self.assertEqual(cards['verification'], '✓ Verification Agent')
+        self.assertTrue(cards['ceo'].startswith('✓ 淸月 CEO'))
+        self.assertIn('stage:0', cards)
+        self.app.agents.selection_set('verification')
+        self.pump_until(lambda: '검증 2회차: PASS' in self.app.records.get('1.0', 'end'))
+        timeline = self.app.timeline.get('1.0', 'end')
+        self.assertIn('hired', timeline)
+        self.assertIn('Assigned engine', timeline)
 
         _press(self.app, '리뷰 / 피드백…')                 # Q1 works? Q2 what next? -> finish
         dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))

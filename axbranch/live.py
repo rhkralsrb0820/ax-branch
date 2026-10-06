@@ -22,6 +22,24 @@ def _brief(detail):
     return ', '.join(f'{k}={v}' for k, v in detail.items())[:100]
 
 
+def _clock(at):
+    return time.strftime('%H:%M:%S', time.localtime(at))
+
+
+def _output(store, pid, project, index):
+    """Latest recorded output of pipeline stage `index` in the current plan (None if not produced)."""
+    row = store.output(pid, index, project.get('plan_version'))
+    return row['output'] if row else None
+
+
+def _stage_result(store, pid, project, index, count):
+    out = _output(store, pid, project, index) or {}
+    if index == count - 1:                       # the producer: what it delivered
+        edits = out.get('edits') or []
+        return (f'{len(edits)} edits · ' if edits else '') + str(out.get('summary') or '')[:100]
+    return str((out.get('key_points') or [out.get('output') or ''])[0])[:100]
+
+
 def view(workspace, store, pid):
     """Build a display from persisted events and the supervisor's current status."""
     rec = supervisor.status(workspace, store, pid)
@@ -63,28 +81,38 @@ def view(workspace, store, pid):
     current = events[boundary:]
     pipeline = []
 
-    def row(title, engine='-', mark='○', detail=''):
-        result = dict(mark=mark, title=title, engine=engine, detail=detail)
+    def row(title, engine='-', mark='○', detail='', key=None, why='', task=''):
+        # Agent card fields (key/why/task/result/last) come from the plan and recorded events only.
+        result = dict(mark=mark, title=title, engine=engine, detail=detail, key=key or title, why=why, task=task,
+                      result='', last='')
         pipeline.append(result)
         return result
 
-    decisions = [e['detail'] for e in events if e['kind'] == 'decision' and e['detail'].get('by') != 'engine']
-    decision = decisions[-1] if decisions else {}
-    row('淸月 CEO', _engine(decision.get('by')), '✓' if decisions else '○', decision.get('what', ''))
-    stages = (project.get('plan') or {}).get('pipeline', [])
+    decisions = [e for e in events if e['kind'] == 'decision' and e['detail'].get('by') != 'engine']
+    decision = decisions[-1]['detail'] if decisions else {}
+    ceo = row('淸月 CEO', _engine(decision.get('by')), '✓' if decisions else '○', decision.get('what', ''),
+              key='ceo', why='Owner의 목표를 해석하고 Agent와 파이프라인을 결정', task=decision.get('what', ''))
+    if decisions:
+        ceo['last'] = _clock(decisions[-1]['at'])
+        ceo['result'] = f"plan v{project.get('plan_version') or '-'}"
+    plan = project.get('plan') or {}
+    stages = plan.get('pipeline', [])
     running_detail = f'{status} · {elapsed} / {timeout} · 마지막 활동 {activity}'
     calls = [e for e in current if e['kind'] in ('call_start', 'call', 'call_failed')]
-    for stage in stages:
+    for index, stage in enumerate(stages):
         role = stage.get('agent_role', '')
-        item = row(role, _engine(stage.get('provider')))
+        item = row(role, _engine(stage.get('provider')), key=f'stage:{index}', why=stage.get('why') or stage.get('name', ''),
+                   task=stage.get('name', ''))
         history = [e for e in calls if e['detail'].get('who') == role]
         if not history:
             continue
         latest = history[-1]
         d = latest['detail']
+        item['last'] = activity if active and rec.get('agent') == role else _clock(latest['at'])
         if latest['kind'] == 'call':
             item.update(mark='✓', engine=_engine(d.get('provider')),
                         detail='Completed · ' + _duration(d.get('seconds')))
+            item['result'] = _stage_result(store, pid, project, index, len(stages)) or item['detail']
         elif latest['kind'] == 'call_failed':
             item.update(mark='✗', detail=str(d.get('error', ''))[:80])
         else:
@@ -96,15 +124,17 @@ def view(workspace, store, pid):
         pipeline[-1].update(mark='✗', detail='no deliverable: ' + str(rejected[-1].get('reason', '')))
 
     verified = [e['detail'] for e in current if e['kind'] == 'verification']
-    item = row('Verification Agent')
+    item = row('Verification Agent', key='verification', why='산출물을 독립적으로 검증 (만든 Agent와 분리)',
+               task='수용 기준 · 결정적 검사 · 실행 검증')
     if verified:
         d = verified[-1]
         verdict = d.get('verdict', '')
         item.update(mark='✓' if verdict == 'PASS' else '✗', engine=_engine(d.get('provider')),
-                    detail=verdict + ' · ' + _engine(d.get('provider')))
+                    detail=verdict + ' · ' + _engine(d.get('provider')), result=verdict)
     elif calls and calls[-1]['kind'] == 'call_start' and calls[-1]['detail'].get('who') == 'Verification' and active:
         item.update(mark='●', engine=_engine(calls[-1]['detail'].get('preferred')), detail=running_detail)
-    item = row('Runtime Acceptance (LOCAL)', 'Local')
+    item = row('Runtime Acceptance (LOCAL)', 'Local', key='runtime', why='실제로 실행해 Owner 사용 경로를 확인 (AI 아님)',
+               task='실행 검증')
     if active and rec['stage'] == 'VERIFYING' and runtime:
         item.update(mark='●', detail=detail)
     elif verified:
@@ -114,7 +144,8 @@ def view(workspace, store, pid):
             steps = checks.get('steps', [])
             passed = sum(bool(step.get('ok')) for step in steps)
             item.update(mark='✓' if checks.get('ok') else '✗', detail=f'{passed} / {len(steps)} checks passed')
-    item = row('OWNER_REVIEW')
+            item['result'] = item['detail']
+    item = row('OWNER_REVIEW', key='owner', why='Owner가 결과를 확인하고 피드백 또는 마무리', task='Owner 확인')
     if project['state'] == 'OWNER_REVIEW':
         item.update(mark='●', detail='Owner 확인 대기')
     elif project['state'] in ('PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL', 'ARCHIVING', 'CLOSED'):
@@ -168,6 +199,74 @@ def view(workspace, store, pid):
         if kind == 'agent_hired':
             timeline.append(dict(at=at, actor=actor, text='Assigned engine: ' + _engine(d.get('provider'))))
     return dict(header=header, pipeline=pipeline, timeline=timeline)
+
+
+def records(store, pid, key):
+    """The explicit collaboration record of one agent card: claims, evidence, counterpoints, decisions and
+    verification as RECORDED — never hidden reasoning (none is stored)."""
+    project = store.project(pid)
+    plan = project.get('plan') or {}
+    stages = plan.get('pipeline', [])
+    out = []
+
+    def section(title, items):
+        items = [str(i) for i in items if i]
+        if items:
+            out.append(f'■ {title}')
+            out.extend(f'  - {i}' for i in items)
+
+    if key == 'ceo':
+        out.append('淸月 AI CEO — 해석 (Interpretation)')
+        out.append(str(plan.get('interpretation') or '-'))
+        section('수용 기준 (Acceptance criteria)', plan.get('acceptance_criteria') or [])
+        section('결정 (Decision · 근거)', [f"[{_clock(e['at'])}] {e['detail'].get('what', '')} — {str(e['detail'].get('why', ''))[:300]}"
+                                        for e in store.events(pid, {'decision'})[-15:]])
+        section('고용한 Agent (Why hired)', [f"{s.get('agent_role')} ({_engine(s.get('provider'))}): {s.get('why') or s.get('name')}"
+                                            for s in stages])
+    elif key.startswith('stage:'):
+        index = int(key.split(':')[1])
+        stage = stages[index] if index < len(stages) else {}
+        o = _output(store, pid, project, index)
+        out.append(f"{stage.get('agent_role', '-')} · {_engine(stage.get('provider'))}")
+        out.append(f"고용 이유 (Why hired): {stage.get('why') or '-'}")
+        out.append(f"지시 (Task): {stage.get('instructions', '-')}")
+        if o is None:
+            out.append('아직 기록된 결과가 없습니다.')
+        elif index == len(stages) - 1:
+            out.append('')
+            out.append(f"■ 산출물 요약 (Claim): {o.get('summary') or '-'}")
+            out.append(f"■ 이전 버전 대비 변경: {o.get('changes_from_previous') or '-'}")
+            if o.get('edits'):
+                out.append(f"■ 수정(edit) {len(o['edits'])}건")
+        else:
+            out.append('')
+            out.append('■ 주장 / 작업 결과 (Claim)')
+            out.append(str(o.get('output') or '-')[:4000])
+            section('핵심 (Key points)', o.get('key_points') or [])
+            section('근거 (Evidence)', o.get('evidence') or [])
+            section('반론 · 위험 (Counterargument)', o.get('counterpoints') or [])
+    elif key == 'verification':
+        for v in store.verifications(pid)[-2:]:
+            r = v['result']
+            out.append(f"■ 검증 {v['iteration']}회차: {v['verdict']} ({_engine(v['provider'])}) · 결정적 검사 "
+                       f"{'통과' if v['checks'].get('ok') else '실패'}")
+            out.extend(f"  {'✓' if c.get('met') else '✗'} {c.get('criterion')} — {str(c.get('evidence', ''))[:300]}"
+                       for c in r.get('criteria', []))
+            out.extend(f"  [{f.get('severity')}] {f.get('issue')} — 근거: {str(f.get('evidence', ''))[:300]}"
+                       for f in r.get('findings', []))
+    elif key == 'runtime':
+        verifications = store.verifications(pid)
+        rt = verifications[-1]['checks'].get('runtime') if verifications else None
+        if not rt:
+            out.append('아직 실행 검증 기록이 없습니다.')
+        else:
+            out.append(f"■ 실행 검증 ({rt.get('mode')}): {'통과' if rt.get('ok') else '실패'}")
+            out.extend(f"  {'OK  ' if s.get('ok') else 'FAIL'} {s.get('name')}"
+                       + (f" — {', '.join(s['problems'])}" if s.get('problems') else '') for s in rt.get('steps', []))
+    elif key == 'owner':
+        section('Owner 피드백', [f"{f['iteration']}회차 ({f['verdict']}): {f['text']}" for f in store.feedback(pid)])
+        section('외부 연결 승인', [f"{a['subject']}: {a['status']}" for a in store.approvals(pid)])
+    return '\n'.join(out) or '기록 없음'
 
 
 def render(v):

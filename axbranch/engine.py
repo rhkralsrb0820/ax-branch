@@ -36,7 +36,7 @@ def ENUM(*values):
     return {'type': 'string', 'enum': list(values)}
 
 
-STAGE = S(name=STR, agent_role=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
+STAGE = S(name=STR, agent_role=STR, why=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
 PLAN = S(interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
          runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE))
@@ -44,7 +44,7 @@ DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=
               artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
               network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE))
-WORK = S(output=STR, key_points=ARR(STR))
+WORK = S(output=STR, key_points=ARR(STR), evidence=ARR(STR), counterpoints=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), edits=ARR(S(path=STR, find=STR, replace=STR)),
           summary=STR, changes_from_previous=STR)
 # Large existing deliverable: edits only. Regenerating 115-164 KB in one call timed out or came back empty
@@ -110,6 +110,8 @@ Rules:
   sources only (no API keys, no paid services). The self-test must not need the network.
 - {EXEC_CONTRACT}
 {RUNTIME_RULES}
+- Every pipeline stage states `why`: one sentence on why 淸月 hires this specialist — what it
+  contributes that no other stage does. The Owner sees it next to the agent.
 - Production agents cannot execute code, use a shell or write files; never instruct them to run
   anything. Execution evidence comes only from the engine's deterministic checks at verification.
 - required_tools: only external programs the work truly needs (e.g. blender); [] otherwise.
@@ -119,11 +121,15 @@ WORKER_SYSTEM = """You are a temporary specialist agent ({role}) hired by 淸月
 pipeline. Do your stage only, at the standard of a top expert in your field. Ground claims in
 evidence, state what is uncertain, and never fabricate sources, data or results.
 You have no shell and cannot execute code: never claim to have run, tested or observed output.
-Reason it through by hand instead and say so."""
+Reason it through by hand instead and say so.
+Explicit records for the Owner (not your private reasoning): output = your claim / work product;
+evidence = the facts, sources and checks it rests on; counterpoints = the strongest objections, risks
+or alternatives, each with how you handled it."""
 
 REWORK = """Your previous artifact FAILED independent verification (findings below). Analyze each
-finding, research or redesign as needed, and produce a NEW complete version that resolves them.
-Do not argue with the verifier; do not describe a patch — deliver the whole new artifact."""
+finding, research or redesign as needed, and produce a NEW version that resolves them — the whole
+artifact, or edits when edit_rule asks for them. Do not argue with the verifier; do not describe a
+change without delivering it."""
 
 VERIFY_SYSTEM = """You are the AX Branch Verification Agent, a permanent independent quality gate.
 You are NOT a production agent: never fix, rewrite or supply corrected content — judge and
