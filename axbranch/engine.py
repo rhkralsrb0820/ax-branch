@@ -209,7 +209,7 @@ class Engine:
             return self._run(pid, cancel, stop_at)
 
     def lock(self, pid):
-        return run_lock(self.workspace / 'projects' / pid / 'run.lock')
+        return run_lock(self.workspace / 'projects' / pid / 'run.lock', wait=2)
 
     def _run(self, pid, cancel, stop_at):
         self.cancel = cancel
@@ -255,9 +255,7 @@ class Engine:
 
         def tick(info):   # live, per second: which agent, which provider/CLI pid, elapsed, last output
             data = json.dumps({**base, **info, 'updated_at': time.strftime('%H:%M:%S')}, ensure_ascii=False)
-            tmp = activity.with_suffix('.tmp')
-            tmp.write_text(data, encoding='utf-8')
-            os.replace(tmp, activity)
+            _status_write(activity, data)
         activity.parent.mkdir(parents=True, exist_ok=True)
         tick({'provider': prefer, 'elapsed': 0, 'output_bytes': 0, 'idle': 0})
         try:
@@ -695,9 +693,7 @@ class Engine:
         folder.mkdir(parents=True, exist_ok=True)
         data = json.dumps({'os_pid': os.getpid(), 'at': time.time(), 'detail': detail,
                            'state': self.store.project(pid)['state']}, ensure_ascii=False)
-        tmp = folder / 'HEARTBEAT.tmp'
-        tmp.write_text(data, encoding='utf-8')
-        os.replace(tmp, folder / 'HEARTBEAT.json')
+        _status_write(folder / 'HEARTBEAT.json', data)
 
     def _python(self):
         return sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
@@ -975,3 +971,20 @@ def liveness(workspace, store, pid):
         return 'STALLED', f"{who}: no output for {a['idle']} s (call {a.get('elapsed')} s, started {a.get('started_at')})"
     return 'WORKING', (f"{who}: call started {a.get('started_at')}, {a.get('elapsed')} s, "
                        f"last output {a.get('idle')} s ago, version v{p['iteration']}")
+
+
+def _status_write(path, text):
+    """Atomic write of a live status file the window reads every second. Windows refuses the replace
+    while a reader has the file open, so retry briefly; a status file is best effort and must never
+    take the engine down (0.1.10: a collision PAUSED a project with an internal error)."""
+    tmp = path.with_suffix('.tmp')
+    try:
+        tmp.write_text(text, encoding='utf-8')
+        for _ in range(20):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                time.sleep(0.02)
+    except OSError:
+        pass

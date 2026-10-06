@@ -55,6 +55,24 @@ class LockTests(unittest.TestCase):
         worker.join(10)
         self.assertEqual(self.store.project(pid)['state'], 'OWNER_REVIEW')
 
+    def test_status_probe_does_not_make_a_starting_session_busy(self):
+        # The window/supervisor probe takes the lock for an instant; a session starting at that
+        # moment must wait it out, not exit "Busy" (seen as flaky GUI runs, 0.1.10 live view).
+        path = self.tmp / 'probe.lock'
+        probing = threading.Event()
+
+        def probe():
+            with run_lock(path):
+                probing.set()
+                threading.Event().wait(0.3)
+        t = threading.Thread(target=probe); t.start(); probing.wait(5)
+        with self.assertRaises(Busy):
+            with run_lock(path):                 # a probe itself never waits
+                pass
+        with run_lock(path, wait=2):             # a session waits the probe out
+            pass
+        t.join()
+
     def test_liveness_labels_from_recorded_state(self):
         ws = self.tmp / 'ws'
         pid = self.store.new_project('make an add tool')

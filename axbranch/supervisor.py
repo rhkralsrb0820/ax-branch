@@ -64,7 +64,10 @@ def status(workspace, store, pid, now=None):
     recoveries = [e for e in events if e['kind'] == 'recovery']
     last_event = events[-1]['at'] if events else p['updated']
     beat_at = beat['at'] if beat else None
-    act_at = (folder / 'ACTIVITY.json').stat().st_mtime if act else None
+    try:
+        act_at = (folder / 'ACTIVITY.json').stat().st_mtime if act else None
+    except FileNotFoundError:             # the engine finished the call after _read()
+        act, act_at = None, None
     meaningful = max(x for x in (last_event, beat_at,
                                  (act_at - (act.get('idle') or 0)) if act else None) if x is not None)
     rec = {

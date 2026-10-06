@@ -8,8 +8,8 @@ import time
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
-from . import WORKSPACE, __version__
-from .engine import activity, liveness, open_engine
+from . import WORKSPACE, __version__, live, supervisor
+from .engine import open_engine
 from .state import Busy, Store
 
 FONT = ('Malgun Gothic', 10)
@@ -39,8 +39,14 @@ class App(tk.Tk):
         self.list = tk.Listbox(body, font=FONT, width=48, activestyle='none')
         self.list.bind('<<ListboxSelect>>', self.select)
         body.add(self.list, weight=1)
-        self.detail = scrolledtext.ScrolledText(body, font=FONT, wrap='word', state='disabled')
-        body.add(self.detail, weight=3)
+        right = ttk.PanedWindow(body, orient='vertical')
+        body.add(right, weight=3)
+        # Live execution view: who works, on which engine, really active or not — read from local state
+        # (supervisor status, heartbeat/activity files, SQLite events) every refresh; never an AI call.
+        self.live = scrolledtext.ScrolledText(right, font=FONT, wrap='word', state='disabled', height=24)
+        right.add(self.live, weight=3)
+        self.detail = scrolledtext.ScrolledText(right, font=FONT, wrap='word', state='disabled')
+        right.add(self.detail, weight=2)
 
         bar = ttk.Frame(self, padding=8); bar.pack(fill='x')
         for text, cmd in (('리뷰 / 피드백…', self.review_dialog), ('외부 연결 승인', lambda: self.network(True)),
@@ -211,7 +217,12 @@ class App(tk.Tk):
     def refresh(self):
         projects = self.store.projects()
         self.ids = [p['id'] for p in projects]
-        rows = [f"{'▶ ' if p['id'] in self.running else '  '}{p['state']:<12} {p['goal'][:40]}" for p in projects]
+        watch = supervisor.candidates(self.store)
+        labels = {pid: supervisor.status(self.workspace, self.store, pid)['status'] for pid in watch}
+        if self.selected is None and watch:                  # open on the work in progress
+            self.selected = next((pid for pid in watch if labels[pid] == 'ACTIVE'), watch[0])
+        rows = [f"{'▶ ' if labels.get(p['id']) == 'ACTIVE' else '  '}{p['state']:<12} "
+                + (f"[{labels[p['id']]}] " if p['id'] in labels else '') + p['goal'][:40] for p in projects]
         if rows != list(self.list.get(0, 'end')):
             self.list.delete(0, 'end')
             for i, row in enumerate(rows):
@@ -252,14 +263,8 @@ class App(tk.Tk):
         p = self.store.project(self.selected)
         lines = [f"[{h['project_id']}] {h['state']}" + (f"  ⏸ {h['pause_reason']}" if h['pause_reason'] else ''),
                  f"Goal: {h['goal']}", f"다음: {h['next_action']}"]
-        label, detail = liveness(self.workspace, self.store, self.selected)
-        lines.append(f"상태: [{label}] {detail}")
-        a = activity(self.workspace, self.selected)
-        if a:
-            lines.append(f"▶ 진행 중: {a['agent']} · {a.get('provider')} (CLI pid {a.get('pid', '-')}) · 경과 {a.get('elapsed', 0)}초 · "
-                         f"출력 {a.get('output_bytes', 0)}B · 마지막 출력 {a.get('idle', 0)}초 전"
-                         + (' (Claude는 완료 시에만 출력)' if a.get('provider') == 'claude' else ''))
         lines.append('')
+        _put(self.live, live.render(live.view(self.workspace, self.store, self.selected)))
         if h['interpretation']:
             lines += ['■ CEO 해석', h['interpretation'], '', '■ 수용 기준', *[f'  - {c}' for c in h['acceptance_criteria']], '',
                       '■ 파이프라인', *[f"  {i + 1}. {s['name']} — {s['agent_role']} ({s['provider']}{', web' if s['web'] else ''})"
@@ -284,11 +289,7 @@ class App(tk.Tk):
                       *[f'  - {s}' for s in r['next_steps']]]
         if p['archive_note']:
             lines += ['', f"Obsidian 저장: {p['archive_note']}"]
-        lines += ['', '■ 기록'] + [f"  {e['kind']}: {_brief(e['detail'])}" for e in self.store.events(self.selected)[-25:]]
-        text = '\n'.join(lines)
-        if text != self.detail.get('1.0', 'end-1c'):
-            self.detail.config(state='normal'); self.detail.delete('1.0', 'end')
-            self.detail.insert('1.0', text); self.detail.config(state='disabled')
+        _put(self.detail, '\n'.join(lines))
 
     def destroy(self):
         if getattr(self, '_tick', None):
@@ -306,8 +307,13 @@ class App(tk.Tk):
         self.destroy()
 
 
-def _brief(detail):
-    return ', '.join(f'{k}={str(v)[:80]}' for k, v in detail.items())
+def _put(widget, text):
+    """Replace a read-only text widget's content only when it changed, keeping the Owner's scroll position."""
+    if text != widget.get('1.0', 'end-1c'):
+        top = widget.yview()[0]
+        widget.config(state='normal'); widget.delete('1.0', 'end')
+        widget.insert('1.0', text); widget.config(state='disabled')
+        widget.yview_moveto(top)
 
 
 def main(goal=None, resume=None):

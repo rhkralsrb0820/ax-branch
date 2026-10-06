@@ -60,7 +60,9 @@ class GuiTests(unittest.TestCase):
             if condition():
                 return
             time.sleep(0.05)
-        self.fail('GUI did not reach the expected state')
+        pid = self.app.selected
+        self.fail('GUI did not reach the expected state: ' + repr((self.app._notice[0], self.app.running,
+                  pid and self.app.store.project(pid)['state'], pid and self.app.store.project(pid)['pause_reason'])))
 
     def test_goal_to_verified_report_to_save_and_close(self):
         self.app.goal.insert('1.0', 'make an add tool')
@@ -71,6 +73,9 @@ class GuiTests(unittest.TestCase):
         shown = self.app.detail.get('1.0', 'end')
         self.assertIn('검증 1회차: FAIL', shown)
         self.assertIn('검증 2회차: PASS', shown)
+        board = self.app.live.get('1.0', 'end')            # live view: from local state, no AI call
+        for text in ('━ 파이프라인 ━', '● OWNER_REVIEW', 'hired', 'Assigned engine', '✓ Verification Agent'):
+            self.assertIn(text, board)
 
         _press(self.app, '리뷰 / 피드백…')                 # Q1 works? Q2 what next? -> finish
         dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))

@@ -90,24 +90,31 @@ class Busy(Rejected):
 
 
 @contextmanager
-def run_lock(path):
+def run_lock(path, wait=0.0):
     """Exclusive, non-blocking OS lock on `path`. The OS drops it when the holder exits or
     crashes, so a dead session never leaves a stale lock. Two threads of one process conflict
-    too (each takes its own handle)."""
+    too (each takes its own handle). `wait`: seconds to keep retrying — a liveness probe holds the
+    lock for microseconds, and a starting session must not mistake that for another session."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     f = open(path, 'a+b')
-    try:
-        f.seek(0)
-        if os.name == 'nt':
-            import msvcrt
-            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        f.close()
-        raise Busy(f'Already running in another session (lock {path}). Not started; nothing changed.') from None
+    deadline = time.monotonic() + wait if wait else None
+    while True:
+        try:
+            f.seek(0)
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except OSError:
+            if deadline and time.monotonic() < deadline:
+                time.sleep(0.05)
+                continue
+            f.close()
+            raise Busy(f'Already running in another session (lock {path}). Not started; nothing changed.') from None
     try:
         yield
     finally:
