@@ -39,7 +39,7 @@ with run_lock(folder / 'run.lock'):
 def alive(pid):
     if os.name == 'nt':
         result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'],
-                                capture_output=True, text=True, timeout=5,
+                                capture_output=True, text=True, errors='replace', timeout=5,
                                 creationflags=subprocess.CREATE_NO_WINDOW, check=True)
         return any(len(row) > 1 and row[1] == str(pid)
                    for row in csv.reader(io.StringIO(result.stdout)))
@@ -220,6 +220,29 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.status()['status'], 'WAITING_FOR_OWNER')
         self.assertIn('NEEDS_DECISION', self.store.project(self.pid)['pause_reason'])
         self.assertIsNone(self.supervise())
+
+    def test_failing_replan_still_counts_toward_the_cap(self):
+        # Codex review #1: an attempt whose re-plan raised was not recorded, so it could repeat forever.
+        self.assertEqual(self.supervise(), 'resume')
+        with mock.patch.object(self.engine, 'replan', side_effect=RuntimeError('strategy call failed')):
+            with self.assertRaises(RuntimeError):
+                self.supervise()
+        self.assertEqual([r['action'] for r in self.recoveries()], ['resume', 'replan+resume'])
+        with mock.patch.object(self.engine, 'replan', side_effect=RuntimeError('strategy call failed')):
+            for _ in range(6):                       # never a dead end, never unbounded
+                try:
+                    if self.supervise() == 'needs_owner_decision':
+                        break
+                except RuntimeError:
+                    pass
+        self.assertEqual(self.status()['status'], 'WAITING_FOR_OWNER')
+        self.assertLessEqual(len(self.recoveries()), supervisor.MAX_RECOVERIES + 1)
+
+    def test_status_probe_creates_no_files(self):
+        # Codex review #8: looking at a project must not change its folder.
+        other = self.store.new_project('never ran here')
+        supervisor.status(self.ws, self.store, other)
+        self.assertFalse((self.ws / 'projects' / other).exists())
 
     def test_owner_stop_is_never_auto_resumed(self):
         # 0.1.10: closing the window cancelled the run ("오너가 중단했습니다") and the supervisor resumed it.

@@ -133,6 +133,7 @@ class App(tk.Tk):
                 return
             extra = 3 if 'not lowered' in (p['pause_reason'] or '') else 0
             self.store.resume(self.selected, extra)
+        self._owner_action('resume')
         self._launch(self.selected)
 
     def stop(self):
@@ -144,11 +145,14 @@ class App(tk.Tk):
             self.running[self.selected].set()
             return
         rec = supervisor.status(self.workspace, self.store, self.selected)
-        if rec['status'] in ('ACTIVE', 'STALLED', 'RECOVERING') and rec.get('worker_pid'):
-            supervisor.stop_worker(rec['worker_pid'], pid=self.selected)
+        if rec.get('worker_pid') and supervisor._held(self.workspace, self.selected):
+            supervisor.stop_worker(rec['worker_pid'], pid=self.selected)    # also one waiting for a provider slot
         p = self.store.project(self.selected)
-        if p['state'] not in ('PAUSED', 'CLOSED', 'OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
-            self.store.pause(self.selected, f'{supervisor.OWNER_STOP} (window). Resume continues from here.')
+        reason = f'{supervisor.OWNER_STOP} (window). Resume continues from here.'
+        if p['state'] == 'PAUSED':
+            self.store.update(self.selected, pause_reason=reason)          # an Owner stop, not a failure
+        elif p['state'] not in ('CLOSED', 'OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
+            self.store.pause(self.selected, reason)
         self._owner_action('stop')
 
     def review_dialog(self):

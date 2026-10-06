@@ -49,8 +49,11 @@ def since_owner(events, kinds):
 
 
 def _held(workspace, pid):
+    path = Path(workspace) / 'projects' / pid / 'run.lock'
+    if not path.exists():                     # never ran here; a display probe must not create files
+        return False
     try:
-        with run_lock(Path(workspace) / 'projects' / pid / 'run.lock'):
+        with run_lock(path):
             return False
     except Busy:
         return True
@@ -107,14 +110,14 @@ def _classify(p, rec, act, beat, folder, workspace, now):
             return 'WAITING_FOR_PROVIDER', reason[:200]
         if OWNER_STOP in reason or '오너가 중단' in reason:
             return 'PAUSED', reason[:200]                  # the Owner stopped it: never auto-resumed
-        if reason.startswith(('Rejected', 'Internal error')):
+        if reason.startswith(('Rejected', 'Internal error', 'recovery checkpoint')):   # incl. a failed re-plan
             return 'FAILED', reason[:200]
         return 'PAUSED', reason[:200]
     marker = folder / 'RECOVERING'
     if marker.exists():
         if now - marker.stat().st_mtime < RECOVERING_STALE:
             return 'RECOVERING', marker.read_text(encoding='utf-8')[:200]
-        marker.unlink(missing_ok=True)         # left by a crashed supervisor: never let it block recovery
+        # older: left by a crashed supervisor — ignored, never blocks recovery (supervise() replaces it)
     if not _held(workspace, p['id']):
         return 'STALLED', f'{state} but no engine session is running it (process gone)'
     if act:
@@ -163,9 +166,10 @@ def supervise(engine, pid, launch, stop):
             # The old worker has not let go yet: launching now would start a second session.
             store.event(pid, 'recovery', signature=sig, action='waiting_for_stop', attempt=len(seen) + 1)
             return 'waiting_for_stop'
-        action = 'resume'
-        if seen:                                     # same failure again: change the approach, not retry
-            action = 'replan+resume'
+        action = 'replan+resume' if seen else 'resume'      # same failure again: change the approach
+        # Recorded BEFORE acting, so an attempt that itself fails (e.g. the re-plan raises) still counts.
+        store.event(pid, 'recovery', signature=sig, action=action, attempt=len(seen) + 1, reason=rec['reason'])
+        if seen:
             if store.project(pid)['state'] not in ('PAUSED', 'REWORK'):
                 store.pause(pid, f'recovery checkpoint before re-plan ({sig})')
             engine.replan(pid, f'Automatic recovery: the failure "{sig}" happened again after a resume. '
@@ -173,7 +177,6 @@ def supervise(engine, pid, launch, stop):
         p = store.project(pid)
         if p['state'] == 'PAUSED':
             store.resume(pid)
-        store.event(pid, 'recovery', signature=sig, action=action, attempt=len(seen) + 1, reason=rec['reason'])
         launch(pid)
         return action
     finally:

@@ -277,7 +277,7 @@ class Engine:
                              notes=getattr(e, 'notes', []))
             raise
         finally:
-            activity.unlink(missing_ok=True)
+            _status_remove(activity)
         if notes:
             self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, notes=notes)
         self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started))
@@ -423,7 +423,9 @@ class Engine:
                                                  'findings': v['result']['findings'], 'checks': v['checks']}
                                                 for v in history[-2:]]
             system += '\n\n' + REWORK
-        edits_only = latest is not None and len(baseline['current_version']['content']) > EDITS_ONLY_ABOVE
+        # ponytail: bundles keep full rebuilds (edits cannot delete a file); add file deletion if large bundles appear
+        edits_only = (latest is not None and plan['artifact_kind'] != 'bundle'
+                      and len(baseline['current_version']['content']) > EDITS_ONLY_ABOVE)
         if edits_only:
             context['edit_rule'] = (f"previous_artifact is large ({len(baseline['current_version']['content'])} "
                                     'characters): return ONLY edits against it, never the whole file. '
@@ -988,6 +990,17 @@ def liveness(workspace, store, pid):
         return 'STALLED', f"{who}: no output for {a['idle']} s (call {a.get('elapsed')} s, started {a.get('started_at')})"
     return 'WORKING', (f"{who}: call started {a.get('started_at')}, {a.get('elapsed')} s, "
                        f"last output {a.get('idle')} s ago, version v{p['iteration']}")
+
+
+def _status_remove(path):
+    """Best-effort removal of a live status file (a reader may hold it open on Windows)."""
+    for _ in range(20):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            time.sleep(0.02)
+    _status_write(path, '{}')                  # still locked: leave an empty record, never a stale call
 
 
 def _status_write(path, text):
