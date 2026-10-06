@@ -16,6 +16,7 @@
   python -m axbranch upgrade-proposal           draft only, and only if Owner satisfaction >= 90%
 """
 import argparse
+import os
 import json
 import sys
 import time
@@ -66,7 +67,8 @@ def main(argv=None):
 
 
 def _dispatch(a):
-    if a.cmd in ('run', 'resume', 'review', 'approve', 'replan', 'finish') and getattr(a, 'id', None):
+    if (a.cmd in ('run', 'resume', 'review', 'approve', 'replan', 'finish') and getattr(a, 'id', None)
+            and os.environ.get('AXB_SUPERVISED') != '1'):      # a worker the app/supervisor started: not the Owner
         from .supervisor import channel
         from .state import Store
         from . import DB_PATH

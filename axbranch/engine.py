@@ -47,6 +47,10 @@ DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=
 WORK = S(output=STR, key_points=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), edits=ARR(S(path=STR, find=STR, replace=STR)),
           summary=STR, changes_from_previous=STR)
+# Large existing deliverable: edits only. Regenerating 115-164 KB in one call timed out or came back empty
+# (P-bbad3c v10-v21); the output must scale with the change, not with the file.
+BUILD_EDITS = S(edits=BUILD['properties']['edits'], summary=STR, changes_from_previous=STR)
+EDITS_ONLY_ABOVE = 40_000       # characters of the latest real version
 VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
             criteria=ARR(S(criterion=STR, met=BOOL, evidence=STR)),
             findings=ARR(S(severity=ENUM('critical', 'major', 'minor'), issue=STR, evidence=STR)))
@@ -413,8 +417,15 @@ class Engine:
                                                  'findings': v['result']['findings'], 'checks': v['checks']}
                                                 for v in history[-2:]]
             system += '\n\n' + REWORK
-        build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context, BUILD,
-                                prefer=final['provider'], web=final['web'])
+        edits_only = latest is not None and len(baseline['current_version']['content']) > EDITS_ONLY_ABOVE
+        if edits_only:
+            context['edit_rule'] = (f"previous_artifact is large ({len(baseline['current_version']['content'])} "
+                                    'characters): return ONLY edits against it, never the whole file. '
+                                    + context['edit_rule'].split('. Return the complete')[0] + '. Add new code by '
+                                    'replacing an existing anchor snippet with that snippet plus the new code.')
+        build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context,
+                                BUILD_EDITS if edits_only else BUILD, prefer=final['provider'], web=final['web'])
+        build = {'content': '', 'files': [], **build}
         edits = build.get('edits') or []
         if edits and not (build['content'] or build['files']):
             # Edit-based build: localized changes applied to the latest real version (0.1.9: regenerating a

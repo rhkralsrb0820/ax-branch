@@ -28,7 +28,8 @@ from .state import ACTIVE, NEXT, Busy, run_lock
 HEARTBEAT_STALE = 600     # s without any engine heartbeat between provider calls -> stalled
 OUTPUT_STALE = 900        # s without CLI output while a provider call is in flight -> stalled
 TIMEOUT_GRACE = 300       # a call past its own timeout by this much means the timeout did not fire
-MAX_RECOVERIES = 5        # per project, all signatures together
+MAX_RECOVERIES = 5        # per project since the Owner's last action, all signatures together
+OWNER_STOP = 'Owner stopped'
 RECOVERING_STALE = 300    # s: a RECOVERING marker older than this was left by a crashed supervisor
 OWNER_STATES = ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL')
 
@@ -38,6 +39,13 @@ def _read(path):
         return json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
+
+
+def since_owner(events, kinds):
+    """Events of these kinds after the Owner's last action: an explicit Owner decision (resume, review,
+    approve, …) starts a fresh automatic-recovery budget; supervisor-launched workers are not Owner actions."""
+    last = max((i for i, e in enumerate(events) if e['kind'] == 'owner_action'), default=-1)
+    return [e for e in events[last + 1:] if e['kind'] in kinds]
 
 
 def _held(workspace, pid):
@@ -61,7 +69,7 @@ def status(workspace, store, pid, now=None):
     folder = Path(workspace) / 'projects' / pid
     beat, act = _read(folder / 'HEARTBEAT.json'), _read(folder / 'ACTIVITY.json')
     events = store.events(pid)
-    recoveries = [e for e in events if e['kind'] == 'recovery']
+    recoveries = since_owner(events, {'recovery'})
     last_event = events[-1]['at'] if events else p['updated']
     beat_at = beat['at'] if beat else None
     try:
@@ -97,6 +105,8 @@ def _classify(p, rec, act, beat, folder, workspace, now):
             return 'WAITING_FOR_OWNER', reason[:200]
         if 'RateLimited' in reason or 'No provider available' in reason:
             return 'WAITING_FOR_PROVIDER', reason[:200]
+        if OWNER_STOP in reason or '오너가 중단' in reason:
+            return 'PAUSED', reason[:200]                  # the Owner stopped it: never auto-resumed
         if reason.startswith(('Rejected', 'Internal error')):
             return 'FAILED', reason[:200]
         return 'PAUSED', reason[:200]
@@ -129,7 +139,7 @@ def supervise(engine, pid, launch, stop):
         return None
     p = store.project(pid)
     sig = signature(f"{rec['status']}:{rec['stage']}:{rec['reason']}")
-    seen = [e for e in store.events(pid, {'recovery'}) if e['detail'].get('signature') == sig]
+    seen = [e for e in since_owner(store.events(pid), {'recovery'}) if e['detail'].get('signature') == sig]
     total = rec['recovery_count']
     folder = Path(workspace) / 'projects' / pid
     if total >= MAX_RECOVERIES or len(seen) >= 2:
@@ -207,10 +217,15 @@ def launch_detached(workspace, pid):
     import os
     import subprocess
     import sys
-    log = (Path(workspace) / 'projects' / pid / 'supervised-run.log').open('ab')
+    folder = Path(workspace) / 'projects' / pid
+    folder.mkdir(parents=True, exist_ok=True)
     flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == 'nt' else 0   # DETACHED | NEW_GROUP | NO_WINDOW
-    subprocess.Popen([sys.executable, '-X', 'utf8', '-m', 'axbranch', 'run', pid], stdout=log, stderr=log,
-                     stdin=subprocess.DEVNULL, creationflags=flags, cwd=str(Path(__file__).resolve().parents[1]))
+    frozen = getattr(sys, 'frozen', False)                 # AXBranch.exe dispatches `run` to the CLI
+    cmd = [sys.executable, 'run', pid] if frozen else [sys.executable, '-X', 'utf8', '-m', 'axbranch', 'run', pid]
+    with (folder / 'supervised-run.log').open('ab') as log:
+        subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL, creationflags=flags,
+                         env={**os.environ, 'AXB_SUPERVISED': '1'},
+                         cwd=None if frozen else str(Path(__file__).resolve().parents[1]))
 
 
 def channel():

@@ -22,6 +22,7 @@ class App(tk.Tk):
         super().__init__()
         self.workspace = workspace
         self.engine_factory = engine_factory or (lambda: open_engine(workspace))
+        self.injected = engine_factory is not None
         self.title(f'AX Branch {__version__} — 淸月 AI CEO')
         self.geometry('1180x760')
         self.store = Store(workspace / 'axbranch.sqlite3')
@@ -64,8 +65,17 @@ class App(tk.Tk):
             self.selected = resume
             self.after(500, self.resume)
 
-    # ---- engine threads
+    # ---- project workers
     def _launch(self, pid):
+        """A run is its own background process, so closing this window never stops it; the window only
+        reads its state. (In-window threads are kept for injected test engines.)"""
+        if self.injected:
+            return self._launch_thread(pid)
+        if supervisor.status(self.workspace, self.store, pid)['status'] == 'ACTIVE':
+            return                                       # already running somewhere: never a second worker
+        supervisor.launch_detached(self.workspace, pid)
+
+    def _launch_thread(self, pid):
         if pid in self.running:
             return
         cancel = threading.Event()
@@ -111,8 +121,20 @@ class App(tk.Tk):
         self._launch(self.selected)
 
     def stop(self):
+        """Owner stop: end the worker's whole process tree and PAUSE (checkpointed; the supervisor never
+        auto-resumes an Owner stop). 계속 실행 / 재개 continues from the same state."""
+        if not self.selected:
+            return
         if self.selected in self.running:
             self.running[self.selected].set()
+            return
+        rec = supervisor.status(self.workspace, self.store, self.selected)
+        if rec['status'] in ('ACTIVE', 'STALLED', 'RECOVERING') and rec.get('worker_pid'):
+            supervisor.stop_worker(rec['worker_pid'], pid=self.selected)
+        p = self.store.project(self.selected)
+        if p['state'] not in ('PAUSED', 'CLOSED', 'OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
+            self.store.pause(self.selected, f'{supervisor.OWNER_STOP} (window). Resume continues from here.')
+        self._owner_action('stop')
 
     def review_dialog(self):
         """Two separate questions: does it work? / what do you want next (plain language) or finish."""
@@ -299,6 +321,7 @@ class App(tk.Tk):
         gc.collect()                            # same reason: never let a worker thread free Tk objects
 
     def quit_app(self):
+        # Background workers keep running after the window closes; only in-window (test) threads stop.
         if self.running and not messagebox.askyesno('AX Branch', '실행 중인 프로젝트가 있습니다. 중단하고 닫을까요? '
                                                     '(상태는 저장되어 다음에 재개할 수 있습니다)'):
             return

@@ -221,6 +221,25 @@ class SupervisorTests(unittest.TestCase):
         self.assertIn('NEEDS_DECISION', self.store.project(self.pid)['pause_reason'])
         self.assertIsNone(self.supervise())
 
+    def test_owner_stop_is_never_auto_resumed(self):
+        # 0.1.10: closing the window cancelled the run ("오너가 중단했습니다") and the supervisor resumed it.
+        for reason in ('Rejected: Codex: 오너가 중단했습니다. 프로세스 트리 전체를 종료했습니다.',
+                       f'{supervisor.OWNER_STOP} (window). Resume continues from here.'):
+            self.store.update(self.pid, state='PAUSED', pause_reason=reason, resume_state='EXECUTING')
+            self.assertEqual(self.status()['status'], 'PAUSED')
+            self.assertIsNone(self.supervise())
+        self.launch.assert_not_called()
+
+    def test_owner_decision_starts_a_fresh_recovery_budget(self):
+        self.assertEqual(self.supervise(), 'resume')
+        self.assertEqual(self.supervise(), 'replan+resume')
+        self.engine.run(self.pid, stop_at='EXECUTING')
+        self.assertEqual(self.supervise(), 'needs_owner_decision')
+        self.store.event(self.pid, 'owner_action', action='resume', channel='app')     # the Owner decides
+        self.store.resume(self.pid)
+        self.assertEqual(self.status()['recovery_count'], 0)
+        self.assertEqual(self.supervise(), 'resume')                                  # automatic again
+
     def test_abandoned_recovering_marker_does_not_disable_watchdog(self):
         # supervisor.py:99: a supervisor crash leaves this marker forever authoritative.
         marker = self.folder / 'RECOVERING'

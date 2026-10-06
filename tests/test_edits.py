@@ -2,6 +2,7 @@
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from axbranch import artifacts, engine as E
@@ -16,6 +17,9 @@ class EditScript(Script):
         self.edit_batches = list(edit_batches)
 
     def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
+        if schema is E.BUILD_EDITS:                    # edits-only schema: no content/files fields at all
+            self.prompts.append((schema, prefer, prompt))
+            return {'edits': self.edit_batches.pop(0), 'summary': 's', 'changes_from_previous': ''}, prefer, []
         if schema is E.BUILD and not self.builds:
             self.prompts.append((schema, prefer, prompt))
             return {'content': '', 'files': [], 'edits': self.edit_batches.pop(0), 'summary': 's',
@@ -49,6 +53,18 @@ class EditTests(unittest.TestCase):
         self.assertEqual(new, LAUNCHABLE.replace("        print('result:', add(2, 3))\n",
                                                  "        print('result:', add(2, 3))\n        print('explained: 2 + 3')\n"))
         self.assertEqual(len(self.store.events(pid, {'edits_applied'})), 1)
+
+    def test_large_previous_version_gets_an_edits_only_build(self):
+        edit = {'path': 'add_tool.py', 'find': "        print('result:', add(2, 3))\n",
+                'replace': "        print('result:', add(2, 3))\n        print('explained: 2 + 3')\n"}
+        with mock.patch.object(E, 'EDITS_ONLY_ABOVE', 10):             # LAUNCHABLE counts as "large"
+            p, pid, script = self.run_with([edit])
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        builds = [(s, pr) for s, _, pr in script.prompts if s in (E.BUILD, E.BUILD_EDITS)]
+        self.assertIs(builds[0][0], E.BUILD)                           # first version: whole file
+        self.assertIs(builds[1][0], E.BUILD_EDITS)                     # then: edits only, by schema
+        self.assertIn('return ONLY edits', builds[1][1])
+        self.assertIn("print('explained: 2 + 3')", Path(self.store.artifacts(pid)[-1]['path']).read_text(encoding='utf-8'))
 
     def test_ambiguous_or_missing_find_is_rejected_then_retried(self):
         bad = {'path': 'add_tool.py', 'find': 'add(2, 3)', 'replace': 'add(3, 3)'}       # occurs twice
