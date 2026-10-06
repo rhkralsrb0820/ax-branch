@@ -12,6 +12,50 @@
 | P11 | Windows exe | live goal run inside the packaged app; crash recovery by newer exe |
 
 ## Open, in priority order (see GAP_ANALYSIS.md)
+
+### Development continuation — GUI/live-view (2026-10-06, verification blocked)
+
+- Preserved the existing GUI/live-view integration, session-lock retry, tests and development log.
+  No merge conflicts or whitespace errors were found; no runtime projects or artifacts were changed.
+- Fixed a status-refresh race in `supervisor.status()`: the engine can remove `ACTIVITY.json`
+  between reading its contents and checking its timestamp. Treat that as a finished call instead
+  of raising `FileNotFoundError` and interrupting the GUI refresh loop.
+- Added a deterministic regression in `tests/test_live.py` that deletes the activity file immediately
+  after it is read, then checks the local-work display and cleared provider pid/elapsed fields.
+- Previous evidence: `devteam/DEV_LOG.jsonl` records 11 live tests and 106 full-suite tests passing
+  before the pending GUI/lock changes. No later failing-test traceback was found in the repository
+  results or `workspace/codex-delegation-6.log`; the precise reported failure is not yet reproduced.
+- Follow-up diagnosis at 22:10 KST: the Python312 directory **is in PATH** (correcting the earlier
+  PATH diagnosis). Commands run as `desktop-9kpek4l\codexsandboxoffline`. Direct Windows process
+  creation for the absolute Python executable fails with `Win32Exception`, native error **5 / Access
+  is denied**; file and ACL queries are also denied, so the exact denying ACL entry cannot be read.
+  No accessible alternative Python was found in the checked existing installations/tool directories.
+- Both targeted tests (`test_live`, `test_gui`, `test_lock`, `test_supervisor`) and full discovery
+  were attempted again using that absolute executable. Both were blocked before unittest started:
+  **0 tests executed; no PASS/FAIL result**. Evidence: [execution log](evidence/2026-10-06-codex-test-access.txt).
+  No permissions, sandbox settings, hook settings or installations were changed. No release or commit.
+- Next: run `python -X utf8 -m unittest tests.test_live tests.test_gui tests.test_lock -v`, then
+  `python -X utf8 -m unittest discover -s tests -t . -v` in a session with Python access;
+  resolve any actual failures before declaring integration complete. Do not rebuild completed work.
+- **Resolved 2026-10-07 (lead, host):** the Codex session's `supervisor.status()` race fix and its
+  `tests/test_live.py` regression were reviewed and kept; they were committed inside a52fa9b (whose
+  message does not mention them — recorded here). The host ran the suite: 112 tests pass (957f9d6).
+  The real GUI failures were two other races, fixed in a52fa9b: Windows refused the heartbeat/activity
+  `os.replace` while the window read the file, and the lock probe made a starting session exit Busy.
+
+### Product backlog
+
+#### BACKLOG — Hook failed (non-blocking for this task)
+
+- The reported hook failure did not prevent shell commands, file edits, or direct process-launch
+  diagnostics. Python's independent Windows error 5 is the current test blocker.
+- Read the configured Codex Companion, Impeccable and Ponytail hook definitions. The current session
+  rollout contains no structured hook failure record; the failing hook and its root cause remain
+  unconfirmed. Investigate with the actual hook stderr/exit code when available; do not disable hooks
+  or modify plugin configuration as part of the GUI/live-view work.
+
+#### Existing product work
+
 0. Owner: test the improved stock analyzer (P-20261003-bbad3c) and answer the two review questions.
 1. Reduce operator dependence: automatic recovery re-plan when a plan is proven misdirected (needs evidence of a reliable trigger).
 2. Record Owner review time (UNKNOWN today) to measure Owner Effort in minutes.

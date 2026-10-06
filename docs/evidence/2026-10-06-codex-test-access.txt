@@ -1,0 +1,11 @@
+﻿Recorded: 2026-10-06T22:10:04.1636099+09:00
+Identity: desktop-9kpek4l\codexsandboxoffline
+Python directory present in PATH: True
+COMMAND: C:/Users/HP/AppData/Local/Programs/Python/Python312/python.exe -X utf8 -m unittest tests.test_live tests.test_gui tests.test_lock tests.test_supervisor -v
+LAUNCH BLOCKED: System.ComponentModel.Win32Exception: Access is denied
+NativeErrorCode: 5
+unittest did not start; 0 tests executed; no PASS/FAIL result.
+COMMAND: C:/Users/HP/AppData/Local/Programs/Python/Python312/python.exe -X utf8 -m unittest discover -s tests -t . -v
+LAUNCH BLOCKED: System.ComponentModel.Win32Exception: Access is denied
+NativeErrorCode: 5
+unittest did not start; 0 tests executed; no PASS/FAIL result.
