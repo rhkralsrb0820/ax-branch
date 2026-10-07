@@ -3,6 +3,41 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.12] - 2026-10-08
+
+Test Project #1 (v21) failed verification for reasons that were mostly AX Branch's, not the product's.
+Re-checking v21 unchanged with the fixed harness: 7 runtime failures → 3, all misconfigured probes.
+
+### Added
+- Every agent (stages, producer, verifier, strategy, Owner rework) receives `external_connections`: the
+  Owner's recorded decision per domain, authoritative over older notes.
+- A misconfigured probe is reported as such, with the element ids on the page, and sends the FAIL to a CEO
+  strategy review (the probe's author) instead of developer rework.
+
+### Changed
+- Planning prompt: BROWSER `http_body` = CSS selectors separated by `||` (clicks exist since 0.1.9; the
+  prompt still said "clicking is not available"); web-mode probes with no path run as command lines.
+- A strategy review cannot silently drop Owner-approved connections.
+
+### Fixed
+- Web mode sent command-line probes to the server as `GET ''` and reused one for "again after flow" and the
+  exact Owner launch (4 of 7 v21 failures).
+- HTTP probe responses were read only up to 200 000 bytes (a 236 KB JSON lost its last keys); now 5 MB.
+- A prose or missing click selector stopped the clicks silently and was reported as "page lacks …".
+- v21 hard-disabled fetching ("Owner 승인 대기") although the Owner had approved all five domains: a strategy
+  review (10-06 22:04) had set network access to none and agents saw a stale "declined" note. bbad3c's plan
+  was repaired from approvals #16–20.
+
+### Verification
+- 119 tests pass; new tests for CLI probes in web mode, large responses, misconfigured selectors (headless
+  Edge), CEO routing of misconfigured probes, and approved connections surviving a strategy review.
+- Live: the CEO's next review (plan v16) restored network access, rewrote the 3 probes with real selectors
+  and removed the "pending Owner authorization" instruction; Test Project #1 resumed (+3 rounds).
+
+### Known issues
+- Same as 0.1.11 (D-AUTO-1, review #7). The strategy review dropped some probes it judged redundant; this is
+  recorded as a decision and visible in the timeline.
+
 ## [0.1.11] - 2026-10-07
 
 Visible execution and the lifecycle fixes found by running Test Project #1 (P-20261003-bbad3c) for real.
