@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.13] - 2026-10-08
+
+A project waiting for the Owner can now be answered inside AX Branch.
+
+### Added
+- Owner panel in the project view, shown only while the project is WAITING_FOR_OWNER: plain-language
+  feedback, [수정 요청 / 계속], [완료], [중단]; "실행해 보니" (works?) when a verified version is under
+  review; approve/decline for connection approvals.
+- `AXBranch-dev.cmd`: double-click to run the latest source (development-mode GUI checks between exe builds).
+
+### Changed
+- `owner_review` also answers a project paused for the Owner (failure budget used up, NEEDS_DECISION):
+  feedback → same project REWORK (CEO diagnosis, re-planned agents/pipeline, rebuild, verification) with a
+  fresh round budget and all history and findings kept; no text → +3 rounds; finish → PENDING_CLOSE.
+
+### Fixed
+- At WAITING_FOR_OWNER the review dialog failed ("the Owner reviews a delivered project") and only the CLI
+  could continue the project (Test Project #1 after v24).
+
+### Verification
+- 122 tests pass, including the GUI flow: paused project → panel → feedback → [수정 요청 / 계속] → the
+  same project reaches OWNER_REVIEW with the feedback recorded.
+
+### Known issues
+- AXBranch.exe is still 0.1.12 (the Owner had it open); rebuild at the next milestone.
+
 ## [0.1.12] - 2026-10-08
 
 Test Project #1 (v21) failed verification for reasons that were mostly AX Branch's, not the product's.
