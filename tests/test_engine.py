@@ -400,6 +400,35 @@ class EngineTests(unittest.TestCase):
         self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS'])   # no rebuild
         self.assertEqual(len(self.store.events(pid, {'harness_retry'})), 1)
 
+    def _budget_paused(self, script):
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.store.update(pid, budget=1)
+        p = eng.run(pid)                                    # first build fails -> budget used -> waits for the Owner
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertIn('not lowered', p['pause_reason'])
+        return eng, pid
+
+    def test_owner_feedback_on_a_waiting_project_reworks_the_same_project(self):
+        script = Script([BROKEN, LAUNCHABLE], ['FAIL', 'PASS'])
+        eng, pid = self._budget_paused(script)
+        p = eng.owner_review(pid, text='결론은 좋은데 다른 방법으로 다시 검증해줘')
+        self.assertEqual(p['state'], 'REWORK')
+        self.assertGreater(p['budget'], 1)                                  # fresh rounds for the new direction
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        diagnosis = next(pr for s, _, pr in script.prompts if s is E.DIAGNOSIS)
+        self.assertIn('다른 방법으로 다시 검증해줘', diagnosis)                 # the CEO analysed the feedback
+        self.assertIn('wrong sum', diagnosis)                               # with the earlier findings kept
+        self.assertEqual(len(self.store.projects()), 1)
+
+    def test_owner_continue_or_finish_on_a_waiting_project(self):
+        eng, pid = self._budget_paused(Script([BROKEN], ['FAIL']))
+        p = eng.owner_review(pid)                                           # [계속] without text
+        self.assertEqual((p['state'], p['budget']), ('REWORK', 4))
+        eng2, pid2 = self._budget_paused(Script([BROKEN], ['FAIL']))
+        p = eng2.owner_review(pid2, finish=True)                           # [완료]
+        self.assertEqual(p['state'], 'PENDING_CLOSE')
+
     def test_misconfigured_probe_goes_to_the_ceo_not_to_rework(self):
         # P-bbad3c v21: BROWSER probes carried prose instead of selectors; only the CEO can fix the probe.
         script = Script([GOOD, GOOD], ['PASS', 'PASS'])

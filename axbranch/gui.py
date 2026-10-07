@@ -44,6 +44,23 @@ class App(tk.Tk):
         body.add(self.list, weight=1)
         right = ttk.PanedWindow(body, orient='vertical')
         body.add(right, weight=3)
+        self.right = right
+        self.owner_box = ttk.LabelFrame(right, text='Owner 결정 — AX Branch가 기다리고 있습니다', padding=6)
+        self.owner_note = ttk.Label(self.owner_box, font=FONT, wraplength=820, justify='left')
+        self.owner_note.pack(anchor='w')
+        self.works_row = ttk.Frame(self.owner_box)
+        self.works = tk.StringVar(value='unknown')
+        ttk.Label(self.works_row, text='실행해 보니:', font=FONT).pack(side='left')
+        for label, value in (('작동함', 'yes'), ('작동하지 않음', 'no'), ('아직 확인 안 함', 'unknown')):
+            ttk.Radiobutton(self.works_row, text=label, value=value, variable=self.works).pack(side='left', padx=4)
+        self.feedback = tk.Text(self.owner_box, height=4, font=FONT, wrap='word')
+        self.decide_row = ttk.Frame(self.owner_box)
+        for text, cmd in (('수정 요청 / 계속', self.owner_send), ('완료', self.owner_finish), ('중단', self.stop)):
+            ttk.Button(self.decide_row, text=text, command=cmd).pack(side='left', padx=3)
+        self.approve_row = ttk.Frame(self.owner_box)
+        for text, cmd in (('외부 연결 승인', lambda: self.network(True)), ('외부 연결 거절', lambda: self.network(False))):
+            ttk.Button(self.approve_row, text=text, command=cmd).pack(side='left', padx=3)
+        self._owner_mode = None
         # Live execution view: project -> 淸月 CEO -> hired agents -> verification -> Owner review, read
         # from local state (supervisor status, heartbeat/activity files, SQLite) every refresh; no AI call.
         self.live = tk.Text(right, font=FONT, wrap='word', state='disabled', height=8)
@@ -196,6 +213,58 @@ class App(tk.Tk):
             engine.store.close()
         self.resume()
 
+    def _owner_panel(self, p, status):
+        """Show the decision panel only while this project waits for the Owner; never require a CLI."""
+        reason = p['pause_reason'] or ''
+        if status != 'WAITING_FOR_OWNER' or p['state'] in ('ARCHIVE_PENDING_APPROVAL',):
+            mode = None
+        elif 'approval needed' in reason:
+            mode = 'approval'
+        elif p['state'] == 'OWNER_REVIEW':
+            mode = 'review'
+        else:
+            mode = 'decision'
+        if mode != self._owner_mode:
+            for w in (self.works_row, self.feedback, self.decide_row, self.approve_row):
+                w.pack_forget()
+            if self._owner_mode is not None:
+                self.right.forget(self.owner_box)
+            if mode is not None:
+                self.right.insert(0, self.owner_box, weight=0)
+                if mode == 'approval':
+                    self.approve_row.pack(anchor='w', pady=4)
+                else:
+                    if mode == 'review':
+                        self.works_row.pack(anchor='w', pady=(4, 0))
+                    self.feedback.pack(fill='x', pady=4)
+                    self.decide_row.pack(anchor='w')
+            self._owner_mode = mode
+        if mode == 'review':
+            note = '결과가 검증을 통과했습니다. 실행해 보고 의견을 적어 주세요. 수정이 필요하면 [수정 요청 / 계속], 끝내려면 [완료].'
+        elif mode == 'decision':
+            note = (f'{reason[:220] or p["state"]}\n원하는 방향을 자연어로 적고 [수정 요청 / 계속]을 누르면 淸月 CEO가 분석해 같은 프로젝트에서 '
+                    '다시 계획·작업·검증합니다. 비워 두고 누르면 같은 방향으로 3라운드 더 진행합니다. 끝내려면 [완료].')
+        elif mode == 'approval':
+            note = reason[:400]
+        else:
+            note = ''
+        if self.owner_note.cget('text') != note:
+            self.owner_note.config(text=note)
+
+    def owner_send(self):
+        text = self.feedback.get('1.0', 'end').strip()
+        works = {'yes': True, 'no': False}.get(self.works.get()) if self._owner_mode == 'review' else None
+        if self._owner_mode == 'review' and works is None and not text:
+            messagebox.showinfo('AX Branch', '바꾸고 싶은 점을 적거나, 작동 여부를 선택해 주세요.')
+            return
+        if self.review(works, text):
+            self.feedback.delete('1.0', 'end')
+            self.works.set('unknown')
+
+    def owner_finish(self):
+        if self.review(finish=True):
+            self.finish()
+
     def review(self, works=None, text='', finish=False):
         """Record the Owner's review; anything that needs work reopens the same project and rebuilds it."""
         if not self.selected:
@@ -209,8 +278,8 @@ class App(tk.Tk):
             return False
         finally:
             engine.store.close()
-        if p['state'] == 'REWORK':
-            self._launch(self.selected)
+        if p['state'] not in ('OWNER_REVIEW', 'PENDING_CLOSE', 'PAUSED', 'CLOSED', 'ARCHIVE_PENDING_APPROVAL'):
+            self._launch(self.selected)                  # REWORK / resumed: the same project runs again
         return True
 
     def finish(self):
@@ -306,6 +375,7 @@ class App(tk.Tk):
                  f"Goal: {h['goal']}", f"다음: {h['next_action']}"]
         lines.append('')
         view = live.view(self.workspace, self.store, self.selected)
+        self._owner_panel(p, dict(view['header'])['상태'].split(' — ')[0])
         _put(self.live, '\n'.join(f'{k}: {v}' for k, v in view['header'] if k not in ('목표', '다음 작업'))
              + f"\n다음: {dict(view['header'])['다음 작업']}")
         rows = {r['key']: r for r in view['pipeline']}

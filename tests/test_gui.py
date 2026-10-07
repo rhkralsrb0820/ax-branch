@@ -118,6 +118,22 @@ class GuiTests(unittest.TestCase):
         self.pump_until(lambda: 'Owner 피드백 1회차 (problem): double-click closes immediately'
                         in self.app.detail.get('1.0', 'end'))
 
+    def test_waiting_project_shows_owner_panel_and_feedback_reworks_it(self):
+        self.script.builds, self.script.verdicts = [BROKEN, LAUNCHABLE], ['FAIL', 'PASS']
+        pid = self.app.store.new_project('make an add tool')
+        self.app.store.update(pid, budget=1)
+        self.app.selected = pid
+        self.app._launch(pid)
+        self.pump_until(lambda: self.app.store.project(pid)['state'] == 'PAUSED' and not self.app.running)
+        self.pump_until(lambda: self.app._owner_mode == 'decision')         # panel shown, no CLI needed
+        self.assertIn('[수정 요청 / 계속]', self.app.owner_note.cget('text'))
+        self.app.feedback.insert('1.0', '다른 방법으로 다시 만들어줘')
+        _press(self.app.owner_box, '수정 요청 / 계속')
+        self.pump_until(lambda: self.app.store.project(pid)['state'] == 'OWNER_REVIEW' and not self.app.running)
+        self.assertEqual(len(self.app.store.projects()), 1)                   # the same project
+        self.assertEqual([f['text'] for f in self.app.store.feedback(pid)], ['다른 방법으로 다시 만들어줘'])
+        self.pump_until(lambda: self.app._owner_mode == 'review')             # works? + feedback + 완료
+
     def test_busy_project_is_reported_not_run(self):
         pid = self.app.store.new_project('make an add tool')
         self.app.selected = pid

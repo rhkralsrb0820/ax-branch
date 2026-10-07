@@ -835,6 +835,8 @@ class Engine:
         text = (text or '').strip()
         with self.lock(pid):
             p = self.store.project(pid)
+            if p['state'] == 'PAUSED' and p['resume_state'] not in ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
+                return self._owner_decision(pid, p, text, finish)
             if p['state'] not in ('OWNER_REVIEW', 'PENDING_CLOSE'):
                 raise Rejected(f"Project is {p['state']}; the Owner reviews a delivered project (OWNER_REVIEW).")
             if works is False and not text:
@@ -859,6 +861,32 @@ class Engine:
                         self.store.set_state(pid, 'PENDING_CLOSE', reason='Owner chose to finish')
             self.write_handoff(pid)
             return self.store.project(pid)
+
+    def _owner_decision(self, pid, p, text, finish):
+        """The Owner answers a project that stopped to wait for them (failure budget used up, recovery needs a
+        decision): plain-language feedback reopens the SAME project — CEO diagnosis, re-planned agents/pipeline,
+        rebuild, verification — with a fresh round budget; no text = continue (+3 rounds); finish = toward close.
+        History, versions and findings are all kept."""
+        reason = p['pause_reason'] or ''
+        if 'approval needed' in reason:
+            raise Rejected('외부 연결 승인 또는 거절을 먼저 선택해 주세요 (approval needed).')
+        it = p['iteration']
+        with self.store.tx():
+            if finish:
+                if text:
+                    raise Rejected('Finishing and asking for more work at the same time is contradictory; choose one.')
+                self.store.add_feedback(pid, it, 'finish', 'Owner chose to finish without a verified version', handled=it)
+                self.store.update(pid, resume_state='PENDING_CLOSE')
+                self.store.resume(pid)
+            elif text:
+                fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+                self.store.add_feedback(pid, it, 'request', text)
+                self.store.update(pid, iteration=it + 1, budget=fails + gov.MAX_ROUNDS, resume_state='REWORK')
+                self.store.resume(pid)                       # REWORK -> the CEO diagnoses the feedback first
+            else:
+                self.store.resume(pid, 3)
+        self.write_handoff(pid)
+        return self.store.project(pid)
 
     def decide_network(self, pid, approve, note=''):
         """Owner decision on the pending external connections of this project's plan. `note` (the Owner's
