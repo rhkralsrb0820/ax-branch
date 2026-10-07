@@ -12,6 +12,7 @@ Modes
         run HTTP probes, require the server to survive them and still answer afterwards.
   gui   start it and require it to stay up; the window itself is not exercised (recorded).
 """
+import html
 import http.client
 import http.server
 import json
@@ -42,6 +43,7 @@ DEFAULT = {'mode': 'cli', 'owner_launch': 'double-click the file (python <file>,
            'launch_args': [], 'probes': []}
 
 START_TIMEOUT, PROBE_TIMEOUT, CLI_TIMEOUT, GUI_ALIVE, BROWSER_TIMEOUT = 25, 15, 60, 6, 90
+RESPONSE_LIMIT = 5_000_000      # bytes of an HTTP probe response that are checked
 EDGE_PATHS = (r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
               r'C:\Program Files\Microsoft\Edge\Application\msedge.exe')
 
@@ -104,25 +106,9 @@ def check(spec, entry_path, python, cwd, on_step=None):
         launch = {'name': 'owner launch', 'args': spec.get('launch_args', []), 'stdin': '', 'expect_exit': -1,
                   'expect_contains': []}
         for probe in [launch, *spec.get('probes', [])]:
-            started = time.monotonic()
-            code, out = sandbox.run(base + list(probe['args']), cwd, CLI_TIMEOUT, probe.get('stdin', ''))
-            step = {'name': probe['name'], 'args': probe['args'], 'exit': code,
-                    'seconds': round(time.monotonic() - started, 2), 'output_tail': out[-1200:]}
-            problems = []
-            if code is None:
-                problems.append(f'did not finish within {CLI_TIMEOUT}s')
-            elif probe.get('expect_exit', -1) >= 0 and code != probe['expect_exit']:
-                problems.append(f"exit {code}, expected {probe['expect_exit']}")
-            elif probe.get('expect_exit', -1) < 0 and code not in (0,) and 'Traceback' in out:
-                problems.append(f'crashed (exit {code})')
-            missing = _contains(out, probe.get('expect_contains', []))
-            if missing:
-                problems.append(f'output lacks {missing}')
-            problems += _present(out, probe)
-            step.update(ok=not problems, problems=problems)
-            ev['steps'].append(step)
+            ev['steps'].append(_cli(base, cwd, probe))
             if on_step:
-                on_step(f"runtime: {step['name']}")
+                on_step(f"runtime: {probe['name']}")
         ev['ok'] = all(s['ok'] for s in ev['steps'])
         return ev
     port = free_port()
@@ -146,10 +132,15 @@ def check(spec, entry_path, python, cwd, on_step=None):
         if up:
             probes = spec.get('probes', [])
             for probe in probes:
-                ev['steps'].append(_rendered(port, probe) if probe.get('http_method') == 'BROWSER' else _http(port, probe))
+                if probe.get('http_method') == 'BROWSER':
+                    ev['steps'].append(_rendered(port, probe))
+                elif _is_http(probe):
+                    ev['steps'].append(_http(port, probe))
+                else:                       # a command-line check of the same program (e.g. its self-test)
+                    ev['steps'].append(_cli(base, cwd, probe))
                 if on_step:
                     on_step(f"runtime: {probe['name']}")
-            first_http = next((pr for pr in probes if pr.get('http_method') != 'BROWSER'), None)
+            first_http = next((pr for pr in probes if _is_http(pr) and pr.get('http_method') != 'BROWSER'), None)
             if first_http:   # still serving after the flow, and the first page still answers
                 again = _http(port, {**first_http, 'name': f"{first_http['name']} (again after flow)"})
                 ev['steps'].append(again)
@@ -169,6 +160,33 @@ def check(spec, entry_path, python, cwd, on_step=None):
 
 
 _URL = re.compile(r'https?://(?:127\.0\.0\.1|localhost):(\d+)')
+
+
+def _is_http(probe):
+    """A probe talks to the running server when it names a path (or is a BROWSER probe); otherwise it is a
+    command-line run of the program. Plans mix both in web mode (P-bbad3c v21: a self-test probe was sent
+    to the server as GET '' and judged as a product failure, and reused for two follow-up checks)."""
+    return probe.get('http_method') == 'BROWSER' or bool(probe.get('http_path'))
+
+
+def _cli(base, cwd, probe):
+    started = time.monotonic()
+    code, out = sandbox.run(base + list(probe.get('args') or []), cwd, CLI_TIMEOUT, probe.get('stdin', ''))
+    step = {'name': probe['name'], 'args': probe.get('args') or [], 'exit': code,
+            'seconds': round(time.monotonic() - started, 2), 'output_tail': out[-1200:]}
+    problems = []
+    if code is None:
+        problems.append(f'did not finish within {CLI_TIMEOUT}s')
+    elif probe.get('expect_exit', -1) >= 0 and code != probe['expect_exit']:
+        problems.append(f"exit {code}, expected {probe['expect_exit']}")
+    elif probe.get('expect_exit', -1) < 0 and code not in (0,) and 'Traceback' in out:
+        problems.append(f'crashed (exit {code})')
+    missing = _contains(out, probe.get('expect_contains', []))
+    if missing:
+        problems.append(f'output lacks {missing}')
+    problems += _present(out, probe)
+    step.update(ok=not problems, problems=problems)
+    return step
 
 
 def _exact_owner_launch(base, cwd, spec):
@@ -195,7 +213,7 @@ def _exact_owner_launch(base, cwd, spec):
         if not up:
             step.update(ok=False, problems=[f'nothing listening on {port}'], output_tail=proc.output()[-800:])
             return step
-        probes = [pr for pr in spec.get('probes', []) if pr.get('http_method') != 'BROWSER'] or [
+        probes = [pr for pr in spec.get('probes', []) if _is_http(pr) and pr.get('http_method') != 'BROWSER'] or [
             {'name': 'page', 'http_method': 'GET', 'http_path': '/', 'expect_status': 200, 'expect_contains': []}]
         first = _http(port, {**probes[0], 'name': 'first page'})
         step.update(ok=first['ok'] and proc.alive(), problems=first['problems'] + ([] if proc.alive() else ['server exited']),
@@ -225,12 +243,19 @@ def _click_proxy(port, path, selectors):
     encoded = json.dumps(selectors).replace('<', r'\u003c')
     script = ('''<script>document.addEventListener('DOMContentLoaded', async () => {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const fail = (selector, why) => {
+    const mark = document.createElement('div');
+    mark.id = 'axb-click-problem'; mark.dataset.selector = selector; mark.dataset.why = why;
+    document.body.appendChild(mark);
+};
 for (const selector of SELECTORS) {
     const deadline = performance.now() + 5000;
     let element;
-    while (!(element = document.querySelector(selector)) && performance.now() < deadline)
-        await sleep(50);
-    if (!element) return;
+    try {
+        while (!(element = document.querySelector(selector)) && performance.now() < deadline)
+            await sleep(50);
+    } catch (e) { fail(selector, 'invalid'); return; }
+    if (!element) { fail(selector, 'missing'); return; }
     element.click();
     await sleep(300);
 }
@@ -365,6 +390,15 @@ def _rendered(port, probe):
     if dom is None:
         step.update(ok=False, problems=[f'browser did not finish within {BROWSER_TIMEOUT}s (2 attempts)'])
         return step
+    mark = re.search(r'id="axb-click-problem"[^>]*data-selector="([^"]*)"[^>]*data-why="(\w+)"', dom)
+    if mark:
+        what = 'is not a CSS selector' if mark.group(2) == 'invalid' else 'matched nothing on the page'
+        ids = sorted(set(re.findall(r'\bid="([^"]+)"', dom)) - {'axb-click-problem'})[:60]
+        step.update(ok=False, probe_misconfigured=True,
+                    problems=[f'probe misconfigured: click selector {html.unescape(mark.group(1))[:120]!r} {what} '
+                              "(http_body of a BROWSER probe = CSS selectors separated by '||'); "
+                              f"element ids on the page: {', '.join('#' + i for i in ids) or 'none'}"])
+        return step
     text = re.sub(r'<script\b.*?</script>', ' ', dom, flags=re.S | re.I)
     text = re.sub(r'<style\b.*?</style>', ' ', text, flags=re.S | re.I)
     missing = _contains(text, probe.get('expect_contains', []))
@@ -386,7 +420,10 @@ def _http(port, probe):
         con = http.client.HTTPConnection('127.0.0.1', port, timeout=PROBE_TIMEOUT)
         con.request(method, probe.get('http_path') or '/', body=body.encode('utf-8') if body else None, headers=headers)
         resp = con.getresponse()
-        text = resp.read(200_000).decode('utf-8', errors='replace')
+        raw = resp.read(RESPONSE_LIMIT + 1)
+        text = raw[:RESPONSE_LIMIT].decode('utf-8', errors='replace')
+        if len(raw) > RESPONSE_LIMIT:
+            problems.append(f'response larger than {RESPONSE_LIMIT} bytes; checked only the first part')
         con.close()
         step.update(status=resp.status, body_tail=text[:800])
         if probe.get('expect_status', 0) and resp.status != probe['expect_status']:

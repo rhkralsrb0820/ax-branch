@@ -400,6 +400,29 @@ class EngineTests(unittest.TestCase):
         self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS'])   # no rebuild
         self.assertEqual(len(self.store.events(pid, {'harness_retry'})), 1)
 
+    def test_misconfigured_probe_goes_to_the_ceo_not_to_rework(self):
+        # P-bbad3c v21: BROWSER probes carried prose instead of selectors; only the CEO can fix the probe.
+        script = Script([GOOD, GOOD], ['PASS', 'PASS'])
+        eng = self.engine(script)
+        real = eng.runtime_evidence
+        calls = []
+
+        def misconfigured(*args):
+            calls.append(1)
+            if len(calls) == 1:
+                return {'ok': False, 'mode': 'web', 'notes': [], 'steps': [
+                    {'name': 'BROWSER: flow', 'ok': False, 'probe_misconfigured': True,
+                     'problems': ["probe misconfigured: click selector 'Click the sample' matched nothing; "
+                                  'element ids on the page: #sample-1']}]}
+            return real(*args)
+        eng.runtime_evidence = misconfigured
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        strategy = [pr for s, _, pr in script.prompts if s is E.STRATEGY]
+        self.assertEqual(len(strategy), 1)
+        self.assertIn('MISCONFIGURED', strategy[0])
+        self.assertIn('#sample-1', strategy[0])
+
     def test_feedback_loop_is_generic_math_proof_document(self):
         proof1 = '# Proof that sqrt(2) is irrational\n' + 'Step 1. Assume sqrt(2)=p/q in lowest terms.\n' * 8
         proof2 = proof1 + 'Step 3 (re-verified by an independent method: infinite descent).\n' * 6

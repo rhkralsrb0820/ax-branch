@@ -51,6 +51,38 @@ class RuntimeTests(unittest.TestCase):
                          ['server start', 'page', 'analysis api', 'page (again after flow)', 'server survived',
                           'exact Owner launch (no arguments)'])
 
+    def test_web_mode_runs_command_line_probes_as_commands(self):
+        # P-bbad3c v21: a self-test probe (args, no path) was sent to the server as GET '' and judged a
+        # product failure — and then reused for "again after flow" and the exact Owner launch.
+        code = "import sys\nif 'selftest' in sys.argv: print('PASS selftest'); sys.exit(0)\n" + SERVER.replace('MODE', OK_MODE)
+        selftest = {'name': 'self-test', 'args': ['selftest'], 'stdin': '', 'http_method': '', 'http_path': '',
+                    'http_body': '', 'expect_exit': 0, 'expect_status': 0, 'expect_contains': ['PASS selftest']}
+        ev = self.check(code, {**WEB, 'probes': [selftest, *WEB['probes']]})
+        self.assertTrue(ev['ok'], ev)
+        self.assertIn('page (again after flow)', [s['name'] for s in ev['steps']])     # an HTTP probe, not the CLI one
+
+    def test_large_response_is_checked_whole(self):
+        # v21: a 236 KB research JSON was cut at 200 000 bytes and its last keys reported missing.
+        code = SERVER.replace('MODE', OK_MODE).replace(
+            "json.dumps({'ticker': 'DEMO', 'sma': 2.0}).encode()", "(json.dumps({'pad': 'x' * 300000, 'tail_key': 1})).encode()")
+        ev = self.check(code, {**WEB, 'probes': [WEB['probes'][0], probe('big', '/api/big', ['"tail_key"'])]})
+        self.assertTrue(ev['ok'], ev)
+
+    @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
+    def test_prose_or_missing_click_selector_is_a_misconfigured_probe(self):
+        page = b"<html><body><button id=go>Go</button><div id=out>ready</div></body></html>"
+        code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page))
+        for body, why in (('Click the first sample and assert the summary', 'matched nothing'), ('Click: [sample', 'is not a CSS selector'),
+                          ('#go||#nope', 'matched nothing')):
+            browser_probe = {**probe('click', '/', ['ready']), 'http_method': 'BROWSER', 'http_body': body}
+            ev = self.check(code, {**WEB, 'probes': [WEB['probes'][0], browser_probe]})
+            step = next(s for s in ev['steps'] if s['name'] == 'click')
+            self.assertFalse(step['ok'], step)
+            self.assertTrue(step.get('probe_misconfigured'), step)
+            self.assertIn('probe misconfigured', step['problems'][0])
+            self.assertIn(why, step['problems'][0])
+            self.assertIn('#go', step['problems'][0])                   # the ids the CEO can use
+
     def test_dropped_connection_is_caught(self):
         ev = self.check(SERVER.replace('MODE', DROP_MODE), WEB)
         self.assertFalse(ev['ok'])
@@ -156,7 +188,7 @@ class RuntimeTests(unittest.TestCase):
 
     @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
     def test_injected_click_script_cannot_satisfy_expect_contains(self):
-        page = b'<html><body><h1>Ready</h1></body></html>'
+        page = b'<html><body><h1 id=only-in-injected-script>Ready</h1></body></html>'
         code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page))
         needles = ['#only-in-injected-script', 'const deadline = performance.now() + 5000']
         browser_probe = {**probe('script source is not evidence', '/', needles), 'http_method': 'BROWSER',

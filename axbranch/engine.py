@@ -72,11 +72,15 @@ RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the
   web: the program must accept `--port PORT` and `--no-browser` and bind 127.0.0.1 only; launch_args
   must be e.g. ["--port", "{port}", "--no-browser"] (the engine substitutes a free port); probes are
   HTTP requests (http_method/path/body, expect_status, expect_contains) that walk the primary user flow
-  end to end, including the requests the page itself makes (e.g. its API calls).
+  end to end, including the requests the page itself makes (e.g. its API calls). A probe with an
+  empty http_path (and http_method "") is instead a command-line run `python <file> *args` of the same
+  program (e.g. its self-test), checked like a cli probe.
   For any page, also add http_method "BROWSER" probes: the engine loads the page in a real headless
   browser (its JavaScript runs and makes its own requests) and checks expect_contains against the
-  RENDERED text. Clicking is not available, so make the primary flow reachable by URL (e.g.
-  /?sample=uptrend shows that analysis) and probe that URL.
+  RENDERED text. To click, put CSS selectors in http_body separated by '||' (e.g.
+  "#sample-1||button.analyze"): each is clicked in order after the page loads. http_body is ONLY
+  selectors — never instructions in words; a selector that matches nothing fails the probe as
+  misconfigured. Prefer stable ids the deliverable defines (and names in its acceptance criteria).
   Probes must use realistic input and check meaningful output, not just that something answered."""
 
 CEO_SYSTEM = f"""You are 淸月 AI CEO, the executive of AX Branch. The Owner gave a Goal.
@@ -615,11 +619,24 @@ class Engine:
             self._strategy(pid, recovery_note=f'The same root cause failed twice in a row: {repeated}. '
                                               'Continuing the same way is not allowed; change provider or approach.',
                            forbid_continue=True)
+        elif misconfigured := self._misconfigured_probes(pid):
+            # The probe, not the product, is wrong: the CEO who wrote the runtime spec fixes it (a developer
+            # rework cannot make prose clickable). Same checks, valid selectors — the bar is not lowered.
+            self._strategy(pid, recovery_note='Runtime Acceptance probes are MISCONFIGURED (not product failures): '
+                           + ' | '.join(misconfigured) + '. Return the runtime spec with these probes fixed: '
+                           "BROWSER http_body = CSS selectors separated by '||' that exist in the deliverable "
+                           '(use the listed ids); keep what each probe checks.')
         elif fails % gov.STRATEGY_EVERY == 0:
             self._strategy(pid)
         if fails >= self.store.project(pid)['budget']:
             self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
                                   f'with more rounds (resume --rounds N), or change/stop the goal.')
+
+    def _misconfigured_probes(self, pid):
+        """Problems of runtime probes the harness could not execute as written, in the latest verification."""
+        last = (self.store.verifications(pid) or [None])[-1]
+        steps = ((last or {}).get('checks') or {}).get('runtime', {}).get('steps', []) if last else []
+        return [f"{s['name']}: {'; '.join(s.get('problems', []))}"[:600] for s in steps if s.get('probe_misconfigured')]
 
     def _repeated_failure(self, pid):
         """The top blocking finding's signature when the last two FAILs share it, else None."""
