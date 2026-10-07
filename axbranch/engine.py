@@ -387,7 +387,7 @@ class Engine:
             done = self.store.output(pid, idx, pv)      # reused across rework rounds of the same plan
             if done is None:
                 stage_context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
-                                 'stage': stage['name'], 'previous_stages': upstream}
+                                 'stage': stage['name'], 'previous_stages': upstream, **self._connections(pid)}
                 stage_context.update(baseline)
                 if plan.get('owner_rework'):
                     stage_context['owner_rework'] = plan['owner_rework']
@@ -398,7 +398,7 @@ class Engine:
                 done = {'output': out}
             upstream.append({'stage': stage['name'], 'agent': stage['agent_role'], **done['output']})
 
-        context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
+        context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'], **self._connections(pid),
                    'deliverable': {'kind': plan['artifact_kind'], 'filename': plan['artifact_filename']},
                    'acceptance_criteria': plan['acceptance_criteria'], 'previous_stages': upstream,
                    'content_rule': ('files = every file of the bundle as {path (relative), content}; content = ""'
@@ -549,7 +549,7 @@ class Engine:
                                             for s in checks['runtime']['steps'] if not s['ok']))[-3000:]
         producer = plan['pipeline'][-1]['provider']
         context = {'owner_goal': p['goal'], 'acceptance_criteria': plan['acceptance_criteria'],
-                   'lenses': plan['verification_lenses'],
+                   'lenses': plan['verification_lenses'], **self._connections(pid),
                    'artifact': {'filename': plan['artifact_filename'], 'kind': artifact['kind'], 'content': text,
                                 'files': [rel for rel, _, _ in artifacts.files_of(artifact)]},
                    'deterministic_checks': checks,
@@ -632,6 +632,23 @@ class Engine:
             self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
                                   f'with more rounds (resume --rounds N), or change/stop the goal.')
 
+    def _connections(self, pid):
+        """The delivered program's external connections with the Owner's RECORDED decision, for every agent.
+        P-bbad3c v21 shipped with fetching hard-disabled ('Owner 승인 대기') two days after the Owner approved
+        all five domains: the agents only saw a stale interpretation that still said 'declined'."""
+        planned = (self.store.project(pid)['plan'] or {}).get('network_access') or []
+        if not planned:
+            return {}
+        decided = {a['subject']: a['status'] for a in self.store.approvals(pid)}
+        reused = {e['domain'] for e in permissions.evaluate(self.store, planned)['reused']}
+        return {'external_connections': {
+            'status': [{'domain': e['domain'], 'risk': e.get('risk'), 'purpose': e.get('purpose'),
+                        'owner_decision': 'approved' if e['domain'] in reused else decided.get(e['domain'], 'not asked yet')}
+                       for e in planned],
+            'rule': ("Authoritative (the Owner's recorded decisions): the delivered program MAY contact every "
+                     "approved domain as planned, enabled by default with an offline switch; never a denied or "
+                     "unlisted one. This supersedes any earlier note saying approval is pending or declined.")}}
+
     def _misconfigured_probes(self, pid):
         """Problems of runtime probes the harness could not execute as written, in the latest verification."""
         last = (self.store.verifications(pid) or [None])[-1]
@@ -653,7 +670,7 @@ class Engine:
     def _strategy(self, pid, recovery_note=None, forbid_continue=False):
         p = self.store.project(pid)
         latest, confirmed = self._baselines(pid)
-        context = {'owner_goal': p['goal'], 'plan': p['plan'],
+        context = {'owner_goal': p['goal'], 'plan': p['plan'], **self._connections(pid),
                    'versions': [{'version': a['iteration'], 'empty': artifacts.is_empty(a), 'bytes':
                                  sum(Path(path).stat().st_size for _, path, _ in artifacts.files_of(a) if Path(path).exists())}
                                 for a in self.store.artifacts(pid)],
@@ -684,6 +701,16 @@ class Engine:
                 self.store.end_agents(pid, 'replaced')
                 self.store.update(pid, plan=plan, plan_version=p['plan_version'] + 1)
             access = decision.get('network_access')
+            if access is not None:
+                # Owner-approved connections are part of what the Owner asked for: a strategy review never drops
+                # them silently (P-bbad3c 10-06 22:04: a review set 'none' and the next builds disabled fetching).
+                approved = {a['subject'] for a in self.store.approvals(pid) if a['status'] == 'approved'}
+                proposed = {e['domain'] for e in access}
+                kept = [e for e in (plan.get('network_access') or []) if e['domain'] in approved and e['domain'] not in proposed]
+                if kept:
+                    access = access + kept
+                    self.store.event(pid, 'decision', what='Owner-approved network access kept',
+                                     why=', '.join(e['domain'] for e in kept), by='engine')
             if access is not None and access != (plan.get('network_access') or []):
                 # The program's external connections may change on re-plan; the approval gate before
                 # STAFFING asks the Owner for anything not already approved or reusable.
@@ -757,7 +784,7 @@ class Engine:
         nothing = {'ok': True, 'mode': 'none', 'steps': [], 'notes': ['nothing has been built yet']}
         before = self.runtime_evidence(last, plan.get('runtime'), old_entry) if last else nothing
         feedback = self.store.feedback(pid)
-        context = {'owner_goal': p['goal'], 'current_plan': plan,
+        context = {'owner_goal': p['goal'], 'current_plan': plan, **self._connections(pid),
                    'owner_confirmed_working_versions': sorted({f['iteration'] for f in feedback if f['verdict'] == 'works'}),
                    'owner_feedback': [{'round': f['iteration'], 'verdict': f['verdict'], 'text': f['text'],
                                        'new': f['handled_iteration'] is None} for f in feedback],

@@ -462,6 +462,26 @@ class EngineTests(unittest.TestCase):
         self.store.resume(pid)
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
 
+    def test_strategy_cannot_silently_drop_approved_connections_and_agents_see_approval(self):
+        # P-bbad3c: a strategy review set network access to 'none' after the Owner approved it, and the agents,
+        # reading a stale interpretation, shipped fetching disabled ("Owner 승인 대기").
+        script = Script([LAUNCHABLE], ['PASS'])
+        sec = {'domain': 'data.sec.gov', 'purpose': 'facts', 'risk': 'public_read'}
+        script.network = [sec]
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        eng.decide_network(pid, True)
+        script.network = []                                                 # a later review proposes none
+        eng._strategy(pid)
+        self.assertEqual(self.store.project(pid)['plan']['network_access'], [sec])
+        self.assertTrue(any(e['detail']['what'] == 'Owner-approved network access kept'
+                            for e in self.store.events(pid, {'decision'})))
+        self.store.resume(pid)
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        build = [pr for s, _, pr in script.prompts if s is E.BUILD][-1]
+        self.assertIn('"owner_decision": "approved"', build)                # the producer sees the decision
+
     def test_external_connection_waits_for_owner_approval(self):
         script = Script([GOOD], ['PASS'])
         script.network = [{'domain': 'query1.finance.example', 'purpose': 'daily prices'}]
