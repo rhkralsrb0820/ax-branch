@@ -89,6 +89,15 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
    - the full Owner workflow observations;
    - complete subprocess/environment evidence.
    Owner decides: extend the harness for these, or accept/reduce the criteria. No further rebuild.
+9. **0.1.17 approved-criteria gate, v31 re-verified (2026-10-08, no rebuild, v31 sha256 unchanged):**
+   checks OK, runtime OK, 30/32 approved criteria met; 3 findings recorded as recommendations (not gating).
+   FAIL on 2 approved criteria, both harness → HARNESS_BLOCKED:
+   - #3: a real default-browser launch is not observed. Verification replaces the browser handler, so no
+     window opens on the Owner desktop; the browser-open request itself is recorded. Persistence and port
+     fallback: resolved.
+   - #6: the rendered order of the result sections is not recorded, and the probe's 500 ms wait was not followed.
+   Owner decides: accept the recorded browser-open request as evidence for #3 (or allow a real browser
+   window during verification), and let the harness record the visible section order for #6.
 
 ### Development continuation — GUI/live-view (2026-10-06, verification blocked)
 
