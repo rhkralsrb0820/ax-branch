@@ -3,6 +3,42 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.15] - 2026-10-08
+
+Runtime Acceptance harness: the four verifier gaps reported on P-20261003-bbad3c v31 (HARNESS_BLOCKED).
+
+### Added
+- BROWSER probes judge the visible text: `document.body.innerText`, captured at the end of the browser's
+  time budget after the scripted clicks. Recorded: browser exe and user agent, click records, every
+  `<details>` open state, page loads in the tab (no-reload), elements holding must-not-contain text with
+  `checkVisibility()` and their `<details>` state, proxied browser requests, browser stderr separately.
+- Outbound record: every artifact launch runs through an audit-hook wrapper (socket connect/sendto/getaddrinfo,
+  subprocess, os.system/startfile, webbrowser.open); `runtime.check()` returns `network` with external
+  connections (by address; loopback, IPv4-mapped loopback and local IPC separated) and browser-open requests.
+- Exact Owner launch: full command, browser-open requests of that process, observation of at least 10 s,
+  the HTTP flow on the same process (failures fail the step), and a second launch while the port is busy
+  (observation only).
+- Subprocess probe records: executable, full command, cwd, environment keys, separate stdout/stderr, start time.
+
+### Changed
+- Probes without `http_path` no longer get `http_method` GET in web mode (they run as subprocesses; noted).
+- `sandbox.start/run`: optional `extra_env` and `split` (separate stderr).
+
+### Fixed
+- Collapsed `<details>` content was judged as shown (`--dump-dom` serialized it). Browser stderr was mixed
+  into the judged text.
+
+### Verification
+- 138 tests pass (new: collapsed vs opened details in real headless Edge, late content and placeholder-like
+  selectors, outbound/browser-open record, subfolder entry imports, address classification, exact-launch
+  observation and flow failure, subprocess probe dispatch).
+- Independent Codex review: 7 findings, all fixed.
+
+### Known issues
+- D-ART-1 (immutable artifact versions) is recorded as P0 backlog, not implemented.
+- Under the wrapper `sys.argv[0]` is the absolute entry path (`__file__` and `sys.path[0]` match a direct run).
+- AXBranch.exe is still 0.1.12.
+
 ## [0.1.14] - 2026-10-08
 
 Orchestration defect D-ORCH-1 (P-20261003-bbad3c v25→v31): no product rebuild for verifier or machine

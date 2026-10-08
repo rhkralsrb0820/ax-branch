@@ -71,9 +71,9 @@ if os.name == 'nt':
         return job
 
 
-def run(args, cwd, timeout, stdin_text=''):
+def run(args, cwd, timeout, stdin_text='', extra_env=None):
     """Returns (returncode or None on timeout, combined output)."""
-    proc = start(args, cwd, stdin_text)
+    proc = start(args, cwd, stdin_text, extra_env=extra_env)
     try:
         code = proc.wait(timeout)
         proc.stop()
@@ -83,24 +83,29 @@ def run(args, cwd, timeout, stdin_text=''):
         proc.cleanup()
 
 
-def start(args, cwd, stdin_text='', env=None, caps=True):
+def start(args, cwd, stdin_text='', env=None, caps=True, extra_env=None, split=False):
     """A contained process that keeps running (e.g. a server under test). Always call stop().
-    env=None -> the clean environment for generated code; provider CLIs pass their own (logged-in)
-    environment and caps=False, keeping only kill-the-whole-tree."""
-    return Contained(args, cwd, stdin_text, env, caps)
+    env=None -> the clean environment for generated code (plus extra_env); provider CLIs pass their own
+    (logged-in) environment and caps=False, keeping only kill-the-whole-tree.
+    split: stderr goes to its own file (streams()); output() still returns stdout then stderr."""
+    return Contained(args, cwd, stdin_text, env, caps, extra_env, split)
 
 
 class Contained:
     # Output goes to a file, not a pipe: a grandchild inheriting a pipe would keep us waiting until
     # it finished its work. We wait for the main process only, then kill whatever is left.
-    def __init__(self, args, cwd, stdin_text, env=None, caps=True):
+    def __init__(self, args, cwd, stdin_text, env=None, caps=True, extra_env=None, split=False):
         self.tmp = Path(tempfile.mkdtemp(prefix='axb-tmp-'))   # outside cwd: the program's folder stays as built
         self.log = self.tmp / 'output.txt'
+        self.err_log = self.tmp / 'stderr.txt' if split else None
         stdin_path = self.tmp / 'stdin.txt'
         stdin_path.write_bytes((stdin_text or '').encode('utf-8'))
         self._out, self._in = self.log.open('wb'), stdin_path.open('rb')
-        common = dict(cwd=cwd, env=clean_env(str(self.tmp)) if env is None else env, stdin=self._in,
-                      stdout=self._out, stderr=subprocess.STDOUT)
+        self._err = self.err_log.open('wb') if split else None
+        if env is None:
+            env = {**clean_env(str(self.tmp)), **(extra_env or {})}
+        common = dict(cwd=cwd, env=env, stdin=self._in,
+                      stdout=self._out, stderr=self._err or subprocess.STDOUT)
         self.job = None
         if os.name != 'nt':
             self.proc = subprocess.Popen(args, start_new_session=True, **common)
@@ -125,9 +130,20 @@ class Contained:
             return None
 
     def output(self):
-        if not self._out.closed:
-            self._out.flush()
-        return self.log.read_bytes().decode('utf-8', errors='replace')
+        out, err = self.streams()
+        return out + err
+
+    def streams(self):
+        """(stdout, stderr); stderr is '' unless started with split=True (then it is inside stdout)."""
+        texts = []
+        for f, path in ((self._out, self.log), (self._err, self.err_log)):
+            if path is None:
+                texts.append('')
+                continue
+            if not f.closed:
+                f.flush()
+            texts.append(path.read_bytes().decode('utf-8', errors='replace'))
+        return texts[0], texts[1]
 
     def stop(self):
         """Kill the whole tree now (idempotent); returns the exit code if it had exited by itself."""
@@ -144,8 +160,8 @@ class Contained:
             except OSError:
                 pass
             self.proc.wait()
-        for f in (self._out, self._in):
-            if not f.closed:
+        for f in (self._out, self._in, self._err):
+            if f is not None and not f.closed:
                 f.close()
         return code
 

@@ -217,6 +217,104 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(self.check('import time\ntime.sleep(30)\n', spec)['ok'])
         self.assertFalse(self.check('raise RuntimeError("no display")\n', spec)['ok'])
 
+    def test_collapsed_details_text_is_not_visible_text(self):
+        # P-bbad3c v31: --dump-dom serialized closed <details> content and the harness judged it as shown.
+        page = ("<html><head><meta charset=\\'utf-8\\'></head><h1>Judgment</h1><details id=\\'more\\'><summary>상세 데이터 보기</summary>"
+                "<p id=\\'q\\'>시세 요약 (Quote)</p></details>")
+        code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", f"'{page}'.encode()")
+        browser_probe = {**probe('collapsed', '/', ['Judgment']), 'http_method': 'BROWSER',
+                         'expect_absent': ['시세 요약 (Quote)']}
+        ev = self.check(code, {**WEB, 'probes': [browser_probe]})
+        step = next(s for s in ev['steps'] if s['name'] == 'collapsed')
+        self.assertTrue(step['ok'], step)
+        self.assertEqual(step['details'][0], {'id': 'more', 'open': False, 'summary': '상세 데이터 보기'})
+        self.assertEqual(step['offending'][0]['id'], 'q')
+        self.assertFalse(step['offending'][0]['in_inner_text'])
+        self.assertIn('innerText', step['text_source'])
+        self.assertTrue(step['user_agent'] and step['browser_requests'])
+        opened = {**browser_probe, 'name': 'opened', 'http_body': 'summary'}     # clicking opens it: now shown
+        ev = self.check(code, {**WEB, 'probes': [opened]})
+        step = next(s for s in ev['steps'] if s['name'] == 'opened')
+        self.assertFalse(step['ok'])
+        self.assertEqual(step['clicks'][0]['selector'], 'summary')
+        self.assertTrue(step['offending'][0]['in_inner_text'])
+
+    def test_external_connections_and_browser_opens_are_recorded(self):
+        code = ("import socket, sys, webbrowser\n"
+                "s = socket.socket(); s.settimeout(0.2)\n"
+                "try: s.connect(('203.0.113.7', 9))\n"
+                "except OSError: pass\n"
+                "webbrowser.open('http://127.0.0.1:1/')\n"
+                "print('out'); print('err', file=sys.stderr)\n")
+        spec = {'mode': 'cli', 'owner_launch': 'double-click', 'launch_args': [], 'probes': []}
+        ev = self.check(code, spec)
+        net = ev['network']
+        self.assertEqual(net['external_count'], 1, net)
+        self.assertEqual(net['external_connections'][0]['target'][0], '203.0.113.7')
+        self.assertEqual(net['browser_open_requests'][0]['url'], 'http://127.0.0.1:1/')
+        step = ev['steps'][0]
+        self.assertEqual((step['stdout_tail'].strip(), step['stderr_tail'].strip()), ('out', 'err'))
+        self.assertEqual(step['executable'], sys.executable)
+        self.assertIn('AXB_AUDIT_LOG', step['env_keys'])
+        self.assertEqual(self.check("print('quiet')\n", spec)['network']['external_count'], 0)
+
+    def test_exact_owner_launch_is_observed(self):
+        code = ("import webbrowser\nwebbrowser.open('http://127.0.0.1/')\n" + SERVER.replace('MODE', OK_MODE))
+        ev = self.check(code, WEB)
+        step = ev['steps'][-1]
+        self.assertTrue(step['ok'], step)
+        self.assertGreaterEqual(step['observed_seconds'], runtime.OBSERVE_SECONDS)
+        self.assertTrue(step['alive_after_observation'])
+        self.assertEqual([s['name'] for s in step['same_process_flow']], ['analysis api'])
+        self.assertEqual(len(step['browser_open_requests']), 1)
+        self.assertTrue(step['busy_port_second_launch']['differs_from_busy_port'])
+        self.assertEqual(ev['network']['external_count'], 0)
+
+    def test_late_content_and_placeholder_like_selectors(self):
+        # Codex review: the text was captured right after load; a selector containing 'NEEDLES' broke the script.
+        page = ("<html><body><b id=NEEDLES>x</b><div id=r>Loading</div><script>"
+                "setTimeout(() => document.getElementById(\\'r\\').textContent = \\'Ready\\', 2000)</script></body></html>")
+        code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", f"'{page}'.encode()")
+        late = {**probe('late', '/', ['Ready']), 'http_method': 'BROWSER', 'http_body': '[id="NEEDLES"]',
+                'expect_absent': ['Loading']}
+        step = next(s for s in self.check(code, {**WEB, 'probes': [late]})['steps'] if s['name'] == 'late')
+        self.assertTrue(step['ok'], step)
+        self.assertTrue(step['clicks'][0]['clicked'])
+
+    def test_entry_in_a_subfolder_imports_its_siblings(self):
+        (self.tmp / 'sub').mkdir()
+        (self.tmp / 'sub' / 'helper.py').write_text("VALUE = 'sibling ok'\n", encoding='utf-8')
+        (self.tmp / 'sub' / 'app.py').write_text(
+            "import os, helper\nprint(helper.VALUE, os.path.isabs(__file__))\n", encoding='utf-8')
+        spec = {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []}
+        ev = runtime.check(spec, 'sub/app.py', sys.executable, str(self.tmp))
+        self.assertIn('sibling ok True', ev['steps'][0]['stdout_tail'], ev)
+
+    def test_network_summary_classifies_by_address(self):
+        log = self.tmp / 'audit.jsonl'
+        rows = [('socket.connect', ['<socket family=AddressFamily.AF_INET6>', ['::ffff:127.0.0.1', 80, 0, 0]]),
+                ('socket.connect', ['<socket family=AddressFamily.AF_UNIX>', '/tmp/x.sock']),
+                ('socket.getaddrinfo', ['127.example.com', 443, 0, 0, 0]),
+                ('socket.getaddrinfo', ['localhost', 80, 0, 0, 0])]
+        log.write_text(''.join(__import__('json').dumps({'t': 0, 'pid': 1, 'event': e, 'args': a}) + '\n'
+                               for e, a in rows) + '{"broken\n', encoding='utf-8')
+        net = runtime.network_summary(str(log))
+        self.assertEqual((net['loopback_events'], net['local_ipc_events'], net['external_count'],
+                          net['malformed_log_lines']), (2, 1, 1, 1))
+        self.assertEqual(net['external_connections'][0]['target'][0], '127.example.com')
+
+    def test_owner_flow_failure_on_the_exact_launch_fails_it(self):
+        mode = "if self.path.startswith('/api') and '--port' not in sys.argv: self.connection.close(); return"
+        step = self.check(SERVER.replace('MODE', mode), WEB)['steps'][-1]
+        self.assertFalse(step['ok'])
+        self.assertTrue(any(p.startswith('flow analysis api') for p in step['problems']), step['problems'])
+
+    def test_subprocess_probe_has_no_http_method(self):
+        selftest = {**probe('self-test', '', []), 'args': ['selftest']}
+        spec, notes = runtime.normalize({**WEB, 'probes': [selftest, probe('page', '/', [])]})
+        self.assertEqual([p['http_method'] for p in spec['probes']], ['', 'GET'])
+        self.assertIn('subprocess probe', notes[0])
+
 
 if __name__ == '__main__':
     unittest.main()
