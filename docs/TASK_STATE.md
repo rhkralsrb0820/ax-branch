@@ -64,6 +64,19 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
    **Next (AX Branch dev):** fix the verifier gaps named in the findings: visible-innerText browser
    evidence, exact Owner launch / browser-open observation, outbound-connection log, subprocess recording.
    Then resume to re-verify v31.
+8. **Harness fixes 0.1.15/0.1.16, v31 re-verified again (2026-10-08, no rebuild, v31 unchanged by sha256):**
+   - deterministic checks OK and Runtime Acceptance OK; all 4 BROWSER steps pass on visible innerText;
+   - the 4 external attempts were all refused (0 unblocked); browser-open requests were recorded;
+   - verdict still FAIL with 5 major findings, all harness → HARNESS_BLOCKED; 6 criteria unmet.
+   The original 4 gaps are covered. What the verifier still asks for goes beyond them:
+   - an offline environment on the exact Owner launch, which contradicts "exact";
+   - interception of descendant processes and attribution of browser traffic (needs an OS firewall, so
+     Owner-approved system setup);
+   - a real default-browser launch;
+   - a runtime test of startup failure ("prints error, waits for Enter");
+   - the full Owner workflow observations;
+   - complete subprocess/environment evidence.
+   Owner decides: extend the harness for these, or accept/reduce the criteria. No further rebuild.
 
 ### Development continuation — GUI/live-view (2026-10-06, verification blocked)
 

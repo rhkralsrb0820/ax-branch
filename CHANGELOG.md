@@ -23,7 +23,7 @@ Verification no longer reaches the internet; the exact Owner launch judges trans
 - Bytes host names (b'localhost') were logged as external.
 
 ### Verification
-- See the commit (full suite after this change). Independent Codex review of the delta: 4 findings, 3 fixed.
+- 139 tests pass. Independent Codex review of the delta: 4 findings, 3 fixed.
   The 4th is a documented limit (below).
 
 ### Known issues
