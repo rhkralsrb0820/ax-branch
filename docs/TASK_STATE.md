@@ -107,6 +107,13 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
     - Deterministic checks and runtime: OK. 3 minor recommendations recorded (not gating). 0 unmet approved criteria.
     - **Owner next:** test v31, including the real default-browser window (`python -m axbranch review
       P-20261003-bbad3c --works` / `--broken "..."` / `--request "..."`).
+11. **2026-10-08/09:**
+    - The Owner's review of v31 led to v32, which failed verification (FAIL #30, 23:52).
+    - The REWORK strategy call was then refused by both providers → PAUSED RateLimited (Claude reset 00:10,
+      Codex 00:15). It stayed there because nothing re-checked a quota pause (fixed in 0.1.20).
+    - 00:20: Claude available on one minimal call. Resumed the REWORK checkpoint with one worker (pid 26220).
+    - Continuing REWORK rebuilt v33 (4 edits on v32) → verification PASS → OWNER_REVIEW 00:25.
+    - The FAIL #30 strategy review did not run.
 
 ### Development continuation — GUI/live-view (2026-10-06, verification blocked)
 
