@@ -745,6 +745,30 @@ class GateAndImmutabilityTests(unittest.TestCase):
         self.assertIn('wrong sum', rebuild)
         self.assertNotIn('RECOMMENDATION-XYZ', rebuild)
 
+    def test_owner_ruling_reaches_the_verifier_and_never_changes_criteria(self):
+        script = HarnessScript([GOOD], ['FAIL'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        criteria = self.store.project(pid)['plan']['acceptance_criteria']
+        with self.assertRaises(Rejected):
+            eng.add_ruling(pid, len(criteria), 'out of range')
+        eng.add_ruling(pid, 0, 'RULING-ABC: the recorded request counts; the Owner checks the window at review')
+        self.store.resume(pid)
+        script.verdicts.append('PASS')
+        eng.run(pid)
+        verify = [prompt for schema, _, prompt in script.prompts if schema is E.VERDICT][-1]
+        self.assertIn('RULING-ABC', verify)
+        self.assertEqual(self.store.project(pid)['plan']['acceptance_criteria'], criteria)
+        plan = self.store.project(pid)['plan']                   # an Owner change rewrites criterion 0
+        plan['acceptance_criteria'] = ['a different requirement'] + plan['acceptance_criteria'][1:]
+        self.store.update(pid, plan=plan)
+        script.verdicts.append('PASS')
+        self.store.update(pid, state='VERIFYING')
+        eng.run(pid)
+        verify = [prompt for schema, _, prompt in script.prompts if schema is E.VERDICT][-1]
+        self.assertNotIn('RULING-ABC', verify)                   # never moves onto another requirement
+
     def test_existing_version_folder_is_never_written(self):
         eng = self.engine(Script([GOOD], ['PASS']))
         pid = self.store.new_project('make an add tool')

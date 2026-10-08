@@ -161,6 +161,8 @@ artifact and the deterministic checks); do not demand evidence or tests the appr
 not produce. Give every finding the index of the approved criterion it violates, or -1 when it is not a
 violation of an approved criterion (a new expectation, a missing kind of evidence, a stronger test or
 an improvement idea): those are recommendations, recorded for the Owner, never part of this verdict.
+owner_rulings are binding Owner decisions on which evidence satisfies an approved criterion in
+automated verification (e.g. what is left to the Owner's own review); apply them exactly.
 OS-level network isolation (firewall, interception of child processes) is a separate security
 capability, not part of this gate; the network evidence is runtime.network (audit hook).
 Give every finding a kind: product = evidence shows the artifact itself is wrong; harness = the
@@ -634,7 +636,13 @@ class Engine:
                    'earlier_rounds': [{'round': v['iteration'], 'findings': v['result']['findings']}
                                       for v in self.store.verifications(pid)],
                    'verification_knowledge': knowledge.retrieve(self.vault, p['goal'] + ' verification failed lesson'),
-                   'runtime_spec': plan.get('runtime'), 'owner_rework': plan.get('owner_rework')}
+                   'runtime_spec': plan.get('runtime'), 'owner_rework': plan.get('owner_rework'),
+                   # A ruling applies to the criterion it was made for: matched by text, so a later Owner change
+                   # that reorders or rewrites the criteria never moves it onto another requirement.
+                   'owner_rulings': [{'criterion': plan['acceptance_criteria'].index(e['detail']['criterion_text']),
+                                      'ruling': e['detail']['ruling']}
+                                     for e in self.store.events(pid, {'owner_ruling'})
+                                     if e['detail'].get('criterion_text') in plan['acceptance_criteria']]}
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
@@ -860,6 +868,18 @@ class Engine:
         if self.store.feedback(pid, pending_only=True):
             return self._owner_rework(pid)
         self.store.set_state(pid, 'STAFFING', reason='rebuild')
+
+    def add_ruling(self, pid, criterion, ruling):
+        """An Owner decision on what evidence satisfies approved criterion `criterion` in automated
+        verification. It never adds or changes a criterion; the verifier applies it."""
+        p = self.store.project(pid)
+        if not 0 <= criterion < len((p['plan'] or {}).get('acceptance_criteria') or []):
+            raise Rejected(f'No approved criterion {criterion} in {pid}.')
+        if not ruling.strip():
+            raise Rejected('An Owner ruling needs text.')
+        self.store.event(pid, 'owner_ruling', criterion=criterion, ruling=ruling.strip(), channel=supervisor.channel(),
+                         criterion_text=p['plan']['acceptance_criteria'][criterion])
+        return self.store.project(pid)
 
     def beat(self, pid, detail):
         """Engine heartbeat (deterministic): which process is working on what, and when it last moved."""

@@ -47,6 +47,7 @@ DEFAULT = {'mode': 'cli', 'owner_launch': 'double-click the file (python <file>,
 
 START_TIMEOUT, PROBE_TIMEOUT, CLI_TIMEOUT, GUI_ALIVE, BROWSER_TIMEOUT = 25, 15, 60, 6, 90
 OBSERVE_SECONDS = 10            # the exact Owner launch must still serve this long after it started
+SETTLE_MS, CLICK_WAIT_MS = 10000, 500   # after each BROWSER click: the page's requests complete, then 500 ms
 
 # Every launch of the artifact goes through this wrapper: an audit hook records what the program does
 # outside itself (connections, name lookups, subprocesses, browser opens) to AXB_AUDIT_LOG, then the
@@ -468,7 +469,7 @@ def _wait_port(proc, port):
     return False, START_TIMEOUT
 
 
-def _click_proxy(port, path, selectors, needles=(), budget=10000):
+def _click_proxy(port, path, selectors, needles=(), budget=10000, order=()):
     """Forward the app through loopback, injecting clicks and a visible-text report only into the requested
     HTML page. The report (JSON in #axb-report) is what the page SHOWS: document.body.innerText after the
     clicks (closed <details> content and hidden elements are not in it), with click records, every
@@ -477,8 +478,29 @@ def _click_proxy(port, path, selectors, needles=(), budget=10000):
     # Escape '<' so a selector can never terminate the injected script element.
     encoded = json.dumps(selectors).replace('<', r'\u003c')
     wanted = json.dumps([n for n in needles if n]).replace('<', r'\u003c')
+    ordered = json.dumps([n for n in order if n]).replace('<', r'\u003c')
+    # Installed right after <head> (before the page's own scripts): counts the page's fetch/XHR requests and
+    # when they last changed, so a click is followed by "requests completed + CLICK_WAIT_MS quiet".
+    early = b'''<script>(() => { if (window.__axb) return;
+const s = window.__axb = {pending: 0, last: performance.now()};
+const bump = d => { s.pending += d; s.last = performance.now(); };
+const realFetch = window.fetch;
+if (realFetch) window.fetch = function (...args) {
+    bump(1); let p;
+    try { p = realFetch.apply(this, args); } catch (e) { bump(-1); throw e; }
+    return p.finally(() => bump(-1));
+};
+const realSend = XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.send = function (...args) {
+    let done = false; const end = () => { if (!done) { done = true; bump(-1); } };
+    bump(1); this.addEventListener('loadend', end, {once: true});
+    try { return realSend.apply(this, args); } catch (e) { this.removeEventListener('loadend', end); end(); throw e; }
+};
+})();</script>'''
     script = ('''<script>document.addEventListener('DOMContentLoaded', async () => {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const net = window.__axb || {pending: 0, last: 0};
+const detailsState = () => [...document.querySelectorAll('details')].map(d => ({id: d.id || null, open: d.open}));
 let loads = 0;
 try { loads = Number(sessionStorage.getItem('axb-loads') || 0) + 1; sessionStorage.setItem('axb-loads', loads); } catch (e) {}
 const report = {href: location.href, userAgent: navigator.userAgent, page_loads_in_tab: loads,
@@ -487,6 +509,15 @@ const finish = () => {
     report.innerText = document.body.innerText;
     report.details = [...document.querySelectorAll('details')].map(d => ({id: d.id || null, open: d.open,
         summary: (d.querySelector('summary') || {}).textContent || ''}));
+    const all = [...document.body.getElementsByTagName('*')];
+    const holdersOf = text => all.filter(el => !['SCRIPT', 'STYLE'].includes(el.tagName) && el.textContent.includes(text)
+        && ![...el.children].some(c => c.textContent.includes(text)));
+    report.order = ORDER_NEEDLES.map(text => {
+        const shown = holdersOf(text).filter(el => typeof el.checkVisibility !== 'function' || el.checkVisibility());
+        const el = shown[0];
+        return {text, visible_matches: shown.length, tag: el ? el.tagName.toLowerCase() : null, id: el ? el.id || null : null,
+                dom_index: el ? all.indexOf(el) : null, top: el ? Math.round(el.getBoundingClientRect().top + scrollY) : null};
+    });
     report.offending = [];
     for (const needle of NEEDLES) {
         const holders = [...document.body.querySelectorAll('*')].filter(el => !['SCRIPT', 'STYLE'].includes(el.tagName)
@@ -512,18 +543,31 @@ for (const selector of SELECTORS) {
             await sleep(50);
     } catch (e) { report.clicks.push({selector, problem: 'invalid'}); return finish(); }
     if (!element) { report.clicks.push({selector, problem: 'missing'}); return finish(); }
+    const before = detailsState();
+    const clickedAt = performance.now();
     element.click();
+    let timedOut = false;
+    while (true) {
+        const now = performance.now();
+        if (net.pending === 0 && now - Math.max(net.last, clickedAt) >= CLICK_WAIT_MS) break;
+        if (now - clickedAt > SETTLE_MS) { timedOut = true; break; }
+        await sleep(50);
+    }
     report.clicks.push({selector, clicked: true, tag: element.tagName.toLowerCase(), id: element.id || null,
-                        at_ms: Math.round(performance.now())});
-    await sleep(300);
+                        at_ms: Math.round(clickedAt), requests_settled: !timedOut, pending_at_end: net.pending,
+                        settle_ms: Math.round(performance.now() - clickedAt), quiet_ms_required: CLICK_WAIT_MS,
+                        details_before: before, details_after: detailsState()});
+    if (timedOut) { report.clicks.push({selector, problem: 'settle_timeout'}); return finish(); }
 }
 // The visible text is taken at the end of the browser's time budget, not right after load: content
 // that appears late (results) or is added late (forbidden text) must be what is judged.
 await sleep(Math.max(300, BUDGET_MS - 1500 - performance.now()));
 finish();
 });</script>''')
-    values = {'SELECTORS': encoded, 'NEEDLES': wanted, 'BUDGET_MS': str(int(budget))}
-    script = re.sub('SELECTORS|NEEDLES|BUDGET_MS', lambda m: values[m.group()], script).encode('ascii')
+    values = {'SELECTORS': encoded, 'NEEDLES': wanted, 'BUDGET_MS': str(int(budget)), 'ORDER_NEEDLES': ordered,
+              'SETTLE_MS': str(SETTLE_MS), 'CLICK_WAIT_MS': str(CLICK_WAIT_MS)}
+    script = re.sub('ORDER_NEEDLES|SELECTORS|NEEDLES|BUDGET_MS|SETTLE_MS|CLICK_WAIT_MS', lambda m: values[m.group()],
+                    script).encode('ascii')
     requests = []
 
     class Proxy(http.server.BaseHTTPRequestHandler):
@@ -577,6 +621,8 @@ finish();
                     elif encoding not in ('', 'identity'):
                         inject = False
                     if inject:
+                        head = re.search(br'<head\b[^>]*>', body, flags=re.I) or re.search(br'<html\b[^>]*>', body, flags=re.I)
+                        body = body[:head.end()] + early + body[head.end():] if head else early + body
                         injected = re.sub(b'</body\\s*>', lambda m: script + m.group(), body, count=1, flags=re.I)
                         body = injected if injected != body else body + script      # a page without </body>
                         if encoding == 'gzip':
@@ -607,15 +653,15 @@ finish();
     return proxy, thread
 
 
-def _dump_dom(exe, port, path, selectors, needles=(), record=None):
+def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
     """One headless-browser load through the click proxy: the DOM (stdout only), or None if the browser did
     not finish in time. record (dict) receives the proxied requests and the browser's stderr."""
     profile = tempfile.mkdtemp(prefix='axb-browser-')
     proxy, thread, proc = None, None, None
     record = {} if record is None else record
     try:
-        budget = max(10000, len(selectors) * 5300 + 2000)
-        proxy, thread = _click_proxy(port, path, selectors, needles, budget)
+        budget = max(10000, len(selectors) * (5000 + SETTLE_MS + CLICK_WAIT_MS + 100) + 2000)
+        proxy, thread = _click_proxy(port, path, selectors, needles, budget, order)
         proc = sandbox.start([exe, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
                               '--disable-logging', '--log-level=3',
                               f'--user-data-dir={profile}', f'--virtual-time-budget={budget}', '--dump-dom',
@@ -651,7 +697,7 @@ def _rendered(port, probe):
     # hangs the browser fails both attempts; a content mismatch is never retried.
     for attempt in (1, 2):
         record = {}
-        dom = _dump_dom(exe, port, path, selectors, probe.get('expect_absent', []), record)
+        dom = _dump_dom(exe, port, path, selectors, probe.get('expect_absent', []), record, probe.get('expect_contains', []))
         if dom is not None:
             break
     step.update(attempts=attempt, **record)
@@ -672,6 +718,11 @@ def _rendered(port, probe):
                     dom_tail=re.sub(r'\s+', ' ', dom)[-600:])
         return step
     bad = next((c for c in report['clicks'] if c.get('problem')), None)
+    if bad and bad['problem'] == 'settle_timeout':
+        step.update(ok=False, harness_error=True, clicks=report['clicks'],
+                    problems=[f"harness: the page's requests after clicking {bad['selector'][:120]!r} did not settle "
+                              f'within {SETTLE_MS} ms; later clicks were not run (evidence incomplete)'])
+        return step
     if bad:
         what = 'is not a CSS selector' if bad['problem'] == 'invalid' else 'matched nothing on the page'
         ids = sorted(set(re.findall(r'\bid="([^"]+)"', dom)) - {'axb-report'})[:60]
@@ -681,6 +732,20 @@ def _rendered(port, probe):
                               f"element ids on the page: {', '.join('#' + i for i in ids) or 'none'}"])
         return step
     text = report['innerText']
+    # The rendered order of the result areas: the visible element holding each expected text, by DOM position
+    # (and its rendered top). A text held by several visible elements, or sharing one element with another
+    # expected text, is ambiguous and reported as such instead of being taken as a section.
+    order = [o for o in report.get('order', []) if o['dom_index'] is not None]
+    shared = {o['dom_index'] for o in order if sum(x['dom_index'] == o['dom_index'] for x in order) > 1}
+    step.update(visible_order=[o['text'] for o in sorted(order, key=lambda o: o['dom_index'])],
+                visible_order_elements=[{k: o[k] for k in ('text', 'tag', 'id', 'dom_index', 'top', 'visible_matches')}
+                                        for o in sorted(order, key=lambda o: o['dom_index'])][:30],
+                visible_order_ambiguous=[o['text'] for o in order if o['visible_matches'] > 1 or o['dom_index'] in shared],
+                visible_excerpts={n: re.sub(r'\s+', ' ', text[max(0, i - 40):i + 140])
+                                  for i, n in sorted((text.find(n), n) for n in probe.get('expect_contains', [])
+                                                     if n and n in text)[:20]},
+                wait_rule=f'after each click: the page fetch/XHR requests completed and {CLICK_WAIT_MS} ms without '
+                          f'request activity (max {SETTLE_MS} ms, else the step is incomplete)')
     missing = _contains(text, probe.get('expect_contains', []))
     absent = _present(text, probe)
     step.update(ok=not missing and not absent, problems=([f'rendered page lacks {missing}'] if missing else []) + absent,

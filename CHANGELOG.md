@@ -3,6 +3,36 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.18] - 2026-10-08
+
+Harness evidence for approved criteria: click wait and visible result order (P-bbad3c #6); Owner rulings (#3).
+
+### Added
+- BROWSER clicks wait until the page's own fetch/XHR requests have completed AND CLICK_WAIT_MS (500 ms) have
+  passed without request activity, up to SETTLE_MS (10 s). The counters are installed right after `<head>`,
+  before the page's scripts. A timeout stops the sequence and reports incomplete harness evidence.
+  Each click records `details_before`/`details_after`.
+- Visible result order: the visible element holding each expected text (tag, id, DOM index, rendered top),
+  `visible_order`, and `visible_order_ambiguous` for texts held by several visible elements or sharing one element.
+- `axbranch ruling <id> <criterion> <text>`: an Owner decision on which evidence satisfies an approved
+  criterion in automated verification. It is bound to the criterion's text (never moves to another
+  requirement after an Owner change), passed to the Verification Agent as binding, and never adds or
+  changes a criterion.
+
+### Changed
+- The browser time budget covers the per-click settle window.
+
+### Fixed
+- The fixed 300 ms post-click sleep did not follow the approved "completed requests plus at least 500 ms" rule.
+
+### Verification
+- 145 tests pass. Codex review: 5 findings fixed (quiet window restarted by
+  request activity, element-based order with ambiguity, wrappers before page scripts, sync-XHR exception,
+  ruling bound to criterion text).
+
+### Known issues
+- Requests from workers, WebSocket, EventSource and images are not counted in the settle window.
+
 ## [0.1.17] - 2026-10-08
 
 Verification gate = approved criteria only; artifact versions are never overwritten (D-ART-1).

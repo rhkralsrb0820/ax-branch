@@ -281,6 +281,31 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(step['ok'], step)
         self.assertTrue(step['clicks'][0]['clicked'])
 
+    def test_click_waits_for_page_requests_and_records_order_and_details(self):
+        # The approved P-bbad3c criterion: judgment first, then collapsed details; spec: after each click wait
+        # for completed requests plus at least 500 ms. The request starts 100 ms AFTER the click, captured
+        # fetch (the page keeps its own reference): the quiet window must still cover it.
+        page = ("<html><head><meta charset=\\'utf-8\\'><script>const get = window.fetch;</script></head><body>"
+                "<button id=go>Go</button><div id=out></div>"
+                "<details id=more><summary>Details</summary><p>Inner</p></details><script>"
+                "document.getElementById(\\'go\\').onclick = () => setTimeout(async () => {"
+                "const r = await get(\\'/api/analyze?t=DEMO\\'); const j = await r.json();"
+                "document.getElementById(\\'out\\').innerHTML = \\'<h3>Judgment \\' + j.sma + \\'</h3><p>Evidence</p>\\';"
+                "}, 100);</script></body></html>")
+        mode = "import time\n        if self.path.startswith('/api'): time.sleep(1.5)"
+        code = SERVER.replace('MODE', mode).replace("b'<h1>Stock dashboard</h1>'", f"'{page}'.encode()")
+        flow = {**probe('flow', '/', ['Judgment', 'Evidence', 'Inner']), 'http_method': 'BROWSER',
+                'http_body': '#go||#more summary'}
+        step = next(s for s in self.check(code, {**WEB, 'probes': [flow]})['steps'] if s['name'] == 'flow')
+        self.assertTrue(step['ok'], step)
+        first, second = step['clicks']
+        self.assertTrue(first['requests_settled'])
+        self.assertEqual(first['quiet_ms_required'], runtime.CLICK_WAIT_MS)
+        self.assertEqual((second['details_before'][0]['open'], second['details_after'][0]['open']), (False, True))
+        self.assertEqual(step['visible_order'], ['Judgment', 'Evidence', 'Inner'])
+        self.assertEqual(step['visible_order_ambiguous'], [])
+        self.assertEqual([e['tag'] for e in step['visible_order_elements']], ['h3', 'p', 'p'])
+
     def test_entry_in_a_subfolder_imports_its_siblings(self):
         (self.tmp / 'sub').mkdir()
         (self.tmp / 'sub' / 'helper.py').write_text("VALUE = 'sibling ok'\n", encoding='utf-8')

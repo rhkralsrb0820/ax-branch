@@ -56,6 +56,8 @@ def main(argv=None):
     rv.add_argument('--finish', action='store_true', help='done: move toward closing the project')
     rv.add_argument('--no-run', action='store_true', help='record the feedback only; rebuild later with run')
     rp = sub.add_parser('replan'); rp.add_argument('id'); rp.add_argument('--reason', required=True)
+    ru = sub.add_parser('ruling', help='Owner: what evidence satisfies an approved criterion in automated verification')
+    ru.add_argument('id'); ru.add_argument('criterion', type=int); ru.add_argument('text')
     ap_ = sub.add_parser('approve'); ap_.add_argument('id'); ap_.add_argument('--network', choices=('yes', 'no'), required=True)
     ap_.add_argument('--note', default='', help='your guidance for the CEO when declining')
     a = ap.parse_args(argv)
@@ -116,6 +118,9 @@ def _dispatch(a):
         p = engine.replan(a.id, a.reason)
         print(f"[{p['id']}] {p['state']} plan v{p['plan_version']} — CEO strategy reviewed; continue with: "
               f"python -m axbranch run {p['id']}")
+    elif a.cmd == 'ruling':
+        engine.add_ruling(a.id, a.criterion, a.text)
+        print(f'[{a.id}] Owner ruling recorded for approved criterion {a.criterion}')
     elif a.cmd == 'approve':
         p = engine.decide_network(a.id, a.network == 'yes', a.note)
         print(f"[{p['id']}] external connection(s) {'approved' if a.network == 'yes' else 'declined'}; "
