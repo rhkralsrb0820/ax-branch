@@ -49,6 +49,7 @@ class App(tk.Tk):
         self.owner_note = ttk.Label(self.owner_box, font=FONT, wraplength=820, justify='left')
         self.owner_note.pack(anchor='w')
         self.works_row = ttk.Frame(self.owner_box)
+        ttk.Button(self.works_row, text='결과 실행', command=self.run_result).pack(side='left', padx=(0, 12))
         self.works = tk.StringVar(value='unknown')
         ttk.Label(self.works_row, text='실행해 보니:', font=FONT).pack(side='left')
         for label, value in (('작동함', 'yes'), ('작동하지 않음', 'no'), ('아직 확인 안 함', 'unknown')):
@@ -240,7 +241,8 @@ class App(tk.Tk):
                     self.decide_row.pack(anchor='w')
             self._owner_mode = mode
         if mode == 'review':
-            note = '결과가 검증을 통과했습니다. 실행해 보고 의견을 적어 주세요. 수정이 필요하면 [수정 요청 / 계속], 끝내려면 [완료].'
+            note = ('결과가 검증을 통과했습니다. [결과 실행]으로 검증된 버전을 바로 실행해 보고 의견을 적어 주세요. '
+                    '수정이 필요하면 [수정 요청 / 계속], 끝내려면 [완료].')
         elif mode == 'decision':
             note = (f'{reason[:220] or p["state"]}\n원하는 방향을 자연어로 적고 [수정 요청 / 계속]을 누르면 淸月 CEO가 분석해 같은 프로젝트에서 '
                     '다시 계획·작업·검증합니다. 비워 두고 누르면 같은 방향으로 3라운드 더 진행합니다. 끝내려면 [완료].')
@@ -250,6 +252,19 @@ class App(tk.Tk):
             note = ''
         if self.owner_note.cget('text') != note:
             self.owner_note.config(text=note)
+
+    def run_result(self):
+        """[결과 실행]: start the verified version from AX Branch (no CLI, no Explorer)."""
+        if not self.selected:
+            return
+        engine = self.engine_factory()
+        try:
+            path, _ = engine.launch_verified(self.selected)
+            self._notice[0] = f'실행함: {path.name} (검증된 버전, 별도 창)'
+        except Exception as e:
+            messagebox.showwarning('AX Branch', str(e))
+        finally:
+            engine.store.close()
 
     def owner_send(self):
         text = self.feedback.get('1.0', 'end').strip()

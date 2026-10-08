@@ -3,6 +3,30 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.19] - 2026-10-08
+
+The Owner can run the verified result from AX Branch.
+
+### Added
+- [결과 실행] in the Owner panel at OWNER_REVIEW: starts the latest verified (PASS) version the way the Owner
+  launches it, using the runtime contract's exact launch (`python <entry>`, no arguments, its own console
+  window). It runs from a fresh copy in `projects/<id>/run/v<N>`, so the recorded version is never touched.
+  Documents open in their default app. Event `owner_run`.
+- `Engine.launch_verified(pid)`.
+
+### Changed
+- The OWNER_REVIEW note points to [결과 실행].
+
+### Fixed
+- At OWNER_REVIEW the Owner needed the CLI or Explorer to run the verified artifact.
+
+### Verification
+- 146 tests pass. Dry run on P-20261003-bbad3c with a fake launcher: v31 copied to run/v31 (bytes
+  identical), started as `stock_analyzer.py` with no arguments in a new console; v31 sha256 unchanged.
+
+### Known issues
+- Every press starts a new instance (the program picks the next free port if 8765 is taken).
+
 ## [0.1.18] - 2026-10-08
 
 Harness evidence for approved criteria: click wait and visible result order (P-bbad3c #6); Owner rulings (#3).

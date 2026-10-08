@@ -889,6 +889,34 @@ class Engine:
                            'state': self.store.project(pid)['state']}, ensure_ascii=False)
         _status_write(folder / 'HEARTBEAT.json', data)
 
+    def launch_verified(self, pid, popen=subprocess.Popen):
+        """Run the latest verified (PASS) version the way the Owner launches it (the runtime contract's exact
+        launch: `python <entry>` with no arguments, a console of its own), from a fresh copy in
+        projects/<id>/run/v<N> so the recorded version is never touched. Documents open in their app.
+        Returns (path started, process or None)."""
+        p = self.store.project(pid)
+        passed = [v for v in self.store.verifications(pid) if v['verdict'] == 'PASS']
+        artifact = next((a for a in self.store.artifacts(pid) if passed and a['id'] == passed[-1]['artifact_id']), None)
+        if artifact is None:
+            raise Rejected('There is no verified version of this project yet.')
+        changed = artifacts.problems(artifact)
+        if changed:
+            raise Rejected(f"The verified version changed on disk: {'; '.join(changed)}")
+        run = self.workspace / 'projects' / pid / 'run' / f"v{artifact['iteration']}"
+        shutil.rmtree(run, ignore_errors=True)
+        run.mkdir(parents=True)
+        artifacts.materialize(artifact, run)
+        entry = run / (p['plan']['artifact_filename'] if artifact['kind'] == 'bundle' else Path(artifact['path']).name)
+        if artifact['kind'] not in ('python', 'bundle'):
+            os.startfile(entry) if os.name == 'nt' else popen(['xdg-open', str(entry)])
+            return entry, None
+        python = self._python()
+        if not python:
+            raise Rejected('No Python interpreter found to run the result.')
+        flags = subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0
+        self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(entry))
+        return entry, popen([python, entry.name], cwd=str(entry.parent), creationflags=flags)
+
     def _python(self):
         return sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
 
