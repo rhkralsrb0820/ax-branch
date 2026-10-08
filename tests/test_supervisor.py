@@ -78,6 +78,10 @@ class SupervisorTests(unittest.TestCase):
     def recoveries(self):
         return [e['detail'] for e in self.store.events(self.pid, {'recovery'})]
 
+    def started(self):
+        """The worker a recovery launched starts (and stops again at once): it clears RECOVERING."""
+        self.engine.run(self.pid, stop_at=self.store.project(self.pid)['state'])
+
     def start_worker(self):
         worker = subprocess.Popen([sys.executable, '-X', 'utf8', '-c', HOLD, str(self.folder)],
                                   cwd=Path(__file__).resolve().parents[1],
@@ -157,6 +161,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_same_failure_resumes_replans_then_needs_owner(self):
         self.assertEqual(self.supervise(), 'resume')
+        self.started()
         with mock.patch.object(self.engine, 'replan', wraps=self.engine.replan) as replan:
             self.assertEqual(self.supervise(), 'replan+resume')
         replan.assert_called_once()
@@ -183,6 +188,7 @@ class SupervisorTests(unittest.TestCase):
                  ('PAUSED', 'No provider available', 'WAITING_FOR_PROVIDER'),
                  ('PAUSED', 'approval needed', 'WAITING_FOR_OWNER'),
                  ('PAUSED', 'NEEDS_DECISION: recovery exhausted', 'WAITING_FOR_OWNER'),
+                 ('PAUSED', 'HARNESS_BLOCKED: v3 failed verification only on harness findings', 'WAITING_FOR_OWNER'),
                  ('OWNER_REVIEW', None, 'WAITING_FOR_OWNER'),
                  ('PENDING_CLOSE', None, 'WAITING_FOR_OWNER'),
                  ('ARCHIVE_PENDING_APPROVAL', None, 'WAITING_FOR_OWNER'),
@@ -211,9 +217,11 @@ class SupervisorTests(unittest.TestCase):
     def test_failed_paused_project_escalates_to_waiting_for_owner(self):
         # supervisor.py:132: Store.pause is a no-op for an already PAUSED project.
         for attempt in range(2):
+            self.started()
             self.store.pause(self.pid, 'Rejected: controlled provider failure')
             self.assertEqual(self.status()['status'], 'FAILED')
             self.assertEqual(self.supervise(), 'resume' if attempt == 0 else 'replan+resume')
+        self.started()
         self.store.pause(self.pid, 'Rejected: controlled provider failure')
         self.assertEqual(self.supervise(), 'needs_owner_decision')
         self.assertEqual(self.launch.call_count, 2)
@@ -224,12 +232,14 @@ class SupervisorTests(unittest.TestCase):
     def test_failing_replan_still_counts_toward_the_cap(self):
         # Codex review #1: an attempt whose re-plan raised was not recorded, so it could repeat forever.
         self.assertEqual(self.supervise(), 'resume')
+        self.started()
         with mock.patch.object(self.engine, 'replan', side_effect=RuntimeError('strategy call failed')):
             with self.assertRaises(RuntimeError):
                 self.supervise()
         self.assertEqual([r['action'] for r in self.recoveries()], ['resume', 'replan+resume'])
         with mock.patch.object(self.engine, 'replan', side_effect=RuntimeError('strategy call failed')):
             for _ in range(6):                       # never a dead end, never unbounded
+                self.started()
                 try:
                     if self.supervise() == 'needs_owner_decision':
                         break
@@ -255,6 +265,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_owner_decision_starts_a_fresh_recovery_budget(self):
         self.assertEqual(self.supervise(), 'resume')
+        self.started()
         self.assertEqual(self.supervise(), 'replan+resume')
         self.engine.run(self.pid, stop_at='EXECUTING')
         self.assertEqual(self.supervise(), 'needs_owner_decision')
@@ -280,6 +291,48 @@ class SupervisorTests(unittest.TestCase):
         with mock.patch.object(supervisor, '_settle', side_effect=lambda e, p: settle(e, p, seconds=0)):
             self.supervise()
         self.launch.assert_not_called()
+
+
+    def test_second_pass_before_the_relaunched_worker_starts_is_not_a_new_death(self):
+        # 10-08 19:11: two supervisor passes 2 s apart recorded one death twice (heartbeat, then
+        # 'process gone' while the new worker was still starting), so the next real death looked repeated.
+        self.assertEqual(self.supervise(), 'resume')
+        self.assertEqual(self.status()['status'], 'RECOVERING')
+        self.assertIsNone(self.supervise())
+        self.assertEqual(len(self.recoveries()), 1)
+        self.launch.assert_called_once_with(self.pid)
+        self.started()
+        self.assertEqual(self.status()['status'], 'STALLED')
+
+    def test_concurrent_supervisor_pass_backs_off(self):
+        # Codex review: two passes could both replace a stale marker and both launch.
+        with run_lock(self.folder / 'supervise.lock'):
+            self.assertIsNone(self.supervise())
+        self.launch.assert_not_called()
+        self.assertEqual(self.recoveries(), [])
+        self.assertEqual(self.supervise(), 'resume')
+
+    def test_repeated_death_in_verifying_reverifies_instead_of_replanning(self):
+        # 10-08 19:43: a re-plan of a project that died in VERIFYING rebuilt into the built iteration.
+        self.store.update(self.pid, state='VERIFYING')
+        with mock.patch.object(self.engine, 'replan') as replan:
+            self.assertEqual(self.supervise(), 'resume')
+            self.started()
+            self.assertEqual(self.supervise(), 'resume')
+        replan.assert_not_called()
+        self.assertEqual(self.store.project(self.pid)['state'], 'VERIFYING')
+        self.assertEqual([r['attempt'] for r in self.recoveries()], [1, 2])
+
+    def test_sleep_is_not_a_stalled_heartbeat(self):
+        # 10-08: the PC slept 03:27-19:11; the wall-clock heartbeat age made recovery kill a live worker.
+        with run_lock(self.folder / 'run.lock'):
+            self.engine.beat(self.pid, 'runtime: browser probe')
+            beat = json.loads((self.folder / 'HEARTBEAT.json').read_text(encoding='utf-8'))
+            beat['at'] -= 56643                   # wall clock jumped over the sleep; awake time did not
+            (self.folder / 'HEARTBEAT.json').write_text(json.dumps(beat), encoding='utf-8')
+            self.assertEqual(self.status()['status'], 'ACTIVE')
+            self.assertIsNone(self.supervise())
+        self.stop.assert_not_called()
 
 
 if __name__ == '__main__':

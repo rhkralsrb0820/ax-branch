@@ -23,7 +23,7 @@ import time
 
 from . import __version__
 from .engine import open_engine
-from .state import Busy
+from .state import ACTIVE, Busy
 
 
 def main(argv=None):
@@ -110,7 +110,7 @@ def _dispatch(a):
         works = True if a.works else False if a.broken else None
         p = engine.owner_review(a.id, works, a.broken or a.request or '', a.finish)
         print(f"[{p['id']}] {p['state']} — Owner review recorded")
-        if p['state'] == 'REWORK' and not a.no_run:
+        if p['state'] in ACTIVE and not a.no_run:          # incl. VERIFYING (re-verify after HARNESS_BLOCKED)
             _show(engine.run(a.id))
     elif a.cmd == 'replan':
         p = engine.replan(a.id, a.reason)

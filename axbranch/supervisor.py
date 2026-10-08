@@ -10,7 +10,8 @@ status()     -> one record with project / stage / agent / provider / worker pid 
 supervise()  -> bounded automatic recovery for one project:
                 1st time a failure signature is seen   -> resume from the checkpoint (completed work is
                                                           never redone: the engine continues from SQLite)
-                2nd time the same signature is seen    -> CEO re-plan, then resume
+                2nd time the same signature is seen    -> CEO re-plan, then resume (a project that died in
+                                                          VERIFYING is only re-verified: nothing to re-plan)
                 3rd time                               -> PAUSED, needs an Owner decision
                 Total recoveries per project are capped.
 
@@ -32,6 +33,19 @@ MAX_RECOVERIES = 5        # per project since the Owner's last action, all signa
 OWNER_STOP = 'Owner stopped'
 RECOVERING_STALE = 300    # s: a RECOVERING marker older than this was left by a crashed supervisor
 OWNER_STATES = ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL')
+
+
+def awake():
+    """Seconds of machine time that exclude sleep/hibernation, comparable across processes. A heartbeat
+    that went quiet because the PC slept is not a hung worker (P-bbad3c 10-08: asleep 03:27-19:11, then the
+    wall-clock age said 'no heartbeat for 56643 s' and recovery killed the live v30 verification)."""
+    import os
+    if os.name != 'nt':
+        return time.monotonic()                   # CLOCK_MONOTONIC stops during suspend
+    import ctypes
+    value = ctypes.c_ulonglong()
+    ctypes.windll.kernel32.QueryUnbiasedInterruptTime(ctypes.byref(value))
+    return value.value / 1e7
 
 
 def _read(path):
@@ -75,6 +89,7 @@ def status(workspace, store, pid, now=None):
     recoveries = since_owner(events, {'recovery'})
     last_event = events[-1]['at'] if events else p['updated']
     beat_at = beat['at'] if beat else None
+    beat_age = (awake() - beat['awake']) if beat and 'awake' in beat else (now - beat_at if beat_at else None)
     try:
         act_at = (folder / 'ACTIVITY.json').stat().st_mtime if act else None
     except FileNotFoundError:             # the engine finished the call after _read()
@@ -86,7 +101,7 @@ def status(workspace, store, pid, now=None):
         'agent': act and act.get('agent'), 'provider': act and act.get('provider'),
         'worker_pid': (beat or {}).get('os_pid'), 'provider_pid': act and act.get('pid'),
         'call_started': act and act.get('started_at'), 'call_elapsed': act and act.get('elapsed'),
-        'call_timeout': providers.TIMEOUT, 'last_heartbeat_age': round(now - beat_at) if beat_at else None,
+        'call_timeout': providers.TIMEOUT, 'last_heartbeat_age': round(beat_age) if beat_age is not None else None,
         'last_meaningful_activity_age': round(now - meaningful),
         'artifact_version': p['iteration'], 'verification_round': len(store.verifications(pid)),
         'recovery_count': len(recoveries),
@@ -104,21 +119,22 @@ def _classify(p, rec, act, beat, folder, workspace, now):
     if state in OWNER_STATES:
         return 'WAITING_FOR_OWNER', f'{state}: the Owner reviews / decides'
     if state == 'PAUSED':
-        if 'approval needed' in reason or 'NEEDS_DECISION' in reason or 'not lowered' in reason:
+        if any(k in reason for k in ('approval needed', 'NEEDS_DECISION', 'not lowered', 'HARNESS_BLOCKED')):
             return 'WAITING_FOR_OWNER', reason[:200]
         if 'RateLimited' in reason or 'No provider available' in reason:
             return 'WAITING_FOR_PROVIDER', reason[:200]
         if OWNER_STOP in reason or '오너가 중단' in reason:
             return 'PAUSED', reason[:200]                  # the Owner stopped it: never auto-resumed
-        if reason.startswith(('Rejected', 'Internal error', 'recovery checkpoint')):   # incl. a failed re-plan
+        if reason.startswith(('Rejected', 'Internal error', 'recovery checkpoint', 'INFRA_FAILED')):   # incl. a failed re-plan
             return 'FAILED', reason[:200]
         return 'PAUSED', reason[:200]
-    marker = folder / 'RECOVERING'
-    if marker.exists():
-        if now - marker.stat().st_mtime < RECOVERING_STALE:
-            return 'RECOVERING', marker.read_text(encoding='utf-8')[:200]
-        # older: left by a crashed supervisor — ignored, never blocks recovery (supervise() replaces it)
     if not _held(workspace, p['id']):
+        marker = folder / 'RECOVERING'
+        try:      # a recovery launched a worker that has not taken the lock yet: not a second death
+            if now - marker.stat().st_mtime < RECOVERING_STALE:
+                return 'RECOVERING', marker.read_text(encoding='utf-8')[:200]
+        except FileNotFoundError:
+            pass  # older markers were left by a crashed supervisor: never block recovery
         return 'STALLED', f'{state} but no engine session is running it (process gone)'
     if act:
         if act.get('waiting'):
@@ -135,7 +151,20 @@ def _classify(p, rec, act, beat, folder, workspace, now):
 
 def supervise(engine, pid, launch, stop):
     """One supervision decision for one project. launch(pid) starts an engine session in the
-    background; stop(pid, worker_pid) ends a hung one. Returns the action taken (or None)."""
+    background; stop(pid, worker_pid) ends a hung one. Returns the action taken (or None).
+    One supervisor at a time per project (window + CLI): the other pass backs off."""
+    guard = run_lock(Path(engine.workspace) / 'projects' / pid / 'supervise.lock')
+    try:
+        guard.__enter__()
+    except Busy:
+        return None
+    try:
+        return _supervise(engine, pid, launch, stop)
+    finally:
+        guard.__exit__(None, None, None)
+
+
+def _supervise(engine, pid, launch, stop):
     store, workspace = engine.store, engine.workspace
     rec = status(workspace, store, pid)
     if rec['status'] not in ('STALLED', 'FAILED'):
@@ -157,7 +186,18 @@ def supervise(engine, pid, launch, stop):
             store.pause(pid, reason)
         store.event(pid, 'recovery', signature=sig, action='needs_owner_decision', attempt=len(seen) + 1)
         return 'needs_owner_decision'
-    (folder / 'RECOVERING').write_text(f"{rec['status']}: {rec['reason']} -> recovering", encoding='utf-8')
+    marker = folder / 'RECOVERING'
+    try:
+        if time.time() - marker.stat().st_mtime >= RECOVERING_STALE:
+            marker.unlink(missing_ok=True)        # left by a crashed supervisor: never blocks recovery
+    except FileNotFoundError:
+        pass
+    try:                                          # exclusive: a second supervisor (window + CLI) backs off
+        with marker.open('x', encoding='utf-8') as f:
+            f.write(f"{rec['status']}: {rec['reason']} -> recovering")
+    except FileExistsError:
+        return None
+    launched = False
     try:
         if rec['status'] == 'STALLED' and _held(workspace, pid):
             stop(pid, rec['worker_pid'])             # hung worker: end its whole tree first
@@ -166,10 +206,13 @@ def supervise(engine, pid, launch, stop):
             # The old worker has not let go yet: launching now would start a second session.
             store.event(pid, 'recovery', signature=sig, action='waiting_for_stop', attempt=len(seen) + 1)
             return 'waiting_for_stop'
-        action = 'replan+resume' if seen else 'resume'      # same failure again: change the approach
+        stage = p['resume_state'] if p['state'] == 'PAUSED' else p['state']
+        # Same failure again: change the approach — except in VERIFYING, which resumes by re-verifying the
+        # built version (10-08: a re-plan there rebuilt into the verified iteration and crashed twice).
+        action = 'replan+resume' if seen and stage != 'VERIFYING' else 'resume'
         # Recorded BEFORE acting, so an attempt that itself fails (e.g. the re-plan raises) still counts.
         store.event(pid, 'recovery', signature=sig, action=action, attempt=len(seen) + 1, reason=rec['reason'])
-        if seen:
+        if action == 'replan+resume':
             if store.project(pid)['state'] not in ('PAUSED', 'REWORK'):
                 store.pause(pid, f'recovery checkpoint before re-plan ({sig})')
             engine.replan(pid, f'Automatic recovery: the failure "{sig}" happened again after a resume. '
@@ -178,9 +221,11 @@ def supervise(engine, pid, launch, stop):
         if p['state'] == 'PAUSED':
             store.resume(pid)
         launch(pid)
+        launched = True
         return action
     finally:
-        (folder / 'RECOVERING').unlink(missing_ok=True)
+        if not launched:   # after a launch the marker stays until the new worker starts (engine._run removes
+            marker.unlink(missing_ok=True)   # it), so a second supervisor pass meanwhile sees RECOVERING
 
 
 def _settle(engine, pid, seconds=30):

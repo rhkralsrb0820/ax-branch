@@ -3,6 +3,42 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.14] - 2026-10-08
+
+Orchestration defect D-ORCH-1 (P-20261003-bbad3c v25→v31): no product rebuild for verifier or machine
+failures, stable repeat detection, stage-correct recovery.
+
+### Added
+- Verification findings carry `kind`: product | harness | infra.
+- `engine.failure_code()`: a structured failure code (finding kinds + failing deterministic steps / engine
+  rejection) for repeat detection.
+- Heartbeats carry sleep-excluded time (`supervisor.awake()`).
+
+### Changed
+- A FAIL without a blocking product finding no longer rebuilds: PAUSED `HARNESS_BLOCKED` (waits for a verifier
+  fix) or `INFRA_FAILED` (automatic re-verify), same version, resume_state VERIFYING.
+- The same failure code after a forced change of approach pauses with NEEDS_DECISION instead of rebuilding again.
+- A project that died in VERIFYING is recovered by re-verifying, never by a re-plan.
+- One supervisor pass per project at a time; the RECOVERING marker stays until the relaunched worker starts.
+- `review <id>` runs the engine for any active state it returns (incl. VERIFYING).
+
+### Fixed
+- Recovery re-plan from VERIFYING rebuilt into the already-built iteration → `IntegrityError` on stage_outputs.
+- PC sleep made a live worker look stalled (heartbeat and provider idle on wall-clock time) and recovery killed it.
+- One worker death recorded as two recoveries by two supervisor passes 2 s apart.
+- Repeat detection compared the verifier's wording; the same findings in new words never matched.
+
+### Verification
+- 130 tests pass (new: harness-only pause and re-verify, rebuild iteration guard, failure codes, PASS with
+  harness-only findings, duplicate/concurrent supervisor passes, VERIFYING recovery, sleep vs heartbeat).
+- Independent Codex review: 6 findings, all fixed in this release.
+
+### Known issues
+- Not yet verified live on P-20261003-bbad3c (PAUSED by the Owner).
+- v31's worker exit (10-08 ~19:16–19:43) has no traceback or crash record; its cause is not established.
+- D-AUTO-1 (OS scheduler) is still not implemented, by Owner decision, until these fixes are verified live.
+- AXBranch.exe is still 0.1.12.
+
 ## [0.1.13] - 2026-10-08
 
 A project waiting for the Owner can now be answered inside AX Branch.

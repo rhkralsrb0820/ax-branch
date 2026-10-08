@@ -123,6 +123,7 @@ def _contained(name, args, prompt, cwd, cancel, on_tick):
                 now = time.monotonic()
                 if now - prev > SLEEP_GAP:
                     slept += now - prev - 1
+                    last_change += now - prev - 1       # asleep is not 'no output' either
                 prev = now
                 grown = proc.log.stat().st_size
                 if grown != size:

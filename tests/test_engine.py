@@ -645,5 +645,75 @@ class ProviderTests(unittest.TestCase):
         self.assertTrue(gov.upgrade_proposal_allowed([95, 90]))
 
 
+class FailureRoutingTests(unittest.TestCase):
+    setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
+
+    def test_harness_only_fail_pauses_without_rebuild_and_reverifies(self):
+        # P-bbad3c v27-v31: findings the verifier itself called unverifiable sent a working build back 4 times.
+        script = HarnessScript([GOOD, GOOD], ['FAIL', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertEqual((p['state'], p['resume_state']), ('PAUSED', 'VERIFYING'))
+        self.assertTrue(p['pause_reason'].startswith('HARNESS_BLOCKED'))
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
+        self.assertEqual(sum(s is E.BUILD for s, _, _ in script.prompts), 1)
+        self.store.resume(pid)                        # verifier fixed: the SAME version is verified again
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual([a['iteration'] for a in self.store.artifacts(pid)], [p['iteration']])
+
+    def test_rebuild_from_a_built_iteration_gets_a_new_version(self):
+        # 10-08: a recovery re-plan from VERIFYING rebuilt into the built v31 -> IntegrityError twice.
+        script = HarnessScript([GOOD, GOOD], ['FAIL', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        built = eng.run(pid)['iteration']
+        eng.replan(pid, 'operator re-plan')           # PAUSED(VERIFYING) -> REWORK, iteration unchanged
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual([a['iteration'] for a in self.store.artifacts(pid)], [built, built + 1])
+
+    def test_failure_code_ignores_verifier_wording(self):
+        def v(issue, steps=('Rendered home',), provider='codex', output=''):
+            return {'provider': provider, 'result': {'findings': [{'severity': 'major', 'kind': 'harness', 'issue': issue}]},
+                    'checks': {'ok': not steps, 'output': output,
+                               'runtime': {'ok': not steps, 'steps': [{'name': s, 'ok': False} for s in steps]}}}
+        self.assertEqual(E.failure_code(v('the repeated home/collapsed-detail failure')),
+                         E.failure_code(v('repeated home and collapsed-fixture failures')))
+        self.assertNotEqual(E.failure_code(v('x')), E.failure_code(v('x', steps=('Other probe',))))
+        self.assertIsNone(E.failure_code(v('no deterministic evidence', steps=())))
+        self.assertEqual(E.failure_code(v('a', provider='engine', output='empty deliverable')),
+                         E.failure_code(v('b', provider='engine', output='empty deliverable')))
+        selftest = v('self-test failed', steps=())          # Codex review: a failing self-test alone
+        selftest['checks'].update(ok=False, runtime={'ok': True, 'steps': []})
+        self.assertIsNotNone(E.failure_code(selftest))
+
+    def test_pass_contradicted_only_by_harness_findings_is_not_a_product_rebuild(self):
+        class Script2(Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.VERDICT and self.verdicts:     # first verdict: PASS + a harness finding
+                    result['findings'] = [{'severity': 'major', 'kind': 'harness', 'issue': 'probe not recorded',
+                                           'evidence': 'e'}]
+                return result, used, notes
+        eng = self.engine(Script2([GOOD], ['PASS', 'PASS']))
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertTrue(p['pause_reason'].startswith('HARNESS_BLOCKED'), p['pause_reason'])
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
+
+
+class HarnessScript(Script):
+    """The first FAIL's findings are verification-harness findings (no product defect shown)."""
+
+    def __call__(self, prompt, schema, *args, **kw):
+        result, used, notes = super().__call__(prompt, schema, *args, **kw)
+        if schema is E.VERDICT:
+            for f in result['findings']:
+                f['kind'] = 'harness'
+        return result, used, notes
+
+
 if __name__ == '__main__':
     unittest.main()

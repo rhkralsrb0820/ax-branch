@@ -13,6 +13,32 @@
 
 ## Open, in priority order (see GAP_ANALYSIS.md)
 
+### P0 — D-ORCH-1: rebuild loop and recovery misfires on P-20261003-bbad3c (recorded 2026-10-08, Owner)
+After the Owner's v25 feedback the project ran v26→v31 with no product defect left after v27, then crashed
+twice. Evidence: SQLite events/verifications, `workspace/logs/engine-errors.log`, Windows System log.
+P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was not changed.
+1. **Harness findings rebuilt the product.** v27/v29/v30 failed only on findings the verifier labelled
+   HARNESS-UNVERIFIABLE, but every FAIL went REWORK→rebuild; v28 was a correct "retain unchanged" answer
+   that the engine rejected as an empty deliverable (FAIL #23).
+   Fix: findings carry `kind` product|harness|infra; only product findings rebuild. Harness-only → PAUSED
+   `HARNESS_BLOCKED` (Owner/dev fixes the verifier), infra-only → `INFRA_FAILED` (auto re-verify);
+   both keep the version and resume in VERIFYING.
+2. **Repeat detection compared wording.** The same 4 findings in new words never matched.
+   Fix: `engine.failure_code()` = finding kinds + failing deterministic step names (or the engine's
+   rejection); a repeat after a forced change pauses with NEEDS_DECISION.
+3. **Recovery re-planned a VERIFYING death and rebuilt into the built iteration** (v31 →
+   IntegrityError on `stage_outputs` twice). Fix: VERIFYING recovers by re-verifying only; `_executing`
+   moves to a new iteration whenever the current one is already built.
+4. **One death counted twice.** Two supervisor passes 2 s apart (19:11) recorded heartbeat + "process gone"
+   for the same death. Fix: the RECOVERING marker is created exclusively and stays until the relaunched
+   worker starts (`engine._run` removes it); a lock holder always wins over the marker.
+5. **Sleep killed a live worker.** The PC slept 03:27→19:11 during v30's browser probe; the wall-clock
+   heartbeat age (56,643 s) made recovery kill the live worker. Fix: heartbeats carry sleep-excluded
+   time (`supervisor.awake()`, QueryUnbiasedInterruptTime on Windows).
+   v31's worker (10956) vanished ~19:16–19:43 right after its build, with no traceback, WER record or
+   recovery event: cause **not established** (the GUI that launched it was also gone by 19:43).
+6. D-AUTO-1 (scheduler) stays blocked until these fixes are verified live.
+
 ### Development continuation — GUI/live-view (2026-10-06, verification blocked)
 
 - Preserved the existing GUI/live-view integration, session-lock retry, tests and development log.
