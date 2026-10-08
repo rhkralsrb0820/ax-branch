@@ -21,7 +21,7 @@ from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge,
 from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
-STR, BOOL = {'type': 'string'}, {'type': 'boolean'}
+STR, BOOL, INT = {'type': 'string'}, {'type': 'boolean'}, {'type': 'integer'}
 
 
 def S(**props):
@@ -55,9 +55,9 @@ BUILD_EDITS = S(edits=BUILD['properties']['edits'], summary=STR, changes_from_pr
 FINDING_KINDS = ('product', 'harness', 'infra')
 EDITS_ONLY_ABOVE = 40_000       # characters of the latest real version
 VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
-            criteria=ARR(S(criterion=STR, met=BOOL, evidence=STR)),
-            findings=ARR(S(severity=ENUM('critical', 'major', 'minor'), kind=ENUM(*FINDING_KINDS), issue=STR,
-                           evidence=STR)))
+            criteria=ARR(S(index=INT, criterion=STR, met=BOOL, evidence=STR)),
+            findings=ARR(S(severity=ENUM('critical', 'major', 'minor'), kind=ENUM(*FINDING_KINDS), criterion=INT,
+                           issue=STR, evidence=STR)))
 STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE),
              runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))))
 REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR))
@@ -155,6 +155,14 @@ is unusable (critical), whatever its source quality or unit tests. Also judge wh
 spec truly reflects the Owner's real use; a spec too weak to show usability is a major finding.
 If owner_rework is present, the Owner reported a real problem with an earlier version: confirm with
 runtime evidence that exactly that problem is gone.
+The gate is ONLY the approved acceptance_criteria (fixed at project start or by the Owner) and the
+deterministic checks. Judge every approved criterion by its index with the evidence available (the
+artifact and the deterministic checks); do not demand evidence or tests the approved runtime spec does
+not produce. Give every finding the index of the approved criterion it violates, or -1 when it is not a
+violation of an approved criterion (a new expectation, a missing kind of evidence, a stronger test or
+an improvement idea): those are recommendations, recorded for the Owner, never part of this verdict.
+OS-level network isolation (firewall, interception of child processes) is a separate security
+capability, not part of this gate; the network evidence is runtime.network (audit hook).
 Give every finding a kind: product = evidence shows the artifact itself is wrong; harness = the
 verification could not establish the fact (a probe not run as specified, missing recording or
 evidence, a misconfigured check) - unverified is not a product defect; infra = the environment
@@ -202,6 +210,18 @@ Owner for approval before the build.
   Verification Agent. The LAST stage must be a producer who writes the complete deliverable."""
 
 
+def gating(f, n=None):
+    """A finding that counts for the gate: a deterministic-check failure, or one about an approved criterion
+    (index 0..n-1; legacy findings without an index count). Anything else is a recommendation."""
+    c = f.get('criterion', 0)
+    return bool(f.get('deterministic')) or (c >= 0 if n is None else 0 <= c < n)
+
+
+def actionable(findings, n=None):
+    """Findings production/strategy must act on: recommendations are never requirements."""
+    return [f for f in findings if gating(f, n)]
+
+
 def failure_code(v):
     """A stable code for how a verification FAILED, from structured fields only - never the verifier's
     wording (v26-v30 repeated the same findings in new words and were never matched). None when there is
@@ -215,7 +235,7 @@ def failure_code(v):
     if not steps:
         return None
     kinds = sorted({f.get('kind', 'product') for f in v['result'].get('findings', [])
-                    if f['severity'] in ('critical', 'major')})
+                    if f['severity'] in ('critical', 'major') and gating(f)})
     return f"{'+'.join(kinds) or 'none'}:{'|'.join(steps)}"[:300]
 
 
@@ -455,8 +475,9 @@ class Engine:
         if history:
             if latest is not None:
                 context['previous_artifact'] = baseline['current_version']['content']
+            n = len(plan['acceptance_criteria'])
             context['verification_findings'] = [{'round': v['iteration'], 'criteria': v['result']['criteria'],
-                                                 'findings': v['result']['findings'], 'checks': v['checks']}
+                                                 'findings': actionable(v['result']['findings'], n), 'checks': v['checks']}
                                                 for v in history[-2:]]
             system += '\n\n' + REWORK
         # ponytail: bundles keep full rebuilds (edits cannot delete a file); add file deletion if large bundles appear
@@ -487,8 +508,32 @@ class Engine:
         texts = [f.get('content') or '' for f in build['files']] + [build['content'] or '']
         if not any(text.strip() for text in texts):
             return self._no_deliverable(pid, final, used, build)
-        folder = self.workspace / 'projects' / pid / 'artifacts' / f'v{it}'
-        folder.mkdir(parents=True, exist_ok=True)
+        # D-ART-1: a version folder is never written twice. Claim it exclusively; if it exists (a recorded
+        # version or a leftover), this build becomes the next free version (10-08: a failed rebuild
+        # overwrote v31's file before its transaction failed).
+        base = self.workspace / 'projects' / pid / 'artifacts'
+        base.mkdir(parents=True, exist_ok=True)
+        while True:
+            folder = base / f'v{it}'
+            try:
+                folder.mkdir()
+                break
+            except FileExistsError:
+                it += 1
+        if it != p['iteration']:
+            self.store.event(pid, 'decision', what='new version folder', by='engine',
+                             why=f"v{p['iteration']} folder already exists; this build is v{it}")
+            self.store.update(pid, iteration=it)
+        try:
+            self._write_version(pid, p, plan, folder, it, pv, notes_stages, final, used, build)
+        except BaseException:
+            # Only the folder this build created, and only if its artifact row was not committed (a cancel can
+            # land after the commit).
+            if not any(a['iteration'] == it for a in self.store.artifacts(pid)):
+                shutil.rmtree(folder, ignore_errors=True)
+            raise
+
+    def _write_version(self, pid, p, plan, folder, it, pv, notes_stages, final, used, build):
         manifest = None
         if plan['artifact_kind'] == 'bundle':
             manifest, sha = artifacts.write_bundle(folder, build['files'])
@@ -580,7 +625,8 @@ class Engine:
                                 + '; '.join(f"{s['name']}: {', '.join(s['problems'])}"
                                             for s in checks['runtime']['steps'] if not s['ok']))[-3000:]
         producer = plan['pipeline'][-1]['provider']
-        context = {'owner_goal': p['goal'], 'acceptance_criteria': plan['acceptance_criteria'],
+        context = {'owner_goal': p['goal'],
+                   'acceptance_criteria': [{'index': i, 'criterion': c} for i, c in enumerate(plan['acceptance_criteria'])],
                    'lenses': plan['verification_lenses'], **self._connections(pid),
                    'artifact': {'filename': plan['artifact_filename'], 'kind': artifact['kind'], 'content': text,
                                 'files': [rel for rel, _, _ in artifacts.files_of(artifact)]},
@@ -597,23 +643,44 @@ class Engine:
                              why=f'{_other(producer)} unavailable (usage limit or not installed); the Verification '
                                  f'Agent is still a separate role with its own prompt and no production context, '
                                  f'but engine diversity was lost for round {p["iteration"]}', by='engine')
-        blocking = [f for f in result['findings'] if f['severity'] in ('critical', 'major')]
-        unmet = [c for c in result['criteria'] if not c['met']]
-        passed = result['verdict'] == 'PASS' and checks['ok'] and not blocking and not unmet
-        if result['verdict'] == 'PASS' and not passed:
-            # The override inherits the blocking findings' kind: a PASS with only harness/infra findings
-            # is not evidence of a product defect.
+        # Gate = approved criteria + deterministic checks. A finding outside the approved criteria is a
+        # recommendation (P-bbad3c v31: rounds kept adding verifier demands as if they were requirements).
+        n = len(plan['acceptance_criteria'])
+        approved = range(n)
+        blocking = [f for f in result['findings'] if f['severity'] in ('critical', 'major') and gating(f, n)]
+        recommendations = [f for f in result['findings'] if not gating(f, n)]
+        unmet = [c for c in result['criteria'] if not c['met'] and c.get('index', 0) in approved]
+        judged = {c.get('index', 0) for c in result['criteria']}
+        unjudged = [i for i in approved if i not in judged]
+        if unjudged:
+            result['findings'].append({'severity': 'major', 'kind': 'harness', 'criterion': unjudged[0],
+                                       'issue': f'Approved criteria not judged by the verifier: {unjudged}.',
+                                       'evidence': 'criteria list'})
+            blocking.append(result['findings'][-1])
+        passed = checks['ok'] and not blocking and not unmet
+        if recommendations:
+            self.store.event(pid, 'verification_recommendations', iteration=p['iteration'],
+                             items=[f"[{f['severity']}/{f.get('kind')}] {f['issue']}"[:400] for f in recommendations])
+        if not passed and not blocking:
+            # Failed only on deterministic checks or unmet approved criteria: name it, so the failure has a kind.
             stated = {f.get('kind', 'product') for f in blocking}
             gate = 'product' if not stated or 'product' in stated else 'harness' if 'harness' in stated else 'infra'
-            result['findings'].append({'severity': 'major', 'kind': gate, 'issue': 'Gate override: verdict PASS contradicted by '
-                                       'failed checks, unmet criteria or blocking findings.',
-                                       'evidence': checks['output'][:500] if not checks['ok'] else 'see criteria/findings'})
+            if unmet:
+                result['findings'].append({'severity': 'major', 'kind': gate, 'criterion': unmet[0].get('index', 0),
+                                           'issue': 'Gate failed: approved criteria not met: '
+                                                    + ', '.join(str(c.get('index', 0)) for c in unmet) + '.',
+                                           'evidence': '; '.join(c.get('evidence', '') for c in unmet)[:500]})
+            if not checks['ok']:
+                result['findings'].append({'severity': 'major', 'kind': gate, 'criterion': -1, 'deterministic': True,
+                                           'issue': 'Gate failed: deterministic checks failed.',
+                                           'evidence': checks['output'][:500]})
         with self.store.tx():
             self.store.add_verification(pid, artifact['id'], p['iteration'], 'PASS' if passed else 'FAIL',
                                         result, checks, used)
         if passed:
             return self._deliver(pid, artifact, text, result)
-        kinds = {f.get('kind', 'product') for f in result['findings'] if f['severity'] in ('critical', 'major')}
+        kinds = {f.get('kind', 'product') for f in result['findings']
+                 if f['severity'] in ('critical', 'major') and gating(f, n)}
         if kinds and 'product' not in kinds:
             # No product defect shown: a rebuild cannot fix the verifier or the machine. Same version, same
             # iteration; resume re-verifies it (INFRA_FAILED automatically, HARNESS_BLOCKED after a verifier fix).
@@ -722,7 +789,7 @@ class Engine:
                    'owner_confirmed_version': confirmed and confirmed['iteration'],
                    **({'recovery_note': recovery_note} if recovery_note else {}),
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
-                                             'findings': v['result']['findings'], 'checks_ok': v['checks']['ok']}
+                                             'findings': actionable(v['result']['findings']), 'checks_ok': v['checks']['ok']}
                                             for v in self.store.verifications(pid)],
                    'available_providers': providers.available() or list(gov.PROVIDERS),
                    'provider_track_record': metrics.provider_record(self.store)}
@@ -836,7 +903,8 @@ class Engine:
                                           if last else None),
                    'runtime_evidence_current': before,
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
-                                             'findings': v['result']['findings']} for v in self.store.verifications(pid)],
+                                             'findings': actionable(v['result']['findings'])}
+                                            for v in self.store.verifications(pid)],
                    'available_providers': providers.available() or list(gov.PROVIDERS),
                    'provider_track_record': metrics.provider_record(self.store)}
         d, used = self._ask(pid, 'CEO', DIAGNOSE_SYSTEM, 'Diagnose the Owner feedback and revise this project.',

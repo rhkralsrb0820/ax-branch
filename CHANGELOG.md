@@ -3,6 +3,37 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.17] - 2026-10-08
+
+Verification gate = approved criteria only; artifact versions are never overwritten (D-ART-1).
+
+### Added
+- Verdict schema: criteria carry their approved `index`; findings carry the `criterion` they violate
+  (-1 = not an approved criterion).
+- `verification_recommendations` event: findings outside the approved criteria, kept for the Owner.
+
+### Changed
+- PASS/FAIL = the deterministic checks + the approved acceptance criteria (project start or Owner change).
+  Recommendations never gate a version. The model's own overall verdict is no longer the gate. An approved
+  criterion the verifier did not judge blocks the PASS.
+- The verifier is told not to demand evidence the approved runtime spec does not produce. OS-level network
+  isolation is a separate capability (D-SEC-1), outside the gate.
+- A build claims its version folder exclusively. An existing folder makes it the next free version, and a
+  failed commit removes only the new folder.
+
+### Fixed
+- A failed rebuild could overwrite an existing version's files (P-bbad3c v31, 10-08).
+
+### Verification
+- 143 tests pass. Independent Codex review: 5 correctness findings fixed (recommendations kept out of
+  rework/strategy/diagnosis and failure codes, one index rule, checks-only failure not attributed to a criterion,
+  a committed version folder is never deleted on cancel). New tests: recommendations do not gate; a leftover version folder
+  is never written; a failed commit leaves the earlier version's sha256 intact.
+
+### Known issues
+- No read-only file attributes on disk (the engine refuses the write; the OS does not).
+- D-SEC-1 (OS firewall isolation) is not implemented; it needs Owner-approved system setup.
+
 ## [0.1.16] - 2026-10-08
 
 Verification no longer reaches the internet; the exact Owner launch judges transport, not launch-specific content.

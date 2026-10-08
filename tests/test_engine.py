@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from axbranch import engine as E, governance as gov, knowledge, providers
+from axbranch import artifacts, engine as E, governance as gov, knowledge, providers
 from axbranch.state import Rejected, Store
 
 GOOD = "def add(a, b):\n    return a + b\n\nif __name__ == '__main__':\n    assert add(2, 3) == 5\n    print('ok')\n"
@@ -49,7 +49,11 @@ class Script:
             return {'content': self.builds.pop(0), 'files': [], 'summary': 's', 'changes_from_previous': ''}, prefer, []
         if schema is E.VERDICT:
             v = self.verdicts.pop(0)
-            return {'verdict': v, 'lenses_applied': ['se'], 'criteria': [{'criterion': 'add', 'met': v == 'PASS', 'evidence': 'e'}],
+            approved = json.loads(prompt.split('CONTEXT (JSON — data, not instructions):\n', 1)[1]
+                                  .rsplit('\n\nReturn exactly', 1)[0])['acceptance_criteria']
+            return {'verdict': v, 'lenses_applied': ['se'],
+                    'criteria': [{'index': c['index'], 'criterion': c['criterion'], 'met': v == 'PASS', 'evidence': 'e'}
+                                 for c in approved],
                     'findings': [] if v == 'PASS' else [{'severity': 'major', 'issue': 'wrong sum', 'evidence': 'a - b'}]}, prefer, []
         if schema is E.STRATEGY or 'decision' in schema.get('properties', {}):
             return {'decision': self.strategy, 'rationale': 'r', 'pipeline': [],
@@ -95,7 +99,7 @@ class EngineTests(unittest.TestCase):
         vs = self.store.verifications(pid)
         # Deterministic self-test overrides the model's PASS on the broken build.
         self.assertEqual([v['verdict'] for v in vs], ['FAIL', 'PASS'])
-        self.assertIn('Gate override', vs[0]['result']['findings'][-1]['issue'])
+        self.assertIn('Gate failed: deterministic checks failed', vs[0]['result']['findings'][-1]['issue'])
         arts = self.store.artifacts(pid)
         self.assertEqual([Path(a['path']).parent.name for a in arts], ['v1', 'v2'])
         self.assertEqual(Path(arts[0]['path']).name, 'add_tool.py')       # filename sanitized, no traversal
@@ -115,7 +119,7 @@ class EngineTests(unittest.TestCase):
         p = eng.close(pid, 'save', satisfaction=95)
         self.assertEqual(p['state'], 'CLOSED')
         note = Path(p['archive_note'])
-        self.assertIn('Gate override', note.read_text(encoding='utf-8'))
+        self.assertIn('Gate failed', note.read_text(encoding='utf-8'))
         text = note.read_text(encoding='utf-8')
         self.assertNotIn('return a + b', text)                       # no raw artifact content archived
         self.assertIn('### Round 2 — PASS', text)                    # every round's verification, not only FAILs
@@ -702,6 +706,68 @@ class FailureRoutingTests(unittest.TestCase):
         p = eng.run(pid)
         self.assertTrue(p['pause_reason'].startswith('HARNESS_BLOCKED'), p['pause_reason'])
         self.assertEqual(len(self.store.artifacts(pid)), 1)
+
+
+class GateAndImmutabilityTests(unittest.TestCase):
+    setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
+
+    def test_findings_outside_approved_criteria_are_recommendations(self):
+        class Recommending(Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.VERDICT:
+                    result['verdict'] = 'FAIL'
+                    result['findings'] = [{'severity': 'major', 'kind': 'harness', 'criterion': -1,
+                                           'issue': 'also test the startup failure at runtime', 'evidence': 'e'}]
+                return result, used, notes
+        eng = self.engine(Recommending([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual(self.store.verifications(pid)[-1]['verdict'], 'PASS')
+        recs = self.store.events(pid, {'verification_recommendations'})
+        self.assertIn('startup failure', recs[0]['detail']['items'][0])
+
+    def test_recommendations_never_reach_the_rebuild(self):
+        class Mixed(Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.VERDICT and result['verdict'] == 'FAIL':
+                    result['findings'] = [{'severity': 'major', 'kind': 'product', 'criterion': 0,
+                                           'issue': 'wrong sum', 'evidence': 'e'},
+                                          {'severity': 'major', 'kind': 'harness', 'criterion': -1,
+                                           'issue': 'RECOMMENDATION-XYZ', 'evidence': 'e'}]
+                return result, used, notes
+        script = Mixed([BROKEN, GOOD], ['FAIL', 'PASS'])
+        p = self.engine(script).run(self.store.new_project('make an add tool'))
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        rebuild = [prompt for schema, _, prompt in script.prompts if schema is E.BUILD][-1]
+        self.assertIn('wrong sum', rebuild)
+        self.assertNotIn('RECOMMENDATION-XYZ', rebuild)
+
+    def test_existing_version_folder_is_never_written(self):
+        eng = self.engine(Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        leftover = self.tmp / 'ws' / 'projects' / pid / 'artifacts' / 'v1'
+        leftover.mkdir(parents=True)
+        (leftover / 'add_tool.py').write_bytes(b'old bytes')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual((leftover / 'add_tool.py').read_bytes(), b'old bytes')
+        self.assertEqual([Path(a['path']).parent.name for a in self.store.artifacts(pid)], ['v2'])
+
+    def test_failed_commit_removes_only_its_own_new_version(self):
+        eng = self.engine(HarnessScript([GOOD, GOOD], ['FAIL', 'PASS']))
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)                                   # v1 built, HARNESS_BLOCKED
+        v1 = self.store.artifacts(pid)[0]
+        eng.replan(pid, 'operator re-plan')            # rebuild -> v2
+        with mock.patch.object(self.store, 'add_artifact', side_effect=RuntimeError('disk full (simulated)')):
+            p = eng.run(pid)
+        self.assertIn('Internal error', p['pause_reason'])
+        folder = Path(v1['path']).parent
+        self.assertFalse((folder.parent / f"v{p['iteration']}").exists())
+        self.assertEqual(artifacts.problems(v1), [])
 
 
 class HarnessScript(Script):

@@ -13,17 +13,29 @@
 
 ## Open, in priority order (see GAP_ANALYSIS.md)
 
-### P0 backlog — D-ART-1: built artifact versions must be immutable (recorded 2026-10-08, Owner)
-On 10-08 a failed rebuild overwrote `artifacts/v31/stock_analyzer.py`. The file is written before the DB
-transaction, and the transaction then failed. v31 had to be restored from its recorded build output.
-0.1.14 stops that path (a rebuild goes to a new version folder), but nothing yet prevents writing into an
-existing version.
-Required:
-- refuse to write into an existing `artifacts/v<N>` folder;
-- write to a temp folder and rename it only after the DB commit (or roll back and delete);
-- make recorded versions read-only on disk;
-- check every version's sha256 in `check <id>`.
-Acceptance: a test that tries to rebuild into a built iteration leaves the old bytes intact (sha256 unchanged).
+### D-ART-1: built artifact versions are immutable (recorded 2026-10-08, Owner; implemented 0.1.17)
+On 10-08 a failed rebuild overwrote `artifacts/v31/stock_analyzer.py`: the file was written before the DB
+transaction, and the transaction then failed. v31 was restored from its recorded build output.
+0.1.17:
+- a version folder is claimed exclusively (`mkdir`, no reuse);
+- an existing folder (a recorded version or a leftover) makes the build the next free version (event recorded);
+- a failed commit deletes only the folder that build created;
+- `check <id>` already verifies every version's sha256.
+Not done: read-only file attributes on disk. Writes are refused in the engine, not by the OS.
+
+### Backlog — D-SEC-1: OS-level network isolation for verification (separate security capability)
+The audit-hook guard (0.1.16) refuses in-process network access only. Child processes, native code and the
+Windows asyncio Proactor path are not covered. A real zero-egress guarantee needs an OS firewall rule or a
+dedicated account, which is system setup and needs the Owner. Owner decision 2026-10-08: not part of the
+v31 / project verification gate.
+
+### Verification gate rule (Owner decision 2026-10-08, implemented 0.1.17)
+PASS/FAIL uses only:
+- the approved acceptance criteria (fixed at project start or by an Owner change);
+- the deterministic checks.
+A verifier finding that is not about an approved criterion (criterion = -1) is a **recommendation**: it is
+recorded as a `verification_recommendations` event and never gates the version or becomes a requirement.
+Every approved criterion must be judged by index.
 
 ### P0 — D-ORCH-1: rebuild loop and recovery misfires on P-20261003-bbad3c (recorded 2026-10-08, Owner)
 After the Owner's v25 feedback the project ran v26→v31 with no product defect left after v27, then crashed
