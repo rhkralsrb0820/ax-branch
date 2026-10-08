@@ -303,11 +303,26 @@ class RuntimeTests(unittest.TestCase):
                           net['malformed_log_lines']), (2, 1, 1, 1))
         self.assertEqual(net['external_connections'][0]['target'][0], '127.example.com')
 
-    def test_owner_flow_failure_on_the_exact_launch_fails_it(self):
-        mode = "if self.path.startswith('/api') and '--port' not in sys.argv: self.connection.close(); return"
-        step = self.check(SERVER.replace('MODE', mode), WEB)['steps'][-1]
+    def test_owner_flow_on_the_exact_launch(self):
+        # A lost connection on the no-argument launch fails it; a content difference is only recorded
+        # (expectations target the verification launch arguments, e.g. --offline).
+        drop = "if self.path.startswith('/api') and '--port' not in sys.argv: self.connection.close(); return"
+        step = self.check(SERVER.replace('MODE', drop), WEB)['steps'][-1]
         self.assertFalse(step['ok'])
-        self.assertTrue(any(p.startswith('flow analysis api') for p in step['problems']), step['problems'])
+        self.assertTrue(any(p.startswith('flow analysis api: connection lost') for p in step['problems']), step)
+        differ = SERVER.replace('MODE', OK_MODE).replace("'sma'", "'sma' if '--port' in sys.argv else 'other'")
+        step = self.check(differ, WEB)['steps'][-1]
+        self.assertTrue(step['ok'], step)
+        self.assertFalse(step['same_process_flow'][0]['ok'])
+
+    def test_external_network_is_refused_during_verification(self):
+        code = ("import socket\n"
+                "try:\n    socket.getaddrinfo('example.com', 443)\nexcept PermissionError as e:\n    print('refused', e)\n"
+                "socket.getaddrinfo('localhost', 80)\nsocket.getaddrinfo(b'localhost', 80)\nprint('local ok')\n")
+        ev = self.check(code, {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []})
+        self.assertIn('refused', ev['steps'][0]['stdout_tail'])
+        self.assertIn('local ok', ev['steps'][0]['stdout_tail'])
+        self.assertEqual((ev['network']['external_count'], ev['network']['external_unblocked']), (1, 0))
 
     def test_subprocess_probe_has_no_http_method(self):
         selftest = {**probe('self-test', '', []), 'args': ['selftest']}

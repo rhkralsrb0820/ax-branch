@@ -52,24 +52,50 @@ OBSERVE_SECONDS = 10            # the exact Owner launch must still serve this l
 # outside itself (connections, name lookups, subprocesses, browser opens) to AXB_AUDIT_LOG, then the
 # entry file runs as __main__ exactly as `python <entry> args` would. Evidence for "zero external
 # connections" (P-bbad3c v31: no outbound log existed at all).
-AUDIT = r'''import json, os, runpy, sys, time
+AUDIT = r'''import ipaddress, json, os, runpy, sys, time
 _log = os.environ.get('AXB_AUDIT_LOG')
-_kinds = ('socket.connect', 'socket.sendto', 'socket.getaddrinfo', 'subprocess.Popen', 'os.system',
-          'os.startfile', 'webbrowser.open')
+def _local(host):
+    if host is None or host in ('', b''):
+        return True
+    host = host.decode() if isinstance(host, bytes) else str(host)
+    try:
+        ip = ipaddress.ip_address(host.split('%')[0])
+    except ValueError:
+        return host.lower().rstrip('.') in ('localhost',) or host.lower().rstrip('.').endswith('.localhost')
+    ip = getattr(ip, 'ipv4_mapped', None) or ip
+    return ip.is_loopback or ip.is_unspecified
+_kinds = ('socket.connect', 'socket.sendto', 'socket.sendmsg', 'socket.getaddrinfo', 'socket.gethostbyname',
+          'socket.gethostbyaddr', 'socket.getnameinfo', 'subprocess.Popen', 'os.system', 'os.startfile',
+          'webbrowser.open')
 def _clip(v):
     if v is None or isinstance(v, (bool, int, float)):
         return v
+    if isinstance(v, (bytes, bytearray)):
+        return bytes(v[:500]).decode('latin-1')
     if isinstance(v, (tuple, list)):
         return [_clip(x) for x in v[:20]]
     return str(v)[:500]
 def _hook(event, args):
-    if _log and event in _kinds:
+    if event not in _kinds:
+        return
+    host = None
+    if event in ('socket.connect', 'socket.sendto', 'socket.sendmsg') and len(args) > 1 and isinstance(args[1], tuple):
+        host = args[1][0]
+    elif event in ('socket.getaddrinfo', 'socket.gethostbyname', 'socket.gethostbyaddr'):
+        host = args[0]
+    elif event == 'socket.getnameinfo':
+        host = args[0][0] if args and isinstance(args[0], tuple) else None
+    blocked = event.startswith('socket.') and not _local(host)
+    if _log:
         try:
-            line = json.dumps({'t': time.time(), 'pid': os.getpid(), 'event': event, 'args': _clip(args)})
+            line = json.dumps({'t': time.time(), 'pid': os.getpid(), 'event': event, 'args': _clip(args),
+                               'blocked': blocked})
             with open(_log, 'a', encoding='utf-8') as f:
                 f.write(line + '\n')
         except Exception:
             pass
+    if blocked:      # verification never reaches the internet: the program sees a refused connection
+        raise PermissionError(f'AX Branch verification: external network refused ({host})')
 sys.addaudithook(_hook)
 # As `python <entry> args`: argv[0] as given, the script's folder first on sys.path, absolute __file__.
 sys.argv = sys.argv[1:]
@@ -78,8 +104,11 @@ sys.path[0] = os.path.dirname(_entry)
 runpy.run_path(_entry, run_name='__main__')
 '''
 AUDIT_NOTE = ('every artifact process was started through a Python audit hook (socket.connect/sendto/getaddrinfo, '
-              'subprocess.Popen, os.system, os.startfile, webbrowser.open) that logs to a file; child processes '
-              'are logged as subprocess events, not intercepted themselves')
+              'sendmsg/gethostbyname/gethostbyaddr/getnameinfo, subprocess.Popen, os.system, os.startfile, '
+              'webbrowser.open) that logs to a file and REFUSES every non-local connection or name lookup '
+              '(PermissionError). Best effort, not an OS firewall: child processes (logged as subprocess events), '
+              'native code and the Windows asyncio Proactor connect path are not intercepted, and a connect() to a '
+              'host NAME resolves it before the refusal')
 
 
 def _local(host):
@@ -204,21 +233,25 @@ def network_summary(path):
     external, loopback, ipc, opens, children = [], 0, 0, [], []
     for e in events:
         args = e.get('args') or []
-        if e['event'] in ('socket.connect', 'socket.sendto'):
+        if e['event'] in ('socket.connect', 'socket.sendto', 'socket.sendmsg'):
             sock, address = (args + [None, None])[:2]
             if 'AF_UNIX' in str(sock) or not isinstance(address, list):
                 ipc += 1                                   # local socket file, not a network peer
                 continue
             host, target = address[0] if address else None, address
-        elif e['event'] == 'socket.getaddrinfo':
+        elif e['event'] in ('socket.getaddrinfo', 'socket.gethostbyname', 'socket.gethostbyaddr'):
             host, target = (args[0] if args else None), args[:2]
+        elif e['event'] == 'socket.getnameinfo':
+            host = args[0][0] if args and isinstance(args[0], list) and args[0] else None
+            target = args[:1]
         else:
             host = target = None
         if e['event'].startswith('socket.'):
             if _local(host):
                 loopback += 1
             else:
-                external.append({'event': e['event'], 'target': target, 'pid': e['pid']})
+                external.append({'event': e['event'], 'target': target, 'pid': e['pid'],
+                                 'blocked': e.get('blocked', False)})
         elif e['event'] in ('webbrowser.open', 'os.startfile'):
             url = args[0] if args else ''
             # one webbrowser.open() raises nested audit events (open -> open_new_tab -> controller)
@@ -228,7 +261,8 @@ def network_summary(path):
             children.append({'event': e['event'], 'args': str(args)[:300], 'pid': e['pid']})
     return {'interception': AUDIT_NOTE, 'log_events': len(events), 'malformed_log_lines': malformed,
             'processes': len({e['pid'] for e in events}), 'local_ipc_events': ipc,
-            'external_connections': external[:50], 'external_count': len(external), 'loopback_events': loopback,
+            'external_connections': external[:50], 'external_count': len(external),
+            'external_unblocked': sum(not x['blocked'] for x in external), 'loopback_events': loopback,
             'browser_open_requests': opens[:20], 'subprocesses': children[:20],
             'browser_traffic': 'the headless verification browser is a separate process; its requests to the app '
                                'go through the loopback click proxy and are listed per BROWSER step'}
@@ -372,9 +406,13 @@ def _exact_owner_launch(base, spec):
         first = _http(port, {**probes[0], 'name': 'first page'})
         problems = list(first['problems'])
         # Same process: the whole HTTP flow (e.g. its self-test endpoint), then still serving.
+        # The probes were written for the verification launch (launch_args, e.g. --offline): their content
+        # expectations are judged there. Here the same process must still answer every request: a lost
+        # connection or a server error fails the Owner launch; content differences are recorded only.
         flow = [{k: s.get(k) for k in ('name', 'request', 'status', 'ok', 'problems')}
                 for s in (_http(port, pr) for pr in http_probes[1:])]
-        problems += [f"flow {s['name']}: {p}" for s in flow if not s['ok'] for p in s['problems']]
+        problems += [f"flow {s['name']}: {p}" for s in flow for p in s['problems']
+                     if p.startswith(('connection lost', 'request failed')) or (s.get('status') or 0) >= 500]
         time.sleep(max(0.0, OBSERVE_SECONDS - (time.time() - t0)))
         again = _http(port, {**probes[0], 'name': f'first page after {OBSERVE_SECONDS}s and the flow'})
         if not again['ok']:
@@ -383,6 +421,8 @@ def _exact_owner_launch(base, spec):
             problems.append(f'server exited (code {proc.proc.poll()})')
         step.update(status=first.get('status'), observed_seconds=round(time.time() - t0, 1),
                     alive_after_observation=proc.alive(), same_process_flow=flow,
+                    same_process_flow_note='transport errors and 5xx are judged; content expectations target the '
+                                           'verification launch arguments and are recorded only',
                     browser_open_requests=_opens(base, proc.proc.pid),
                     busy_port_second_launch=_second_launch(base, port, hinted))
         stdout, stderr = proc.streams()

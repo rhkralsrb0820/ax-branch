@@ -3,6 +3,34 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.16] - 2026-10-08
+
+Verification no longer reaches the internet; the exact Owner launch judges transport, not launch-specific content.
+
+### Added
+- The audit-hook wrapper refuses non-local connects, sendto/sendmsg and name lookups (getaddrinfo,
+  gethostbyname/addr, getnameinfo) with PermissionError and records them as blocked;
+  `network.external_unblocked` counts what was not refused.
+
+### Changed
+- Exact Owner launch, HTTP flow on the same process: a lost connection, a failed request or a 5xx response fails
+  the step. Content expectations are recorded only, because probes target the verification launch arguments
+  (e.g. --offline).
+
+### Fixed
+- 0.1.15 ran the spec's probes on the online no-argument launch: P-bbad3c's v31 then contacted its approved hosts
+  (Google News, SEC, Stooq) during verification, and an --offline-only expectation failed.
+- Bytes host names (b'localhost') were logged as external.
+
+### Verification
+- See the commit (full suite after this change). Independent Codex review of the delta: 4 findings, 3 fixed.
+  The 4th is a documented limit (below).
+
+### Known issues
+- The refusal is in-process and best effort, not an OS firewall. Child processes, native code and the Windows
+  asyncio Proactor connect path are not intercepted, and connect() to a host name resolves it before the
+  refusal. A real zero-egress guarantee needs an OS firewall rule, which is system setup and needs the Owner.
+
 ## [0.1.15] - 2026-10-08
 
 Runtime Acceptance harness: the four verifier gaps reported on P-20261003-bbad3c v31 (HARNESS_BLOCKED).
