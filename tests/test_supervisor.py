@@ -304,6 +304,29 @@ class SupervisorTests(unittest.TestCase):
         self.started()
         self.assertEqual(self.status()['status'], 'STALLED')
 
+    def test_quota_pause_resumes_after_the_stated_reset_once(self):
+        # 10-08: reset 00:10 passed and P-bbad3c sat in WAITING_FOR_PROVIDER; nothing re-checked.
+        reason = ('RateLimited: No provider available: claude: limit (resets 12:10am (Asia/Seoul)). / '
+                  'codex: limit (try again at Oct 9th, 2026 12:15 AM.).')
+        self.store.pause(self.pid, reason)
+        paused = self.store.events(self.pid, {'state'})[-1]['at']
+        reset = supervisor.provider_reset_at(reason, paused)
+        self.assertEqual(self.status()['status'], 'WAITING_FOR_PROVIDER')
+        retry = lambda t: supervisor._provider_retry(self.engine, self.pid, self.launch, now=t)
+        self.assertIsNone(retry(reset - 1))                                   # before the reset: wait
+        self.assertEqual(retry(reset + 1), 'provider_retry')
+        self.assertEqual(self.store.project(self.pid)['state'], 'EXECUTING')  # the same checkpoint
+        self.launch.assert_called_once_with(self.pid)
+        self.assertEqual(self.status()['status'], 'RECOVERING')               # no second worker meanwhile
+        self.assertIsNone(self.supervise())
+        self.started()
+        self.store.pause(self.pid, reason)                                    # still refused: paused again
+        self.assertIsNone(retry(reset + 60))                                  # not again within the gap
+        self.launch.assert_called_once()
+        self.assertEqual(self.recoveries(), [])                               # not a failure recovery
+        self.store.update(self.pid, pause_reason='RateLimited: usage limit')  # no stated reset: Owner/next call
+        self.assertIsNone(retry(reset + 2 * supervisor.PROVIDER_RETRY_GAP))
+
     def test_concurrent_supervisor_pass_backs_off(self):
         # Codex review: two passes could both replace a stale marker and both launch.
         with run_lock(self.folder / 'supervise.lock'):

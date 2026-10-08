@@ -33,6 +33,29 @@ MAX_RECOVERIES = 5        # per project since the Owner's last action, all signa
 OWNER_STOP = 'Owner stopped'
 RECOVERING_STALE = 300    # s: a RECOVERING marker older than this was left by a crashed supervisor
 OWNER_STATES = ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL')
+PROVIDER_RETRY_GAP = 900  # s between automatic retries after a stated provider reset time
+_RESETS = re.compile(r'resets (\d{1,2})(?::(\d{2}))?\s*([ap]m)', re.I)
+_TRY_AT = re.compile(r'try again at (\w{3})\w* (\d{1,2})\w*, (\d{4}) (\d{1,2}):(\d{2})\s*([AP]M)', re.I)
+
+
+def provider_reset_at(reason, paused_at):
+    """Epoch time of the EARLIEST reset the provider refusals in `reason` state (one free provider is enough),
+    or None if none is stated. 'resets 12:10am' is the next such local time after the pause; 'try again at
+    Oct 9th, 2026 12:15 AM' is absolute. Local time: the CLIs print the user's zone."""
+    import datetime as dt
+    base = dt.datetime.fromtimestamp(paused_at)
+    times = []
+    for h, m, ap in _RESETS.findall(reason or ''):
+        hour = int(h) % 12 + (12 if ap.lower() == 'pm' else 0)
+        at = base.replace(hour=hour, minute=int(m or 0), second=0, microsecond=0)
+        times.append(at if at > base else at + dt.timedelta(days=1))
+    for mon, day, year, h, m, ap in _TRY_AT.findall(reason or ''):
+        try:
+            at = dt.datetime.strptime(f'{mon} {day} {year} {h}:{m} {ap.upper()}', '%b %d %Y %I:%M %p')
+        except ValueError:
+            continue
+        times.append(at)
+    return min(times).timestamp() if times else None
 
 
 def awake():
@@ -167,6 +190,8 @@ def supervise(engine, pid, launch, stop):
 def _supervise(engine, pid, launch, stop):
     store, workspace = engine.store, engine.workspace
     rec = status(workspace, store, pid)
+    if rec['status'] == 'WAITING_FOR_PROVIDER':
+        return _provider_retry(engine, pid, launch)
     if rec['status'] not in ('STALLED', 'FAILED'):
         return None
     p = store.project(pid)
@@ -226,6 +251,32 @@ def _supervise(engine, pid, launch, stop):
     finally:
         if not launched:   # after a launch the marker stays until the new worker starts (engine._run removes
             marker.unlink(missing_ok=True)   # it), so a second supervisor pass meanwhile sees RECOVERING
+
+
+def _provider_retry(engine, pid, launch, now=None):
+    """A project paused because every provider refused for quota resumes from its checkpoint once the
+    stated reset time has passed (10-08: reset 00:10 passed and the project sat in WAITING_FOR_PROVIDER, since
+    nothing ever re-checked). Not a failure recovery: no re-plan, no recovery count. At most one retry per
+    PROVIDER_RETRY_GAP; a refusal again just pauses again with the new reset time."""
+    store, now = engine.store, now or time.time()
+    p = store.project(pid)
+    if p['state'] != 'PAUSED' or not p['pause_reason'] or 'RateLimited' not in p['pause_reason']:
+        return None                                     # a live call waiting for a slot, or not a quota pause
+    paused = [e for e in store.events(pid, {'state'}) if e['detail'].get('to') == 'PAUSED']
+    reset = provider_reset_at(p['pause_reason'], paused[-1]['at'] if paused else now)
+    retries = [e for e in store.events(pid, {'provider_retry'}) if now - e['at'] < PROVIDER_RETRY_GAP]
+    if reset is None or now < reset or retries:
+        return None
+    folder = Path(engine.workspace) / 'projects' / pid
+    try:
+        with (folder / 'RECOVERING').open('x', encoding='utf-8') as f:     # the worker removes it when it starts
+            f.write('provider reset passed -> resuming from the checkpoint')
+    except FileExistsError:
+        return None
+    store.event(pid, 'provider_retry', reset_at=reset, resume_state=p['resume_state'])
+    store.resume(pid)
+    launch(pid)
+    return 'provider_retry'
 
 
 def _settle(engine, pid, seconds=30):

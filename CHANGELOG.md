@@ -3,6 +3,34 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.20] - 2026-10-09
+
+A project paused for provider quota resumes by itself after the stated reset time.
+
+### Added
+- `supervisor.provider_reset_at()`: the earliest reset time stated in the provider refusals.
+  Handles "resets 12:10am" (next such local time after the pause) and "try again at Oct 9th, 2026 12:15 AM".
+- Supervisor: a PAUSED `RateLimited` project resumes from its checkpoint with one worker once that time has
+  passed (event `provider_retry`). It is not a failure recovery (no re-plan, no recovery count), retries at
+  most once per 15 minutes, and holds the RECOVERING marker so no second worker starts.
+
+### Changed
+- Nothing else. A quota pause without a stated reset time still waits.
+
+### Fixed
+- P-20261003-bbad3c stayed in WAITING_FOR_PROVIDER after the Claude reset (00:10 KST). The supervisor only acted
+  on STALLED/FAILED, so a quota pause was never re-checked.
+
+### Verification
+- 147 tests pass. Live (2026-10-09 00:20): Claude available on one minimal call; P-bbad3c resumed from its
+  REWORK checkpoint with one detached worker.
+
+### Known issues
+- The automatic retry runs where the supervisor runs: the open AX Branch window, or `axbranch supervise --watch`.
+  With both closed it waits for D-AUTO-1 (OS scheduler, still blocked by Owner decision).
+- At the 10-08 23:53 pause the scheduled strategy review (FAIL #30) had not run, because its CEO call was the one refused.
+  The resume continues from REWORK without it.
+
 ## [0.1.19] - 2026-10-08
 
 The Owner can run the verified result from AX Branch.
