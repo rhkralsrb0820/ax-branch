@@ -98,6 +98,15 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
    - #6: the rendered order of the result sections is not recorded, and the probe's 500 ms wait was not followed.
    Owner decides: accept the recorded browser-open request as evidence for #3 (or allow a real browser
    window during verification), and let the harness record the visible section order for #6.
+10. **0.1.18, v31 re-verified (2026-10-08, no rebuild, v31 sha256 unchanged): PASS → OWNER_REVIEW.**
+    - Owner ruling on #3: the recorded browser-open request plus server/port evidence counts in automated
+      verification; the real window is checked at OWNER_REVIEW.
+    - #6: the harness verified the click wait (all clicks settled: requests completed + 500 ms quiet) and
+      the visible order: 한 줄 판단 → 핵심 근거 → 위험 요인 → 불확실성 → 확인해 볼 점 → 규칙 기반… → 상세 데이터 보기;
+      inside the details, 시세 요약 → 기술 지표 값 → 가격 차트 → 재무·밸류에이션 → SEC 공시 → 외부 기사 → 판단 요소별 점수 → 데이터 출처 상태.
+    - Deterministic checks and runtime: OK. 3 minor recommendations recorded (not gating). 0 unmet approved criteria.
+    - **Owner next:** test v31, including the real default-browser window (`python -m axbranch review
+      P-20261003-bbad3c --works` / `--broken "..."` / `--request "..."`).
 
 ### Development continuation — GUI/live-view (2026-10-06, verification blocked)
 
