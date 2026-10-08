@@ -35,9 +35,23 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
 5. **Sleep killed a live worker.** The PC slept 03:27→19:11 during v30's browser probe; the wall-clock
    heartbeat age (56,643 s) made recovery kill the live worker. Fix: heartbeats carry sleep-excluded
    time (`supervisor.awake()`, QueryUnbiasedInterruptTime on Windows).
-   v31's worker (10956) vanished ~19:16–19:43 right after its build, with no traceback, WER record or
-   recovery event: cause **not established** (the GUI that launched it was also gone by 19:43).
+   **UNRESOLVED:** v31's worker (10956) vanished ~19:16–19:43 right after its build, with no traceback,
+   WER record or recovery event: cause not established (the GUI that launched it was also gone by 19:43).
+   No fix without evidence; record the next unexplained worker exit before changing anything.
+   Side effect of 3 (found 2026-10-08): the failed rebuild wrote its file into `artifacts/v31/` before
+   its transaction failed, so v31's bytes no longer matched the recorded sha256. v31 was restored from its
+   recorded build output (sha256 match). The overwritten file is kept as
+   `projects/P-20261003-bbad3c/v31-overwritten-by-failed-rebuild-2026-10-08-1946.py`. The 0.1.14 iteration
+   guard makes a rebuild write to a new version folder.
 6. D-AUTO-1 (scheduler) stays blocked until these fixes are verified live.
+7. **Live check (0.1.14, 2026-10-08):** P-bbad3c was resumed at VERIFYING on the existing v31 (no v32).
+   Result: FAIL with 4 major findings, all of kind harness → PAUSED `HARNESS_BLOCKED` (resume_state VERIFYING,
+   iteration 31, no rebuild). Runtime steps that failed: "Home visible innerText from real browser" and
+   "Fixture judgment with proven initial collapse and no reload". Both report the details markers in the
+   rendered text: the harness reads collapsed `<details>` content via `--dump-dom`. 4/33 criteria unmet.
+   **Next (AX Branch dev):** fix the verifier gaps named in the findings: visible-innerText browser
+   evidence, exact Owner launch / browser-open observation, outbound-connection log, subprocess recording.
+   Then resume to re-verify v31.
 
 ### Development continuation — GUI/live-view (2026-10-06, verification blocked)
 
