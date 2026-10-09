@@ -769,20 +769,33 @@ class Engine:
             pass             # already forced a change for this cause once and it recurred: paused below
         elif repeated:
             # Same root cause twice in a row: retrying the same way is waste (v10-v15 on P-bbad3c).
-            self._strategy(pid, recovery_note=f'The same root cause failed twice in a row: {repeated}. '
-                                              'Continuing the same way is not allowed; change provider or approach.',
-                           forbid_continue=True)
+            recovery_note = (f'The same root cause failed twice in a row: {repeated}. '
+                             'Continuing the same way is not allowed; change provider or approach.')
+            self.store.event(pid, 'strategy_pending', recovery_note=recovery_note, forbid_continue=True,
+                             verification_round=fails, trigger='repeated')
+            pending = self.store.events(pid, {'strategy_pending'})[-1]['id']
+            self._strategy(pid, recovery_note=recovery_note, forbid_continue=True)
+            self.store.event(pid, 'strategy_done', pending=pending)
             # Recorded only once the change is applied: an interrupted strategy call is not a forced change.
             self.store.event(pid, 'decision', what='repeated failure signature', why=repeated, by='engine')
         elif misconfigured := self._misconfigured_probes(pid):
             # The probe, not the product, is wrong: the CEO who wrote the runtime spec fixes it (a developer
             # rework cannot make prose clickable). Same checks, valid selectors — the bar is not lowered.
-            self._strategy(pid, recovery_note='Runtime Acceptance probes are MISCONFIGURED (not product failures): '
-                           + ' | '.join(misconfigured) + '. Return the runtime spec with these probes fixed: '
-                           "BROWSER http_body = CSS selectors separated by '||' that exist in the deliverable "
-                           '(use the listed ids); keep what each probe checks.')
+            recovery_note = ('Runtime Acceptance probes are MISCONFIGURED (not product failures): '
+                             + ' | '.join(misconfigured) + '. Return the runtime spec with these probes fixed: '
+                             "BROWSER http_body = CSS selectors separated by '||' that exist in the deliverable "
+                             '(use the listed ids); keep what each probe checks.')
+            self.store.event(pid, 'strategy_pending', recovery_note=recovery_note, forbid_continue=False,
+                             verification_round=fails, trigger='misconfigured')
+            pending = self.store.events(pid, {'strategy_pending'})[-1]['id']
+            self._strategy(pid, recovery_note=recovery_note)
+            self.store.event(pid, 'strategy_done', pending=pending)
         elif fails % gov.STRATEGY_EVERY == 0:
+            self.store.event(pid, 'strategy_pending', recovery_note=None, forbid_continue=False,
+                             verification_round=fails, trigger='periodic')
+            pending = self.store.events(pid, {'strategy_pending'})[-1]['id']
             self._strategy(pid)
+            self.store.event(pid, 'strategy_done', pending=pending)
         if fails >= self.store.project(pid)['budget']:
             self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
                                   f'with more rounds (resume --rounds N), or change/stop the goal.')
@@ -900,8 +913,20 @@ class Engine:
             return self.store.project(pid)
 
     def _rework(self, pid):
+        # A strategy review decided after the last FAIL but interrupted (quota, crash) runs before any rebuild.
+        # Only the newest decision counts: an older unfinished one was superseded by later verification.
+        events = self.store.events(pid, {'strategy_pending', 'strategy_done'})
+        pending = next((e for e in reversed(events) if e['kind'] == 'strategy_pending'), None)
+        if pending and not any(e['kind'] == 'strategy_done' and e['detail'].get('pending') == pending['id'] for e in events):
+            detail = pending['detail']
+            self._strategy(pid, recovery_note=detail['recovery_note'], forbid_continue=detail['forbid_continue'])
+            self.store.event(pid, 'strategy_done', pending=pending['id'])
         if self.store.feedback(pid, pending_only=True):
             return self._owner_rework(pid)
+        fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+        if fails >= self.store.project(pid)['budget']:
+            return self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
+                                        f'with more rounds (resume --rounds N), or change/stop the goal.')
         self.store.set_state(pid, 'STAFFING', reason='rebuild')
 
     def add_ruling(self, pid, criterion, ruling):

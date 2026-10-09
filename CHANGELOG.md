@@ -3,6 +3,29 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.27] - 2026-10-10
+
+Durable strategy review (autonomy gap 2): the CEO's decision to rethink after a FAIL survives interruptions.
+
+### Added
+- `strategy_pending` / `strategy_done` events around every strategy review that `_after_fail` decides.
+
+### Changed
+- `_rework` first runs an unfinished strategy review (newest only) before any rebuild. It also refuses to build
+  when the failure budget is used up; Owner-feedback rework is unchanged.
+
+### Fixed
+- A strategy review refused for quota (or interrupted) was skipped on resume, and the project rebuilt the same way
+  (P-20261003-bbad3c, FAIL #30).
+
+### Verification
+- engine + supervisor + library tests pass (70). New: a refused review runs before the next build, exactly once;
+  an exhausted budget never builds again on resume.
+- Implemented by Codex; reviewed and integrated by Claude (fix: only the newest pending review counts).
+
+### Known issues
+- A crash between the strategy commit and `strategy_done` can repeat that review once (harmless, bounded).
+
 ## [0.1.26] - 2026-10-10
 
 Artifact Library + Develop.

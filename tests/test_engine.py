@@ -652,6 +652,65 @@ class ProviderTests(unittest.TestCase):
 class FailureRoutingTests(unittest.TestCase):
     setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
 
+    def test_refused_strategy_review_runs_before_the_next_build(self):
+        class RefusedStrategy(Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                # Repeated failures use a copied strategy schema that forbids 'continue'.
+                if self.fail_on is E.STRATEGY and 'decision' in schema.get('properties', {}):
+                    self.fail_on = schema
+                return super().__call__(prompt, schema, *args, **kw)
+
+        script = RefusedStrategy([BROKEN, BROKEN, GOOD], ['FAIL', 'FAIL', 'PASS'],
+                                 strategy='switch_provider', fail_on=E.STRATEGY)
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertEqual((p['state'], p['resume_state']), ('PAUSED', 'REWORK'))
+        self.assertIn('RateLimited', p['pause_reason'])
+        pending = self.store.events(pid, {'strategy_pending'})
+        self.assertEqual(len(pending), 1)
+        pending = pending[0]
+        self.assertEqual(pending['detail']['verification_round'], 2)
+        self.assertEqual(pending['detail']['trigger'], 'repeated')
+        self.assertTrue(pending['detail']['forbid_continue'])
+        self.assertEqual(self.store.events(pid, {'strategy_done'}), [])
+        self.assertEqual(sum(s is E.BUILD for s, _, _ in script.prompts), 2)
+
+        checkpoint = len(script.prompts)
+        self.store.resume(pid)
+        p = self.engine(script).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        resumed = script.prompts[checkpoint:]
+        strategy_index = next(i for i, (s, _, _) in enumerate(resumed) if 'decision' in s.get('properties', {}))
+        build_index = next(i for i, (s, _, _) in enumerate(resumed) if s is E.BUILD)
+        self.assertLess(strategy_index, build_index)
+        schema, _, prompt = resumed[strategy_index]
+        self.assertIn(pending['detail']['recovery_note'], prompt)
+        self.assertNotIn('continue', schema['properties']['decision']['enum'])
+        self.assertEqual([e['id'] for e in self.store.events(pid, {'strategy_pending'})], [pending['id']])
+        self.assertEqual([e['detail'] for e in self.store.events(pid, {'strategy_done'})], [{'pending': pending['id']}])
+
+    def test_exhausted_budget_never_builds_again_on_resume(self):
+        script = Script([BROKEN, BROKEN, GOOD], ['FAIL', 'FAIL', 'PASS'], strategy='switch_provider')
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.store.update(pid, budget=2)
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertIn('not lowered', p['pause_reason'])
+        self.assertEqual(sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid)), 2)
+        self.assertEqual(sum(s is E.BUILD for s, _, _ in script.prompts), 2)
+        done = self.store.events(pid, {'strategy_done'})
+        self.assertEqual(len(done), 1)
+
+        checkpoint = len(script.prompts)
+        self.store.update(pid, state='REWORK')
+        p = eng.run(pid)
+        self.assertEqual((p['state'], p['resume_state']), ('PAUSED', 'REWORK'))
+        self.assertIn('not lowered', p['pause_reason'])
+        self.assertEqual(script.prompts[checkpoint:], [])       # no build or already-completed strategy review
+        self.assertEqual(self.store.events(pid, {'strategy_done'}), done)
+
     def test_harness_only_fail_pauses_without_rebuild_and_reverifies(self):
         # P-bbad3c v27-v31: findings the verifier itself called unverifiable sent a working build back 4 times.
         script = HarnessScript([GOOD, GOOD], ['FAIL', 'PASS'])
