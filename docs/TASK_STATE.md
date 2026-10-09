@@ -204,6 +204,23 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
 - Old findings have no kind (counted as 미분류).
 - D-SEC-1 is open.
 
+## Overnight autonomous development (2026-10-10) — in progress
+Audit: `docs/AUTONOMY_AUDIT.md` (Codex, from code + `docs/evidence/2026-10-10-autonomy-audit-evidence.json`).
+Ranked gaps:
+1. goal-aware execution and stopping;
+2. durable autonomous replanning;
+3. strategy/hypothesis/attempt memory;
+4. independent challenge with correct engine provenance;
+5. preservation of verification contracts;
+6. adaptive knowledge retrieval.
+
+Plan (sequential, all touch engine.py; Codex implements, Claude integrates, local tests):
+- T1 durable strategy review (gap 2);
+- T2 attempt memory + exact-repeat guard (gap 3);
+- T3 actual-producer provenance for verifier routing (gap 4);
+- T4 stop-outcome classification (gap 1, minimal);
+- T5 probe/criteria preservation in strategy (gap 5).
+
 ## Artifact Library + Develop (0.1.26, 2026-10-10)
 - Project = record of the work, Artifact = what the Owner uses, Knowledge = vault notes.
 - The Library is an index over the existing tables (no copies).

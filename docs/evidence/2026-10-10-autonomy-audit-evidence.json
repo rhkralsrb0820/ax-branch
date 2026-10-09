@@ -1,0 +1,424 @@
+{
+ "projects": [
+  {
+   "id": "P-20261009-bd147a",
+   "title": "리만 가설 연구",
+   "state": "EXECUTING",
+   "closed_mode": null,
+   "iteration": 4,
+   "plan_version": 4,
+   "roles": [
+    "Analytic number theory literature researcher",
+    "Research mathematician (analytic number theory, rigorous numerics)",
+    "Mathematical software engineer and technical writer"
+   ],
+   "providers": [
+    "claude",
+    "claude",
+    "codex"
+   ],
+   "verifications": {
+    "PASS": 3
+   },
+   "event_kinds": {
+    "created": 1,
+    "owner_action": 6,
+    "session": 5,
+    "state": 20,
+    "context_used": 1,
+    "call_start": 19,
+    "call": 18,
+    "decision": 7,
+    "agent_hired": 6,
+    "verification_recommendations": 3,
+    "verification": 3,
+    "owner_notified": 4,
+    "owner_run": 8,
+    "owner_view": 4,
+    "owner_feedback": 5,
+    "reproduction": 3,
+    "approval_requested": 2,
+    "approval_decided": 2,
+    "permission_granted": 1
+   },
+   "decision_kinds": {
+    "owner feedback diagnosis": 3,
+    "runtime probes dropped by revised plan": 3,
+    "plan v1": 1
+   },
+   "effort": {
+    "owner_interventions": 6,
+    "owner_feedback_rounds": 5,
+    "rework_rounds": 3,
+    "verification_rounds": 3,
+    "manual_recovery": 0,
+    "owner_escape": 0,
+    "automatic_recoveries": 0,
+    "elapsed_hours": 4.0,
+    "agent_active_minutes": 67,
+    "satisfaction": "UNKNOWN",
+    "owner_review_minutes": "UNKNOWN"
+   }
+  },
+  {
+   "id": "P-20261003-bbad3c",
+   "title": "주식 분석 프로그램",
+   "state": "CLOSED",
+   "closed_mode": "save",
+   "iteration": 33,
+   "plan_version": 19,
+   "roles": [
+    "Market-data source researcher (price path only)",
+    "Price-path patch producer",
+    "Complete single-file application producer"
+   ],
+   "providers": [
+    "claude",
+    "codex",
+    "claude"
+   ],
+   "verifications": {
+    "PASS": 5,
+    "FAIL": 30
+   },
+   "event_kinds": {
+    "created": 1,
+    "session": 32,
+    "state": 177,
+    "context_used": 1,
+    "call": 124,
+    "decision": 63,
+    "agent_hired": 42,
+    "verification": 35,
+    "owner_feedback": 9,
+    "reproduction": 6,
+    "audit": 1,
+    "call_start": 121,
+    "provider_handoff": 31,
+    "agents_replaced": 14,
+    "recovery_replan": 9,
+    "edits_applied": 16,
+    "approval_requested": 22,
+    "approval_decided": 22,
+    "build_rejected": 7,
+    "owner_action": 22,
+    "recovery": 12,
+    "permission_granted": 2,
+    "call_failed": 4,
+    "verification_recommendations": 4,
+    "owner_ruling": 1,
+    "owner_run": 3,
+    "archived": 1,
+    "agents_terminated": 1,
+    "satisfaction_note": 2,
+    "archive_restructured": 3,
+    "owner_effort": 3
+   },
+   "decision_kinds": {
+    "runtime probes dropped by strategy": 13,
+    "strategy: change_pipeline": 12,
+    "network access revised by strategy": 8,
+    "verification ran on the producer's engin": 7,
+    "strategy: continue": 7,
+    "owner feedback diagnosis": 6,
+    "runtime probes dropped by revised plan": 5,
+    "strategy: switch_provider": 2,
+    "plan v1": 1,
+    "repeated failure signature": 1,
+    "Owner-approved network access restored": 1
+   },
+   "effort": {
+    "owner_interventions": "15 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_feedback_rounds": 9,
+    "rework_rounds": 39,
+    "verification_rounds": 35,
+    "manual_recovery": "9 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_escape": "10 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "automatic_recoveries": 12,
+    "elapsed_hours": 139.5,
+    "agent_active_minutes": 374,
+    "satisfaction": 60,
+    "owner_review_minutes": "UNKNOWN"
+   }
+  },
+  {
+   "id": "P-20261003-d356e8",
+   "title": "한글로 읽은 원화 금액",
+   "state": "PAUSED",
+   "closed_mode": null,
+   "iteration": 2,
+   "plan_version": 1,
+   "roles": [
+    "Python engineer specialized in parsers and Korean numeral grammar"
+   ],
+   "providers": [
+    "claude"
+   ],
+   "verifications": {
+    "FAIL": 1,
+    "PASS": 1
+   },
+   "event_kinds": {
+    "created": 1,
+    "session": 1,
+    "state": 10,
+    "context_used": 1,
+    "call": 6,
+    "decision": 1,
+    "agent_hired": 1,
+    "verification": 2,
+    "owner_action": 1
+   },
+   "decision_kinds": {
+    "plan v1": 1
+   },
+   "effort": {
+    "owner_interventions": "1 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_feedback_rounds": 0,
+    "rework_rounds": 1,
+    "verification_rounds": 2,
+    "manual_recovery": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_escape": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "automatic_recoveries": 0,
+    "elapsed_hours": 146.8,
+    "agent_active_minutes": 0,
+    "satisfaction": "UNKNOWN",
+    "owner_review_minutes": "UNKNOWN"
+   }
+  },
+  {
+   "id": "P-20261003-46185d",
+   "title": "섭씨/화씨/켈빈 온도를 서로 변환하는 Python 함수와 CLI",
+   "state": "PAUSED",
+   "closed_mode": null,
+   "iteration": 4,
+   "plan_version": 1,
+   "roles": [
+    "Python 수치 변환 및 CLI 구현 전문가"
+   ],
+   "providers": [
+    "codex"
+   ],
+   "verifications": {
+    "FAIL": 3,
+    "PASS": 1
+   },
+   "event_kinds": {
+    "created": 1,
+    "session": 1,
+    "state": 18,
+    "provider_handoff": 7,
+    "call": 11,
+    "decision": 2,
+    "agent_hired": 1,
+    "verification": 4,
+    "owner_action": 1
+   },
+   "decision_kinds": {
+    "plan v1": 1,
+    "strategy: continue": 1
+   },
+   "effort": {
+    "owner_interventions": "1 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_feedback_rounds": 0,
+    "rework_rounds": 3,
+    "verification_rounds": 4,
+    "manual_recovery": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_escape": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "automatic_recoveries": 0,
+    "elapsed_hours": 147.3,
+    "agent_active_minutes": 0,
+    "satisfaction": "UNKNOWN",
+    "owner_review_minutes": "UNKNOWN"
+   }
+  },
+  {
+   "id": "P-20261003-4e3292",
+   "title": "여러 파일로 구성된 Python 패키지",
+   "state": "PAUSED",
+   "closed_mode": null,
+   "iteration": 2,
+   "plan_version": 1,
+   "roles": [
+    "Python package architect",
+    "Python engineer"
+   ],
+   "providers": [
+    "claude",
+    "codex"
+   ],
+   "verifications": {
+    "FAIL": 1,
+    "PASS": 1
+   },
+   "event_kinds": {
+    "created": 1,
+    "session": 1,
+    "state": 10,
+    "call": 7,
+    "decision": 1,
+    "agent_hired": 2,
+    "verification": 2,
+    "owner_action": 1
+   },
+   "decision_kinds": {
+    "plan v1": 1
+   },
+   "effort": {
+    "owner_interventions": "1 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_feedback_rounds": 0,
+    "rework_rounds": 1,
+    "verification_rounds": 2,
+    "manual_recovery": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_escape": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "automatic_recoveries": 0,
+    "elapsed_hours": 147.3,
+    "agent_active_minutes": 0,
+    "satisfaction": "UNKNOWN",
+    "owner_review_minutes": "UNKNOWN"
+   }
+  },
+  {
+   "id": "P-20261003-97494b",
+   "title": "Windows에서 Python 가상환경",
+   "state": "PAUSED",
+   "closed_mode": null,
+   "iteration": 2,
+   "plan_version": 1,
+   "roles": [
+    "Korean technical writer specializing in Python on Windows",
+    "Independent Windows/Python technical reviewer and Korean editor"
+   ],
+   "providers": [
+    "claude",
+    "codex"
+   ],
+   "verifications": {
+    "FAIL": 1,
+    "PASS": 1
+   },
+   "event_kinds": {
+    "created": 1,
+    "session": 2,
+    "state": 10,
+    "call": 8,
+    "decision": 1,
+    "agent_hired": 2,
+    "verification": 2,
+    "owner_action": 12
+   },
+   "decision_kinds": {
+    "plan v1": 1
+   },
+   "effort": {
+    "owner_interventions": "12 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_feedback_rounds": 0,
+    "rework_rounds": 1,
+    "verification_rounds": 2,
+    "manual_recovery": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_escape": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "automatic_recoveries": 0,
+    "elapsed_hours": 147.4,
+    "agent_active_minutes": 0,
+    "satisfaction": "UNKNOWN",
+    "owner_review_minutes": "UNKNOWN"
+   }
+  },
+  {
+   "id": "P-20261003-06983b",
+   "title": "원화 금액",
+   "state": "CLOSED",
+   "closed_mode": "save",
+   "iteration": 1,
+   "plan_version": 1,
+   "roles": [
+    "Python engineer specializing in Korean number localization"
+   ],
+   "providers": [
+    "codex"
+   ],
+   "verifications": {
+    "PASS": 1
+   },
+   "event_kinds": {
+    "created": 1,
+    "session": 2,
+    "state": 8,
+    "call": 4,
+    "decision": 1,
+    "agent_hired": 1,
+    "session_end": 1,
+    "verification": 1,
+    "audit": 1,
+    "archived": 1,
+    "agents_terminated": 1
+   },
+   "decision_kinds": {
+    "plan v1": 1
+   },
+   "effort": {
+    "owner_interventions": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_feedback_rounds": 0,
+    "rework_rounds": 0,
+    "verification_rounds": 1,
+    "manual_recovery": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_escape": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "automatic_recoveries": 0,
+    "elapsed_hours": 0.5,
+    "agent_active_minutes": 0,
+    "satisfaction": "UNKNOWN",
+    "owner_review_minutes": "UNKNOWN"
+   }
+  },
+  {
+   "id": "P-20261003-906ead",
+   "title": "한국 사업자등록번호",
+   "state": "CLOSED",
+   "closed_mode": "discard",
+   "iteration": 2,
+   "plan_version": 1,
+   "roles": [
+    "Python engineer (temporary specialist)",
+    "Independent QA reviewer and finalizer (temporary specialist)"
+   ],
+   "providers": [
+    "codex",
+    "claude"
+   ],
+   "verifications": {
+    "FAIL": 1,
+    "PASS": 1
+   },
+   "event_kinds": {
+    "created": 1,
+    "state": 13,
+    "call": 7,
+    "decision": 1,
+    "agent_hired": 2,
+    "verification": 2,
+    "artifact_bytes_restored": 2,
+    "audit": 1,
+    "owner_action": 9,
+    "owner_feedback": 1,
+    "agents_terminated": 1,
+    "owner_effort": 1
+   },
+   "decision_kinds": {
+    "plan v1": 1
+   },
+   "effort": {
+    "owner_interventions": "9 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_feedback_rounds": 1,
+    "rework_rounds": 1,
+    "verification_rounds": 2,
+    "manual_recovery": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "owner_escape": "0 (기록: 2026-10-06 06:18 이후; 그 이전 UNKNOWN)",
+    "automatic_recoveries": 0,
+    "elapsed_hours": 145.6,
+    "agent_active_minutes": 0,
+    "satisfaction": 90,
+    "owner_review_minutes": "UNKNOWN"
+   }
+  }
+ ]
+}
