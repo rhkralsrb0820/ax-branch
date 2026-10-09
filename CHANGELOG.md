@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.24] - 2026-10-09
+
+[중단] works on a project that waits for the Owner.
+
+### Added
+- Nothing.
+
+### Changed
+- [계속 실행 / 재개] on a project paused from OWNER_REVIEW / PENDING_CLOSE / ARCHIVE_PENDING_APPROVAL restores that
+  stage without launching a worker (there is no engine work there) and records the Owner action.
+
+### Fixed
+- [중단] did nothing on OWNER_REVIEW / PENDING_CLOSE / ARCHIVE_PENDING_APPROVAL projects. The window skipped the pause
+  for those states. They now PAUSE as an Owner stop: `resume_state` keeps the exact stage, the supervisor never
+  auto-resumes it, and the project, artifacts, knowledge and history are untouched. CLOSED is unchanged.
+
+### Verification
+- GUI + supervisor tests pass (new: stop → PAUSED → supervise leaves it → explicit resume → same stage, no worker;
+  CLOSED untouched).
+- Live on a copy of the real DB, P-20261003-97494b: PENDING_CLOSE → [중단] → PAUSED (resume_state PENDING_CLOSE);
+  one real `axbranch supervise` pass reports "[PAUSED] Owner stopped" and leaves it paused;
+  [계속 실행 / 재개] → PENDING_CLOSE; 0 workers started.
+
+### Known issues
+- None new.
+
 ## [0.1.23] - 2026-10-09
 
 Project list layout.

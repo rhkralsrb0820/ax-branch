@@ -173,6 +173,34 @@ class GuiTests(unittest.TestCase):
         self.app._tip(None)
         self.assertIsNone(self.app._tipwin)
 
+    def test_stop_pauses_a_project_waiting_for_the_owner_and_resume_restores_it(self):
+        # 0.1.23: [중단] on a PENDING_CLOSE / OWNER_REVIEW project did nothing.
+        from axbranch import supervisor
+        for waiting in ('PENDING_CLOSE', 'OWNER_REVIEW'):
+            with self.subTest(waiting=waiting):
+                pid = self.app.store.new_project('waiting project')
+                self.app.store.update(pid, state=waiting)
+                self.app.selected = pid
+                _press(self.app, '중단')
+                p = self.app.store.project(pid)
+                self.assertEqual((p['state'], p['resume_state']), ('PAUSED', waiting))
+                self.assertIn(supervisor.OWNER_STOP, p['pause_reason'])
+                engine = self.app.engine_factory()
+                launch = mock.Mock()
+                self.assertIsNone(supervisor.supervise(engine, pid, launch=launch, stop=mock.Mock()))
+                engine.store.close()
+                launch.assert_not_called()                                   # never auto-resumed
+                self.assertEqual(self.app.store.project(pid)['state'], 'PAUSED')
+                with mock.patch.object(supervisor, 'launch_detached') as worker:
+                    _press(self.app, '계속 실행 / 재개')                      # the Owner resumes explicitly
+                worker.assert_not_called()                                   # nothing to run: no worker
+                self.assertEqual(self.app.store.project(pid)['state'], waiting)
+        closed = self.app.store.new_project('closed project')
+        self.app.store.update(closed, state='CLOSED')
+        self.app.selected = closed
+        _press(self.app, '중단')
+        self.assertEqual(self.app.store.project(closed)['state'], 'CLOSED')   # unchanged
+
     def test_busy_project_is_reported_not_run(self):
         pid = self.app.store.new_project('make an add tool')
         self.app.selected = pid

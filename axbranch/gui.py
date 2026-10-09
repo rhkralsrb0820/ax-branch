@@ -160,8 +160,9 @@ class App(tk.Tk):
             return
         p = self.store.project(self.selected)
         if p['state'] == 'PAUSED':
-            if p['resume_state'] in ('PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
-                self.store.resume(self.selected)
+            if p['resume_state'] in ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
+                self.store.resume(self.selected)          # back to waiting for the Owner: no engine work, no worker
+                self._owner_action('resume')
                 return
             extra = 3 if 'not lowered' in (p['pause_reason'] or '') else 0
             self.store.resume(self.selected, extra)
@@ -183,7 +184,7 @@ class App(tk.Tk):
         reason = f'{supervisor.OWNER_STOP} (window). Resume continues from here.'
         if p['state'] == 'PAUSED':
             self.store.update(self.selected, pause_reason=reason)          # an Owner stop, not a failure
-        elif p['state'] not in ('CLOSED', 'OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
+        elif p['state'] != 'CLOSED':                       # incl. a project waiting for the Owner (0.1.23: no-op)
             self.store.pause(self.selected, reason)
         self._owner_action('stop')
 
