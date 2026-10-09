@@ -894,10 +894,63 @@ class Engine:
                            'state': self.store.project(pid)['state']}, ensure_ascii=False)
         _status_write(folder / 'HEARTBEAT.json', data)
 
+    DOCS = ('.md', '.txt', '.html', '.htm', '.pdf')
+
+    def result_info(self, pid):
+        """How the Owner sees the verified result: ('view', [documents]) for documents and reports (a report
+        of a command-line deliverable is the result the Owner reads), ('run', []) for web/window programs and
+        programs without a document. Read-only: nothing is copied or started."""
+        artifact, plan = self._verified(pid), self.store.project(pid)['plan']
+        docs = [rel for rel, _, _ in artifacts.files_of(artifact) if Path(rel).suffix.lower() in self.DOCS]
+        docs.sort(key=lambda rel: (not re.search(r'report|readme|result|보고', rel, re.I), rel.count('/'), rel))
+        mode = (plan.get('runtime') or {}).get('mode', 'cli')
+        if artifact['kind'] == 'markdown' or (docs and mode not in ('web', 'gui')):
+            return 'view', docs or [Path(artifact['path']).name]
+        return 'run', []
+
+    def _verified(self, pid):
+        passed = [v for v in self.store.verifications(pid) if v['verdict'] == 'PASS']
+        artifact = next((a for a in self.store.artifacts(pid) if passed and a['id'] == passed[-1]['artifact_id']), None)
+        if artifact is None:
+            raise Rejected('There is no verified version of this project yet.')
+        return artifact
+
+    def open_result(self, pid, show_text=None, popen=subprocess.Popen):
+        """[결과 보기] / [결과 실행]: the verified result in one step, from a fresh copy (never the recorded version).
+        A .md/.txt report is shown by show_text(title, text, path) inside AX Branch when given; HTML, PDF and other
+        documents open in their default app; programs run as launch_verified runs them.
+        Returns (what, path)."""
+        how, docs = self.result_info(pid)
+        if how == 'run':
+            path, _ = self.launch_verified(pid, popen)
+            return 'run', path
+        run = self._fresh_copy(pid)
+        path = run / docs[0]
+        self.store.event(pid, 'owner_view', path=str(path))
+        if show_text and path.suffix.lower() in ('.md', '.txt'):
+            show_text(path.name, path.read_text(encoding='utf-8', errors='replace'), path)
+        elif os.name == 'nt':
+            os.startfile(path)
+        else:
+            popen(['xdg-open', str(path)])
+        return 'view', path
+
+    def _fresh_copy(self, pid):
+        artifact = self._verified(pid)
+        changed = artifacts.problems(artifact)
+        if changed:
+            raise Rejected(f"The verified version changed on disk: {'; '.join(changed)}")
+        run = self.workspace / 'projects' / pid / 'run' / f"v{artifact['iteration']}"
+        shutil.rmtree(run, ignore_errors=True)
+        run.mkdir(parents=True)
+        artifacts.materialize(artifact, run)
+        return run
+
     def launch_verified(self, pid, popen=subprocess.Popen):
         """Run the latest verified (PASS) version the way the Owner launches it (the runtime contract's exact
         launch: `python <entry>` with no arguments, a console of its own), from a fresh copy in
         projects/<id>/run/v<N> so the recorded version is never touched. Documents open in their app.
+        A command-line program's console stays open after it finishes (P-bbd147a: it printed and the console closed).
         Returns (path started, process or None)."""
         p = self.store.project(pid)
         passed = [v for v in self.store.verifications(pid) if v['verdict'] == 'PASS']
@@ -919,8 +972,11 @@ class Engine:
         if not python:
             raise Rejected('No Python interpreter found to run the result.')
         flags = subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0
+        cmd = [python, entry.name]
+        if os.name == 'nt' and (p['plan'].get('runtime') or {}).get('mode', 'cli') in ('cli', 'none'):
+            cmd = ['cmd', '/k', *cmd]                       # keep the output on screen after the program ends
         self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(entry))
-        return entry, popen([python, entry.name], cwd=str(entry.parent), creationflags=flags)
+        return entry, popen(cmd, cwd=str(entry.parent), creationflags=flags)
 
     def _python(self):
         return sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))

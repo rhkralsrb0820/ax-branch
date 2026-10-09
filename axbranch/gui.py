@@ -4,6 +4,7 @@ and always shows the persisted truth."""
 import gc
 import os
 import re
+from pathlib import Path
 import threading
 import time
 import tkinter as tk
@@ -56,6 +57,7 @@ class App(tk.Tk):
         self.list.bind('<Leave>', lambda _e: self._tip(None))
         body.add(holder, weight=0)                        # the main area takes any extra width; divider draggable
         self.ids, self._rows, self._titles, self._tipwin = [], None, [], None
+        self._labels = {}
         right = ttk.PanedWindow(body, orient='vertical')
         body.add(right, weight=1)
         self.right = right
@@ -63,7 +65,8 @@ class App(tk.Tk):
         self.owner_note = ttk.Label(self.owner_box, font=FONT, wraplength=820, justify='left')
         self.owner_note.pack(anchor='w')
         self.works_row = ttk.Frame(self.owner_box)
-        ttk.Button(self.works_row, text='결과 실행', command=self.run_result).pack(side='left', padx=(0, 12))
+        self.run_button = ttk.Button(self.works_row, text='결과 실행', command=self.run_result)
+        self.run_button.pack(side='left', padx=(0, 12))
         self.works = tk.StringVar(value='unknown')
         ttk.Label(self.works_row, text='실행해 보니:', font=FONT).pack(side='left')
         for label, value in (('작동함', 'yes'), ('작동하지 않음', 'no'), ('아직 확인 안 함', 'unknown')):
@@ -256,7 +259,10 @@ class App(tk.Tk):
                     self.decide_row.pack(anchor='w')
             self._owner_mode = mode
         if mode == 'review':
-            note = ('결과가 검증을 통과했습니다. [결과 실행]으로 검증된 버전을 바로 실행해 보고 의견을 적어 주세요. '
+            label = self._result_label(p['id'])
+            if self.run_button.cget('text') != label:
+                self.run_button.config(text=label)
+            note = (f'결과가 검증을 통과했습니다. [{label}]로 검증된 결과를 바로 확인하고 의견을 적어 주세요. '
                     '수정이 필요하면 [수정 요청 / 계속], 끝내려면 [완료].')
         elif mode == 'decision':
             note = (f'{reason[:220] or p["state"]}\n원하는 방향을 자연어로 적고 [수정 요청 / 계속]을 누르면 淸月 CEO가 분석해 같은 프로젝트에서 '
@@ -268,14 +274,53 @@ class App(tk.Tk):
         if self.owner_note.cget('text') != note:
             self.owner_note.config(text=note)
 
+    def _result_label(self, pid):
+        key = (pid, self.store.project(pid)['iteration'])
+        if key not in self._labels:                        # once per project version, not every refresh
+            engine = self.engine_factory()
+            try:
+                self._labels[key] = '결과 보기' if engine.result_info(pid)[0] == 'view' else '결과 실행'
+            except Exception:
+                return '결과 실행'
+            finally:
+                engine.store.close()
+        return self._labels[key]
+
     def run_result(self):
-        """[결과 실행]: start the verified version from AX Branch (no CLI, no Explorer)."""
+        """[결과 보기] / [결과 실행]: the verified result in one click (no CLI, no Explorer, no editor)."""
         if not self.selected:
             return
         engine = self.engine_factory()
         try:
-            path, _ = engine.launch_verified(self.selected)
-            self._notice[0] = f'실행함: {path.name} (검증된 버전, 별도 창)'
+            how, path = engine.open_result(self.selected, show_text=self.show_text)
+            self._notice[0] = f"{'열었음' if how == 'view' else '실행함'}: {path.name} (검증된 버전)"
+        except Exception as e:
+            messagebox.showwarning('AX Branch', str(e))
+        finally:
+            engine.store.close()
+
+    def show_text(self, title, text, path):
+        """A report inside AX Branch (read-only), with the program run one click away when there is one."""
+        win = tk.Toplevel(self)
+        win.title(f'AX Branch — {title}')
+        win.geometry('900x700')
+        view = scrolledtext.ScrolledText(win, font=FONT, wrap='word')
+        view.insert('1.0', text)
+        view.config(state='disabled')
+        row = ttk.Frame(win, padding=6)
+        row.pack(fill='x', side='bottom')
+        pid = self.selected
+        if any(Path(path).parent.glob('*.py')):
+            ttk.Button(row, text='프로그램 실행', command=lambda: self._run_program(pid)).pack(side='left')
+        ttk.Button(row, text='닫기', command=win.destroy).pack(side='right')
+        view.pack(fill='both', expand=True)
+        win.view = view
+        self._viewer = win
+
+    def _run_program(self, pid):
+        engine = self.engine_factory()
+        try:
+            engine.launch_verified(pid)
         except Exception as e:
             messagebox.showwarning('AX Branch', str(e))
         finally:

@@ -779,11 +779,35 @@ class GateAndImmutabilityTests(unittest.TestCase):
         popen = mock.Mock()
         path, _ = eng.launch_verified(pid, popen=popen)
         args, kwargs = popen.call_args
-        self.assertEqual(args[0][1:], [Path(verified['path']).name])     # the Owner's launch: no arguments
+        self.assertEqual(args[0][-1], Path(verified['path']).name)       # the Owner's launch: no arguments
+        self.assertEqual(args[0][:2], ['cmd', '/k'])                      # a CLI result stays on screen
         self.assertEqual(Path(kwargs['cwd']), self.tmp / 'ws' / 'projects' / pid / 'run' / f"v{verified['iteration']}")
         self.assertEqual(path.read_bytes(), Path(verified['path']).read_bytes())
         self.assertEqual(artifacts.problems(verified), [])
         self.assertEqual(self.store.events(pid, {'owner_run'})[-1]['detail']['version'], verified['iteration'])
+
+    def test_report_is_shown_in_ax_branch_and_a_web_app_is_run(self):
+        # P-20261009-bd147a: a CLI research bundle; [결과 실행] flashed a console and the report never showed.
+        eng = self.engine(Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        art = self.store.artifacts(pid)[-1]
+        self.assertEqual(eng.result_info(pid), ('run', []))               # a program without a document
+        report = Path(art['path']).parent / 'REPORT.md'
+        self.store.db.execute("UPDATE artifacts SET kind='bundle', path=?, manifest=? WHERE id=?",
+                              (str(report.parent), json.dumps({'files': [], 'rejected': []}), art['id']))
+        with mock.patch.object(artifacts, 'files_of', return_value=[('REPORT.md', report, ''), ('add_tool.py', report, '')]), \
+                mock.patch.object(artifacts, 'problems', return_value=[]), \
+                mock.patch.object(artifacts, 'materialize', lambda a, run: (Path(run) / 'REPORT.md').write_text('# 보고서', encoding='utf-8')):
+            self.assertEqual(eng.result_info(pid), ('view', ['REPORT.md']))
+            shown = []
+            how, path = eng.open_result(pid, show_text=lambda title, text, p: shown.append((title, text)))
+        self.assertEqual((how, shown), ('view', [('REPORT.md', '# 보고서')]))
+        plan = self.store.project(pid)['plan']
+        plan['runtime'] = {**plan['runtime'], 'mode': 'web'}
+        self.store.update(pid, plan=plan)
+        with mock.patch.object(artifacts, 'files_of', return_value=[('REPORT.md', report, '')]):
+            self.assertEqual(eng.result_info(pid), ('run', []))           # a web app runs, its docs aside
 
     def test_existing_version_folder_is_never_written(self):
         eng = self.engine(Script([GOOD], ['PASS']))

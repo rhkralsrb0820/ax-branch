@@ -135,8 +135,8 @@ class GuiTests(unittest.TestCase):
         self.assertEqual([f['text'] for f in self.app.store.feedback(pid)], ['다른 방법으로 다시 만들어줘'])
         self.pump_until(lambda: self.app._owner_mode == 'review')             # works? + feedback + 완료
         with mock.patch.object(E.Engine, 'launch_verified', return_value=(Path('add_tool.py'), None)) as run:
-            _press(self.app.owner_box, '결과 실행')                         # no CLI / Explorer needed
-        run.assert_called_once_with(pid)
+            _press(self.app.owner_box, '결과 실행')                         # a program without a report: run it
+        self.assertEqual(run.call_args.args[0], pid)                         # no CLI / Explorer needed
         self.assertIn('[결과 실행]', self.app.owner_note.cget('text'))
 
     def test_project_list_shows_short_title_and_status_dot_not_internal_state(self):

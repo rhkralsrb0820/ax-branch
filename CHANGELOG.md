@@ -3,6 +3,39 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.25] - 2026-10-09
+
+The Owner sees the verified result in one click, whatever its type.
+
+### Added
+- `Engine.result_info` / `Engine.open_result`: the verified result as the Owner should see it.
+  - A document or a report of a command-line deliverable is shown. `.md` and `.txt` open in a read-only viewer
+    inside AX Branch, with [프로그램 실행] when the result has a program. HTML, PDF and other documents open in
+    their default app.
+  - Web and window programs run as before.
+  - Always from a fresh copy, never the recorded version. Event `owner_view`.
+- The Owner panel button reads [결과 보기] or [결과 실행] to match.
+
+### Changed
+- A command-line program started for the Owner runs in a console that stays open (`cmd /k`), so its output stays
+  on screen.
+
+### Fixed
+- P-20261009-bd147a (Test #2): [결과 실행] did run `python rh_lab.py` (3 owner_run events). The program printed its
+  summary and exited, and the new console closed at once, so nothing was visible. The result itself,
+  RESEARCH_REPORT.md, was never shown.
+
+### Verification
+- Engine + GUI tests pass (new: report shown inside AX Branch vs web app run; label; CLI console stays open).
+- Live on a copy of the real DB, P-20261009-bd147a:
+  - button label [결과 보기];
+  - one click opens "AX Branch — RESEARCH_REPORT.md" with text identical to the verified report (10,546 chars);
+  - [프로그램 실행] starts `cmd /k python rh_lab.py` in a new console;
+  - v1 sha256 unchanged, verification still PASS.
+
+### Known issues
+- Markdown is shown as plain text (no rendering).
+
 ## [0.1.24] - 2026-10-09
 
 [중단] works on a project that waits for the Owner.
