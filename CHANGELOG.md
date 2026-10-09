@@ -3,6 +3,35 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.28] - 2026-10-10
+
+Attempt memory (autonomy gap 3, minimal): the CEO sees which approach led to which result and does not pay to
+re-verify a known failure.
+
+### Added
+- `engine.attempt_ledger(store, pid)`: each verification paired with the approach recorded before it (strategy
+  decision or Owner-feedback diagnosis): verdict, stable failure code, top gating findings. It is derived from
+  existing records only.
+- The strategy review gets `attempt_ledger` and is told not to re-propose, unchanged, an approach that already
+  failed with the same failure code.
+
+### Changed
+- A rebuild byte-identical to an earlier version that FAILED with a product finding is not verified again. It
+  becomes an engine FAIL ("identical to vN"), whose stable failure code drives the existing forced change of
+  approach. After a harness/infra-only FAIL, identical bytes are still verified.
+
+### Fixed
+- Identical rebuilds were re-verified, spending a verification round on a known failure.
+
+### Verification
+- engine/supervisor/library/GUI tests pass (80 + 1 new). New: ledger links approach → outcome (incl. ordering and
+  bounds); an identical rebuild is not verified again; an identical rebuild after a harness-only FAIL is verified.
+- Implemented by Codex; reviewed and integrated by Claude, who restricted the guard to product FAILs.
+
+### Known issues
+- The approach is the recorded decision text; semantic sameness of differently-worded approaches is not detected
+  (only identical bytes and identical failure codes).
+
 ## [0.1.27] - 2026-10-10
 
 Durable strategy review (autonomy gap 2): the CEO's decision to rethink after a FAIL survives interruptions.

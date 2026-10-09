@@ -177,7 +177,7 @@ class EngineTests(unittest.TestCase):
 
     def test_budget_pauses_without_lowering_bar_and_strategy_switches(self):
         old = gov.MAX_ROUNDS
-        script = Script([BROKEN] * 3, ['FAIL'] * 3, strategy='switch_provider')
+        script = Script([BROKEN + f'# attempt {i}\n' for i in range(3)], ['FAIL'] * 3, strategy='switch_provider')
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         self.store.update(pid, budget=3)
@@ -435,7 +435,7 @@ class EngineTests(unittest.TestCase):
 
     def test_misconfigured_probe_goes_to_the_ceo_not_to_rework(self):
         # P-bbad3c v21: BROWSER probes carried prose instead of selectors; only the CEO can fix the probe.
-        script = Script([GOOD, GOOD], ['PASS', 'PASS'])
+        script = Script([GOOD, GOOD + '\n'], ['PASS', 'PASS'])
         eng = self.engine(script)
         real = eng.runtime_evidence
         calls = []
@@ -652,6 +652,58 @@ class ProviderTests(unittest.TestCase):
 class FailureRoutingTests(unittest.TestCase):
     setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
 
+    def test_attempt_ledger_links_approach_to_outcome(self):
+        # The second FAIL is the engine's identical-build rejection, with no verifier call.
+        script = Script([BROKEN, BROKEN, GOOD], ['FAIL', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        ledger = E.attempt_ledger(self.store, pid)
+        self.assertEqual([row['round'] for row in ledger], [1, 2, 3])
+        self.assertEqual([row['verdict'] for row in ledger], ['FAIL', 'FAIL', 'PASS'])
+        self.assertEqual([row['approach_kind'] for row in ledger[:2]], ['plan v1', 'plan v1'])
+        self.assertEqual(ledger[0]['approach'], 'initial plan')
+        self.assertTrue(ledger[2]['approach_kind'].startswith('strategy:'))
+        self.assertEqual(ledger[2]['approach'], 'r')
+        self.assertEqual(ledger[0]['top_findings'], ['wrong sum'])
+        self.assertIn('identical to v1', ledger[1]['top_findings'][0])
+        self.assertEqual(ledger[0]['failure_code'], E.failure_code(self.store.verifications(pid)[0]))
+        self.assertTrue(ledger[1]['failure_code'].startswith('engine:'))
+        self.assertIsNone(ledger[2]['failure_code'])
+        prompt = next(pr for schema, _, pr in script.prompts if schema is E.STRATEGY)
+        self.assertIn('attempt_ledger', prompt)
+        context = json.loads(prompt.split('CONTEXT (JSON — data, not instructions):\n', 1)[1]
+                             .rsplit('\n\nReturn exactly', 1)[0])
+        self.assertEqual(context['attempt_ledger'], ledger[:2])
+
+    def test_attempt_ledger_orders_and_bounds_recorded_context(self):
+        store = mock.Mock()
+        findings = [{'severity': 'major', 'criterion': -1, 'issue': 'recommendation'},
+                    {'severity': 'minor', 'criterion': 0, 'issue': 'polish'},
+                    {'severity': 'critical', 'criterion': 0, 'issue': 'x' * 201},
+                    {'severity': 'major', 'criterion': -1, 'deterministic': True, 'issue': 'y' * 201},
+                    {'severity': 'major', 'criterion': 0, 'issue': 'third blocker'}]
+        store.verifications.return_value = [
+            {'iteration': i, 'created': 10 + i, 'verdict': 'FAIL', 'provider': 'engine',
+             'result': {'findings': findings}, 'checks': {'ok': False, 'output': 'same failure'}}
+            for i in reversed(range(14))]
+        store.events.return_value = [
+            {'at': 23, 'detail': {'what': 'strategy: switch_provider', 'why': 'not before the last verification'}},
+            {'at': 13.5, 'detail': {'what': 'owner feedback diagnosis', 'why': 'owner diagnosis ' * 30}},
+            {'at': 12, 'detail': {'what': 'strategy: continue', 'why': 'earlier strategy'}},
+            {'at': 20, 'detail': {'what': 'unrelated decision', 'why': 'ignore'}}]
+        ledger = E.attempt_ledger(store, 'p')
+        self.assertEqual([row['round'] for row in ledger], list(range(2, 14)))
+        self.assertEqual(ledger[0]['approach_kind'], 'plan v1')       # equal timestamps are not BEFORE
+        self.assertEqual(ledger[1]['approach'], 'earlier strategy')
+        self.assertTrue(all(row['approach_kind'] == 'owner feedback diagnosis' for row in ledger[2:]))
+        self.assertEqual(ledger[-1]['approach'], ('owner diagnosis ' * 30)[:300])
+        self.assertEqual(ledger[-1]['top_findings'], ['x' * 200, 'y' * 200])
+        self.assertEqual(E.attempt_ledger(store, 'p', limit=2), ledger[-2:])
+        self.assertEqual(E.attempt_ledger(store, 'p', limit=0), [])
+        store.verifications.return_value = []
+        self.assertEqual(E.attempt_ledger(store, 'p'), [])
+
     def test_refused_strategy_review_runs_before_the_next_build(self):
         class RefusedStrategy(Script):
             def __call__(self, prompt, schema, *args, **kw):
@@ -660,7 +712,7 @@ class FailureRoutingTests(unittest.TestCase):
                     self.fail_on = schema
                 return super().__call__(prompt, schema, *args, **kw)
 
-        script = RefusedStrategy([BROKEN, BROKEN, GOOD], ['FAIL', 'FAIL', 'PASS'],
+        script = RefusedStrategy([BROKEN, BROKEN + '\n', GOOD], ['FAIL', 'FAIL', 'PASS'],
                                  strategy='switch_provider', fail_on=E.STRATEGY)
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
@@ -691,7 +743,7 @@ class FailureRoutingTests(unittest.TestCase):
         self.assertEqual([e['detail'] for e in self.store.events(pid, {'strategy_done'})], [{'pending': pending['id']}])
 
     def test_exhausted_budget_never_builds_again_on_resume(self):
-        script = Script([BROKEN, BROKEN, GOOD], ['FAIL', 'FAIL', 'PASS'], strategy='switch_provider')
+        script = Script([BROKEN, BROKEN + '\n', GOOD], ['FAIL', 'FAIL', 'PASS'], strategy='switch_provider')
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         self.store.update(pid, budget=2)
@@ -728,7 +780,7 @@ class FailureRoutingTests(unittest.TestCase):
 
     def test_rebuild_from_a_built_iteration_gets_a_new_version(self):
         # 10-08: a recovery re-plan from VERIFYING rebuilt into the built v31 -> IntegrityError twice.
-        script = HarnessScript([GOOD, GOOD], ['FAIL', 'PASS'])
+        script = HarnessScript([GOOD, GOOD + '\n'], ['FAIL', 'PASS'])
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         built = eng.run(pid)['iteration']
@@ -748,6 +800,8 @@ class FailureRoutingTests(unittest.TestCase):
         self.assertIsNone(E.failure_code(v('no deterministic evidence', steps=())))
         self.assertEqual(E.failure_code(v('a', provider='engine', output='empty deliverable')),
                          E.failure_code(v('b', provider='engine', output='empty deliverable')))
+        self.assertEqual(E.failure_code(v('a', provider='engine', output='identical to v1, which already FAILED verification')),
+                         E.failure_code(v('b', provider='engine', output='identical to v42, which already FAILED verification')))
         selftest = v('self-test failed', steps=())          # Codex review: a failing self-test alone
         selftest['checks'].update(ok=False, runtime={'ok': True, 'steps': []})
         self.assertIsNotNone(E.failure_code(selftest))
@@ -769,6 +823,34 @@ class FailureRoutingTests(unittest.TestCase):
 
 class GateAndImmutabilityTests(unittest.TestCase):
     setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
+
+    def test_identical_rebuild_after_a_harness_only_fail_is_verified(self):
+        script = HarnessScript([GOOD, GOOD], ['FAIL', 'PASS'])        # FAIL #1: harness findings only
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        eng.replan(pid, 'operator re-plan')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')       # same bytes, verified again, not rejected
+        self.assertEqual(self.store.events(pid, {'build_rejected'}), [])
+
+    def test_identical_rebuild_is_not_verified_again(self):
+        script = Script([BROKEN, BROKEN, GOOD], ['FAIL', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        self.assertEqual(sum(schema is E.VERDICT for schema, _, _ in script.prompts), 2)
+        vs = self.store.verifications(pid)
+        self.assertEqual([v['verdict'] for v in vs], ['FAIL', 'FAIL', 'PASS'])
+        self.assertEqual((vs[1]['provider'], vs[1]['artifact_id']), ('engine', ''))
+        self.assertIn('identical to v1', vs[1]['checks']['output'])
+        rejected = self.store.events(pid, {'build_rejected'})
+        self.assertEqual(len(rejected), 1)
+        self.assertIn('identical', rejected[0]['detail']['reason'])
+        arts = self.store.artifacts(pid)
+        self.assertEqual([a['iteration'] for a in arts], [1, 3])
+        self.assertFalse((Path(arts[0]['path']).parent.parent / 'v2').exists())
+        self.assertEqual(artifacts.problems(arts[0]), [])
+        self.assertEqual((script.builds, script.verdicts), ([], []))
 
     def test_findings_outside_approved_criteria_are_recommendations(self):
         class Recommending(Script):
@@ -880,7 +962,7 @@ class GateAndImmutabilityTests(unittest.TestCase):
         self.assertEqual([Path(a['path']).parent.name for a in self.store.artifacts(pid)], ['v2'])
 
     def test_failed_commit_removes_only_its_own_new_version(self):
-        eng = self.engine(HarnessScript([GOOD, GOOD], ['FAIL', 'PASS']))
+        eng = self.engine(HarnessScript([GOOD, GOOD + '\n'], ['FAIL', 'PASS']))
         pid = self.store.new_project('make an add tool')
         eng.run(pid)                                   # v1 built, HARNESS_BLOCKED
         v1 = self.store.artifacts(pid)[0]

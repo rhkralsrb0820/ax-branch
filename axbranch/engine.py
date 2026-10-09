@@ -211,6 +211,7 @@ that should prove usability from now on (the current one if unchanged); if usabi
 strengthen it (e.g. BROWSER probes for rendered pages). Always return network_access: every domain the
 finished program contacts at run time with its risk (the current list if unchanged); new ones go to the
 Owner for approval before the build.
+Approaches in attempt_ledger that already failed with the same failure_code must not be proposed again unchanged; say what is different this time in the rationale.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
@@ -245,6 +246,25 @@ def failure_code(v):
     kinds = sorted({f.get('kind', 'product') for f in v['result'].get('findings', [])
                     if f['severity'] in ('critical', 'major') and gating(f)})
     return f"{'+'.join(kinds) or 'none'}:{'|'.join(steps)}"[:300]
+
+
+def attempt_ledger(store, pid, limit=12):
+    """Recent verification outcomes paired with the approach recorded before each one."""
+    if limit <= 0:
+        return []
+    decisions = sorted((e for e in store.events(pid, {'decision'})
+                        if e['detail'].get('what', '').startswith('strategy: ')
+                        or e['detail'].get('what') == 'owner feedback diagnosis'), key=lambda e: e['at'])
+    ledger = []
+    for v in sorted(store.verifications(pid), key=lambda v: v['created'])[-limit:]:
+        approach = next((e['detail'] for e in reversed(decisions) if e['at'] < v['created']), {})
+        ledger.append({'round': v['iteration'], 'verdict': v['verdict'],
+                       'failure_code': failure_code(v) if v['verdict'] == 'FAIL' else None,
+                       'top_findings': [f['issue'][:200] for f in actionable(v['result'].get('findings', []))
+                                        if f['severity'] in ('critical', 'major')][:2],
+                       'approach': approach.get('why', 'initial plan')[:300],
+                       'approach_kind': approach.get('what', 'plan v1')})
+    return ledger
 
 
 def _prompt(system, task, context):
@@ -562,6 +582,15 @@ class Engine:
             # Exact bytes: write_text translates newlines on Windows and would break the recorded hash.
             path.write_bytes(content.encode('utf-8'))
             sha = artifacts.sha(content.encode('utf-8'))
+        # Only a FAIL that showed a product defect condemns these bytes (a harness/infra-only FAIL does not).
+        failed = {v['artifact_id'] for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'
+                  and any(f.get('kind', 'product') == 'product' for f in v['result'].get('findings', [])
+                          if f.get('severity') in ('critical', 'major') and gating(f))}
+        duplicate = next((a for a in self.store.artifacts(pid) if a['id'] in failed and a['sha256'] == sha), None)
+        if duplicate:
+            shutil.rmtree(folder, ignore_errors=True)       # only the folder claimed for this build
+            return self._no_deliverable(pid, final, used, build,
+                                        reason=f"identical to v{duplicate['iteration']}, which already FAILED verification")
         with self.store.tx():
             agent = self._agent(pid, final)
             self.store.save_output(pid, it, pv, len(notes_stages), agent, used, build)
@@ -847,6 +876,7 @@ class Engine:
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
                                              'findings': actionable(v['result']['findings']), 'checks_ok': v['checks']['ok']}
                                             for v in self.store.verifications(pid)],
+                   'attempt_ledger': attempt_ledger(self.store, pid),
                    'available_providers': providers.available() or list(gov.PROVIDERS),
                    'provider_track_record': metrics.provider_record(self.store)}
         schema = STRATEGY
