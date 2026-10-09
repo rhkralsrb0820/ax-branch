@@ -3,6 +3,41 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.32] - 2026-10-10
+
+CEO executive acceptance: Verification PASS is no longer automatically handed to the Owner.
+
+### Added
+- After a PASS, the CEO decides on the Owner's GOAL, not on the task list. The decision fields are
+  `goal_satisfied` (yes/partly/no/unknown), `missing_evidence`, `next_action` (deliver/rework/owner_decision) and
+  `directive`.
+  - When a concrete change within its authority can close a material gap, the CEO orders the next production round
+    itself (`ceo_directive`: objective, expected outcome, required evidence).
+  - Bounded: at most 2 such rounds per Owner action, inside the failure budget.
+  - The approved verification gate is unchanged.
+- The acceptance decision sees the deterministic/runtime evidence and its own previous directive. The decision is
+  recorded as 'executive rework' / 'executive acceptance'.
+- Stop outcome OWNER_DECISION_REQUIRED when the CEO's next action is an Owner decision.
+
+### Changed
+- Producers of an executive rework get the CEO's directive (not the "previous version FAILED" instruction).
+- Owner feedback replaces any pending CEO directive.
+
+### Fixed
+- Test #1: the CEO's own final judgment said the core goal (real prices) had no evidence of being solved, yet the
+  engine delivered it to the Owner as done.
+- A recorded PASS whose CEO report call was interrupted (quota) was verified again on resume. It now resumes at
+  the acceptance step.
+
+### Verification
+- engine/supervisor/library/GUI tests pass (97+). New: rework once then deliver, cap, cap reset by an Owner
+  action, no directive → deliver, owner_decision, budget, Owner feedback replaces the directive, REPORT failover,
+  interrupted acceptance resumes without re-verifying, owner_decision stop outcome.
+- Implemented by Claude. Tests and adversarial review by Codex: 5 findings, all fixed.
+
+### Known issues
+- Whether the live CEO uses rework well (not too eager, not too lax) is unproven on real projects.
+
 ## [0.1.31] - 2026-10-10
 
 Strategy reviews can no longer lower the verification bar (autonomy gap 5).

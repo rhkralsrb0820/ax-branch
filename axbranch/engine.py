@@ -61,7 +61,9 @@ VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
                            issue=STR, evidence=STR)))
 STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE),
              runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))))
-REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR))
+REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR), goal_satisfied=ENUM('yes', 'partly', 'no', 'unknown'),
+           missing_evidence=ARR(STR), next_action=ENUM('deliver', 'rework', 'owner_decision'), directive=STR)
+MAX_EXECUTIVE_REWORKS = 2      # CEO-ordered rounds after a PASS, per Owner action (Autonomous != infinite)
 
 EXEC_CONTRACT = ("The engine runs `python <file> --self-test` with empty stdin in an empty temp dir; that "
                  "invocation must run the full self-test and exit 0 only if it passes. Running `python <file>` "
@@ -177,8 +179,25 @@ evidence, a misconfigured check) - unverified is not a product defect; infra = t
 failed (browser, process, OS, provider), not the artifact. Use product only with evidence."""
 
 REPORT_SYSTEM = """You are 淸月 AI CEO. Production agents delivered an artifact and the independent
-Verification Agent PASSED it. Give the Owner a concise executive report: what was achieved,
-your judgment of its value and limits (from the evidence shown, not optimism), and next steps."""
+Verification Agent PASSED it against the approved criteria. Verification PASS is not Goal completion: you are
+accountable for the Owner's goal, so first make an executive acceptance decision, coldly and from evidence.
+Ask: what does the Owner actually want to be able to do or know? Does the evidence shown prove it, in real use?
+What would make this wrong, what evidence is missing, what assumption is untested?
+- goal_satisfied: yes / partly / no / unknown — judged against the Owner's goal, not the task list.
+- missing_evidence: the specific gaps (empty if none).
+- next_action:
+  deliver — the goal is met with evidence, or every remaining gap is outside your authority (needs the Owner,
+    real-world access, money, or is the nature of the problem); say so honestly in the judgment;
+  rework — a concrete change the production team can make NOW would close a material gap with evidence; you
+    then order it yourself (the Owner is not asked);
+  owner_decision — progress needs an Owner approval, resource or business trade-off.
+- directive: for rework, the order to the team: objective, expected outcome, evidence that must show it is done,
+  constraints (keep everything that already passed). It guides the team; it does not add acceptance criteria.
+Then the Owner report: what was achieved, your judgment of value and limits, next steps."""
+
+CEO_DIRECTIVE = """The CEO reviewed the verified previous version and judged that the Owner's goal is not yet
+satisfied (ceo_directive: the CEO's order, missing evidence). Build a NEW version that closes exactly those gaps and
+makes the result demonstrable, keeping everything that already passed verification."""
 
 DIAGNOSE_SYSTEM = """You are 淸月 AI CEO. The Owner tested the delivered, verified artifact and wrote
 feedback in plain language (owner_feedback; 'new' = not yet acted on). It may report something that
@@ -546,6 +565,9 @@ class Engine:
         if plan.get('owner_rework'):
             context['owner_rework'] = plan['owner_rework']
             system += '\n\n' + OWNER_REWORK
+        if plan.get('ceo_directive'):
+            context['ceo_directive'] = plan['ceo_directive']
+            system += '\n\n' + CEO_DIRECTIVE
         context.update({k: v for k, v in baseline.items() if k == 'owner_confirmed_version'})
         if latest is not None and not history and latest['project_id'] != pid:
             context['previous_artifact'] = baseline['current_version']['content']    # Develop: the base version
@@ -556,7 +578,8 @@ class Engine:
             context['verification_findings'] = [{'round': v['iteration'], 'criteria': v['result']['criteria'],
                                                  'findings': actionable(v['result']['findings'], n), 'checks': v['checks']}
                                                 for v in history[-2:]]
-            system += '\n\n' + REWORK
+            if history[-1]['verdict'] == 'FAIL':     # an executive rework follows a PASS, not a failure
+                system += '\n\n' + REWORK
         # ponytail: bundles keep full rebuilds (edits cannot delete a file); add file deletion if large bundles appear
         edits_only = (latest is not None and plan['artifact_kind'] != 'bundle'
                       and len(baseline['current_version']['content']) > EDITS_ONLY_ABOVE)
@@ -707,6 +730,10 @@ class Engine:
         changed = artifacts.problems(artifact)
         if changed:
             raise Rejected(f"Artifact changed on disk after it was built: {'; '.join(changed)}")
+        done = [v for v in self.store.verifications(pid) if v['artifact_id'] == artifact['id']]
+        if done and done[-1]['verdict'] == 'PASS':
+            # Verified already; the CEO acceptance call was interrupted (quota/crash): continue there.
+            return self._deliver(pid, artifact, artifacts.text_of(artifact), done[-1]['result'])
         text = artifacts.text_of(artifact)
         rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
         checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
@@ -1155,6 +1182,7 @@ class Engine:
                    'provider_track_record': metrics.provider_record(self.store)}
         d, used = self._ask(pid, 'CEO', DIAGNOSE_SYSTEM, 'Diagnose the Owner feedback and revise this project.',
                             context, DIAGNOSIS, prefer='claude')
+        plan = {k: v for k, v in plan.items() if k != 'ceo_directive'}      # the Owner's word replaces the CEO's order
         new = self._sanitize({**plan, **{k: d[k] for k in ('interpretation', 'artifact_kind', 'artifact_filename',
                                                           'acceptance_criteria', 'verification_lenses', 'runtime',
                                                           'network_access', 'pipeline')}})
@@ -1278,12 +1306,47 @@ class Engine:
                    'artifact': {'path': artifact['path'], 'excerpt': text[:6000]},
                    'verification': {'criteria': verdict['criteria'], 'minor_findings': verdict['findings']},
                    'rounds': p['iteration']}
-        report, used = self._ask(pid, 'CEO', REPORT_SYSTEM, 'Report the verified result to the Owner.',
+        last = self.store.verifications(pid)[-1] if self.store.verifications(pid) else None
+        if last:
+            runtime_ev = last['checks'].get('runtime') or {}
+            context['deterministic_evidence'] = {
+                'checks_ok': last['checks'].get('ok'), 'checks_output_tail': str(last['checks'].get('output', ''))[-1500:],
+                'runtime_steps': [{'name': st.get('name'), 'ok': st.get('ok'), 'problems': st.get('problems', [])[:3]}
+                                  for st in runtime_ev.get('steps', [])][:30],
+                'network': {k: (runtime_ev.get('network') or {}).get(k) for k in ('external_count', 'external_unblocked')}}
+        if p['plan'].get('ceo_directive'):
+            context['previous_ceo_directive'] = p['plan']['ceo_directive']
+        report, used = self._ask(pid, 'CEO', REPORT_SYSTEM,
+                                 'Decide whether the Owner goal is satisfied, then report the verified result.',
                                  context, REPORT, prefer='claude')
-        how = (p['plan'].get('runtime') or {}).get('owner_launch', '')
+        decision = report.get('next_action', 'deliver')
+        owner_act = max((e['id'] for e in self.store.events(pid, {'owner_action'})), default=0)
+        ordered = [e for e in self.store.events(pid, {'decision'})
+                   if e['detail'].get('what') == 'executive rework' and e['id'] > owner_act]
+        fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+        plan = p['plan']
+        if decision == 'rework' and report.get('directive') and len(ordered) < MAX_EXECUTIVE_REWORKS \
+                and fails < p['budget']:
+            # The CEO orders the next round itself: verified is not yet the Owner's goal.
+            with self.store.tx():
+                plan['ceo_directive'] = {'directive': report['directive'], 'missing_evidence': report.get('missing_evidence', []),
+                                         'goal_satisfied': report.get('goal_satisfied'), 'after_version': p['iteration']}
+                self.store.update(pid, plan=plan, iteration=p['iteration'] + 1)
+                self.store.event(pid, 'decision', what='executive rework', by=used,
+                                 why=f"goal {report.get('goal_satisfied')}; {report['directive'][:600]}")
+                self.store.set_state(pid, 'REWORK', reason='CEO executive review: the Owner goal is not yet satisfied')
+            return
+        if decision == 'rework' and report.get('directive'):     # wanted more, but a bound stopped it: say so
+            report['judgment'] = (report.get('judgment', '') + f"\n\n(CEO가 추가 작업을 원했지만 자동 재작업 한도"
+                                  f" {MAX_EXECUTIVE_REWORKS}회 또는 실패 예산에 도달해 Owner에게 보고합니다.)")
+        plan.pop('ceo_directive', None)
+        how = (plan.get('runtime') or {}).get('owner_launch', '')
         with self.store.tx():
-            self.store.update(pid, report={**report, 'artifact': artifact['path'], 'rounds': p['iteration'],
-                                           'how_to_test': how})
+            self.store.update(pid, plan=plan, report={**report, 'artifact': artifact['path'], 'rounds': p['iteration'],
+                                                     'how_to_test': how})
+            self.store.event(pid, 'decision', what='executive acceptance', by=used,
+                             why=f"goal {report.get('goal_satisfied', 'unknown')}; next {decision}; "
+                                 f"missing: {'; '.join(report.get('missing_evidence', []))[:500]}")
             self.store.set_state(pid, 'OWNER_REVIEW', reason='verified artifact delivered; Owner to test it')
 
     # ---- Owner lifecycle

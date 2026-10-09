@@ -88,6 +88,8 @@ def stop_outcome(project):
         return None
     reason = project.get('pause_reason') or ''
     if state == 'OWNER_REVIEW':
+        if (project.get('report') or {}).get('next_action') == 'owner_decision':
+            return 'OWNER_DECISION_REQUIRED', ((project.get('report') or {}).get('judgment') or '')[:200]
         return 'VERIFIED', reason[:200] or 'verified; waiting for the Owner review'
     if state in ('PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL', 'ARCHIVING', 'CLOSED'):
         return 'CLOSING', reason[:200] or 'Owner closing steps'

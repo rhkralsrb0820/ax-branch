@@ -76,6 +76,20 @@ class Script:
         raise AssertionError('unexpected schema')
 
 
+class ExecutiveScript(Script):
+    """Keep the normal pipeline, but consume scripted CEO acceptance reports."""
+
+    def __init__(self, builds, verdicts, reports):
+        super().__init__(builds, verdicts)
+        self.reports = list(reports)
+
+    def __call__(self, prompt, schema, *args, **kw):
+        result, used, notes = super().__call__(prompt, schema, *args, **kw)
+        if schema is E.REPORT:
+            result.update(self.reports.pop(0))
+        return result, used, notes
+
+
 class PreserveProbesTests(unittest.TestCase):
     def test_preserves_dropped_probes_and_assertions_without_mutating_inputs(self):
         launch = {'name': 'launch', 'args': [], 'stdin': '', 'http_method': '', 'http_path': '',
@@ -774,6 +788,174 @@ class EngineTests(unittest.TestCase):
             self.store.set_state(pid, 'CLOSED')
 
 
+class ExecutiveAcceptanceTests(unittest.TestCase):
+    setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
+
+    rework = {'goal_satisfied': 'partly', 'missing_evidence': ['real output'],
+              'next_action': 'rework', 'directive': 'show real output'}
+    deliver = {'goal_satisfied': 'yes', 'missing_evidence': [], 'next_action': 'deliver', 'directive': ''}
+
+    def test_executive_rework_once_then_deliver(self):
+        script = ExecutiveScript([GOOD, GOOD + '\n'], ['PASS', 'PASS'], [self.rework, self.deliver])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        builds = [prompt for schema, _, prompt in script.prompts if schema is E.BUILD]
+        self.assertEqual(len(builds), 2)
+        self.assertNotIn('ceo_directive', builds[0])
+        self.assertIn('ceo_directive', builds[1])
+        self.assertIn('show real output', builds[1])
+        self.assertIn(E.CEO_DIRECTIVE, builds[1])
+        self.assertEqual([e['detail']['what'] for e in self.store.events(pid, {'decision'})
+                          if e['detail']['what'].startswith('executive ')],
+                         ['executive rework', 'executive acceptance'])
+        self.assertNotIn('ceo_directive', p['plan'])
+        arts = self.store.artifacts(pid)
+        self.assertEqual([a['iteration'] for a in arts], [1, 2])
+        self.assertEqual([Path(a['path']).read_bytes() for a in arts],
+                         [GOOD.encode('utf-8'), (GOOD + '\n').encode('utf-8')])
+        self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS', 'PASS'])
+        self.assertEqual(p['report']['artifact'], arts[-1]['path'])
+        self.assertEqual((p['iteration'], p['report']['rounds']), (2, 2))
+        self.assertEqual(eng.consistency(pid), [])
+        self.assertEqual((script.builds, script.verdicts, script.reports), ([], [], []))
+
+    def test_executive_rework_is_capped_even_for_identical_passed_bytes(self):
+        rounds = E.MAX_EXECUTIVE_REWORKS + 1
+        for identical in (False, True):
+            with self.subTest(identical=identical):
+                builds = [GOOD if identical else GOOD + '\n' * i for i in range(rounds)]
+                script = ExecutiveScript(builds, ['PASS'] * rounds, [self.rework] * rounds)
+                eng = self.engine(script)
+                pid = self.store.new_project('make an add tool')
+                p = eng.run(pid)
+                self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+                decisions = [e['detail']['what'] for e in self.store.events(pid, {'decision'})]
+                self.assertEqual(decisions.count('executive rework'), E.MAX_EXECUTIVE_REWORKS)
+                self.assertEqual(decisions.count('executive acceptance'), 1)
+                self.assertIn(f'자동 재작업 한도 {E.MAX_EXECUTIVE_REWORKS}회', p['report']['judgment'])
+                self.assertNotIn('ceo_directive', p['plan'])
+                arts = self.store.artifacts(pid)
+                self.assertEqual([a['iteration'] for a in arts], list(range(1, rounds + 1)))
+                self.assertEqual(len({Path(a['path']).parent for a in arts}), rounds)
+                self.assertEqual([Path(a['path']).read_bytes() for a in arts],
+                                 [content.encode('utf-8') for content in builds])
+                self.assertEqual(self.store.events(pid, {'build_rejected'}), [])
+                self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS'] * rounds)
+                self.assertEqual((script.builds, script.verdicts, script.reports), ([], [], []))
+
+    def test_owner_action_resets_executive_rework_cap(self):
+        script = ExecutiveScript([GOOD, GOOD + '\n'], ['PASS', 'PASS'], [self.rework, self.deliver])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        for _ in range(E.MAX_EXECUTIVE_REWORKS):
+            self.store.event(pid, 'decision', what='executive rework', why='earlier order', by='claude')
+        self.store.event(pid, 'owner_action', action='review', channel='app')
+        owner_action = self.store.events(pid, {'owner_action'})[-1]['id']
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        ordered = [e for e in self.store.events(pid, {'decision'}) if e['detail']['what'] == 'executive rework']
+        self.assertEqual(len(ordered), E.MAX_EXECUTIVE_REWORKS + 1)
+        self.assertEqual(sum(e['id'] > owner_action for e in ordered), 1)
+        self.assertEqual(len(self.store.artifacts(pid)), 2)
+        self.assertEqual((script.builds, script.verdicts, script.reports), ([], [], []))
+
+    def test_executive_rework_without_directive_delivers_without_looping(self):
+        script = ExecutiveScript([GOOD], ['PASS'], [{**self.rework, 'directive': ''}])
+        pid = self.store.new_project('make an add tool')
+        p = self.engine(script).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual([e['detail']['what'] for e in self.store.events(pid, {'decision'})
+                          if e['detail']['what'].startswith('executive ')], ['executive acceptance'])
+        self.assertNotIn('ceo_directive', p['plan'])
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
+        self.assertEqual(sum(schema is E.REPORT for schema, _, _ in script.prompts), 1)
+
+    def test_executive_owner_decision_is_delivered_for_owner_review(self):
+        report = {**self.rework, 'next_action': 'owner_decision', 'directive': ''}
+        script = ExecutiveScript([GOOD], ['PASS'], [report])
+        pid = self.store.new_project('make an add tool')
+        p = self.engine(script).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        decisions = [e['detail'] for e in self.store.events(pid, {'decision'})
+                     if e['detail']['what'].startswith('executive ')]
+        self.assertEqual([d['what'] for d in decisions], ['executive acceptance'])
+        self.assertIn('next owner_decision', decisions[0]['why'])
+        self.assertEqual(p['report']['next_action'], 'owner_decision')
+        self.assertEqual(p['report']['missing_evidence'], ['real output'])
+        self.assertNotIn('ceo_directive', p['plan'])
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
+
+    def test_executive_rework_respects_failure_budget(self):
+        script = ExecutiveScript([BROKEN, GOOD], ['FAIL', 'PASS'], [self.rework])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.store.update(pid, budget=2)
+        self.assertEqual(eng.run(pid, stop_at='REWORK')['state'], 'REWORK')
+        self.assertEqual(eng.run(pid, stop_at='VERIFYING')['state'], 'VERIFYING')
+        self.store.update(pid, budget=1)         # the next PASS must not grant another build at the budget boundary
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['FAIL', 'PASS'])
+        decisions = [e['detail']['what'] for e in self.store.events(pid, {'decision'})]
+        self.assertNotIn('executive rework', decisions)
+        self.assertEqual(decisions.count('executive acceptance'), 1)
+        self.assertIn('실패 예산', p['report']['judgment'])
+        self.assertNotIn('ceo_directive', p['plan'])
+        self.assertEqual(len(self.store.artifacts(pid)), 2)
+
+    def test_owner_feedback_replaces_pending_ceo_directive(self):
+        script = ExecutiveScript([GOOD, LAUNCHABLE], ['PASS', 'PASS'], [self.rework, self.deliver])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid, stop_at='REWORK')
+        self.assertEqual(p['state'], 'REWORK', p['pause_reason'])
+        self.assertEqual(p['plan']['ceo_directive']['directive'], 'show real output')
+        self.store.pause(pid, 'Owner stopped the run')
+        eng.owner_review(pid, text='double-click must keep the result visible')
+        self.store.event(pid, 'owner_action', action='review', channel='app')
+        p = eng.run(pid, stop_at='STAFFING')
+        self.assertEqual(p['state'], 'STAFFING', p['pause_reason'])
+        self.assertNotIn('ceo_directive', p['plan'])
+        self.assertIn('double-click must keep the result visible', p['plan']['owner_rework']['feedback'])
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        build = [prompt for schema, _, prompt in script.prompts if schema is E.BUILD][-1]
+        self.assertIn('owner_rework', build)
+        self.assertNotIn('ceo_directive', build)
+        self.assertNotIn(E.CEO_DIRECTIVE, build)
+        self.assertEqual(len(self.store.artifacts(pid)), 2)
+
+    def test_executive_report_fails_over_to_codex(self):
+        class ReportFailover(ExecutiveScript):
+            def __call__(self, prompt, schema, *args, **kw):
+                if schema is E.REPORT:
+                    self.prompts.append((schema, kw.get('prefer', 'claude'), prompt))
+                    return providers.call(prompt, schema, *args, **kw)
+                return super().__call__(prompt, schema, *args, **kw)
+
+        script = ReportFailover([GOOD, GOOD + '\n'], ['PASS', 'PASS'], [self.rework, self.deliver])
+        claude = mock.Mock(side_effect=providers.RateLimited('usage limit (scripted)'))
+        codex = mock.Mock(side_effect=lambda *a: {'summary': 'done', 'judgment': 'good', 'next_steps': [],
+                                                **script.reports.pop(0)})
+        pid = self.store.new_project('make an add tool')
+        with mock.patch.dict(providers.RUN, {'claude': claude, 'codex': codex}), \
+                mock.patch.object(providers.shutil, 'which', return_value='x'):
+            p = self.engine(script).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual((claude.call_count, codex.call_count), (2, 2))
+        self.assertTrue(all(call.args[1] is E.REPORT for call in codex.call_args_list))
+        decisions = [e['detail'] for e in self.store.events(pid, {'decision'})
+                     if e['detail']['what'].startswith('executive ')]
+        self.assertEqual([(d['what'], d['by']) for d in decisions],
+                         [('executive rework', 'codex'), ('executive acceptance', 'codex')])
+        handoffs = [e['detail'] for e in self.store.events(pid, {'provider_handoff'})]
+        self.assertEqual([(e['who'], e['preferred'], e['used']) for e in handoffs],
+                         [('CEO', 'claude', 'codex'), ('CEO', 'claude', 'codex')])
+        self.assertTrue(all('usage limit' in e['notes'][0] for e in handoffs))
+
+
 class ProviderTests(unittest.TestCase):
     def test_failover_only_on_quota(self):
         calls = []
@@ -1023,6 +1205,24 @@ class FailureRoutingTests(unittest.TestCase):
 class GateAndImmutabilityTests(unittest.TestCase):
     setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
 
+    def test_interrupted_acceptance_resumes_without_reverifying(self):
+        # A PASS is recorded, then the CEO acceptance (REPORT) call is refused for quota.
+        script = Script([GOOD], ['PASS'], fail_on=E.REPORT)
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertEqual((p['state'], p['resume_state']), ('PAUSED', 'VERIFYING'))
+        self.store.resume(pid)
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        self.assertEqual(sum(schema is E.VERDICT for schema, _, _ in script.prompts), 1)   # not verified again
+        self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS'])
+
+    def test_owner_decision_is_its_own_stop_outcome(self):
+        project = {'state': 'OWNER_REVIEW', 'pause_reason': None,
+                   'report': {'next_action': 'owner_decision', 'judgment': 'needs a paid data source'}}
+        self.assertEqual(stop_outcome(project), ('OWNER_DECISION_REQUIRED', 'needs a paid data source'))
+        self.assertEqual(stop_outcome({**project, 'report': {'next_action': 'deliver'}})[0], 'VERIFIED')
+
     def test_identical_rebuild_after_a_harness_only_fail_is_verified(self):
         script = HarnessScript([GOOD, GOOD], ['FAIL', 'PASS'])        # FAIL #1: harness findings only
         eng = self.engine(script)
@@ -1104,6 +1304,8 @@ class GateAndImmutabilityTests(unittest.TestCase):
         plan['acceptance_criteria'] = ['a different requirement'] + plan['acceptance_criteria'][1:]
         self.store.update(pid, plan=plan)
         script.verdicts.append('PASS')
+        # a fresh verification of the version (a recorded PASS would resume at the CEO acceptance instead)
+        self.store.db.execute("DELETE FROM verifications WHERE project_id=? AND verdict='PASS'", (pid,))
         self.store.update(pid, state='VERIFYING')
         eng.run(pid)
         verify = [prompt for schema, _, prompt in script.prompts if schema is E.VERDICT][-1]
