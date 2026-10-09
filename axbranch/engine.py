@@ -211,6 +211,8 @@ spec whose probes exercise the new requirements end to end (they should FAIL on 
 if it lacks them) while keeping probes for confirmed behaviour, network_access, and the pipeline
 (reuse suitable roles; add the specialists the new requirements need). Never drop or weaken existing
 requirements unless the Owner asked for that change.
+relevant_knowledge holds lessons from other projects that match the current problem; use what applies and say which
+one in your diagnosis.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
@@ -232,6 +234,7 @@ finished program contacts at run time with its risk (the current list if unchang
 Owner for approval before the build.
 Existing probes and their assertions are kept automatically; you may repair how a probe runs or add probes, never remove or weaken them.
 Approaches in attempt_ledger that already failed with the same failure_code must not be proposed again unchanged; say what is different this time in the rationale.
+relevant_knowledge holds lessons from other projects that match the current problem; use what applies and say which one in your rationale.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
@@ -957,6 +960,9 @@ class Engine:
                                              'findings': actionable(v['result']['findings']), 'checks_ok': v['checks']['ok']}
                                             for v in self.store.verifications(pid)],
                    'attempt_ledger': attempt_ledger(self.store, pid),
+                   'relevant_knowledge': self._replan_knowledge(pid, 'strategy', ' '.join(
+                       f['issue'] for v in [v for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'][-1:]
+                       for f in actionable(v['result'].get('findings', [])) if f['severity'] in ('critical', 'major'))[:900]),
                    'available_providers': providers.available() or list(gov.PROVIDERS),
                    'provider_track_record': metrics.provider_record(self.store)}
         schema = STRATEGY
@@ -1160,6 +1166,18 @@ class Engine:
             return runtime.check(spec or runtime.DEFAULT, rel, python, cwd,
                                  on_step=(lambda detail: self.beat(pid, detail)) if pid else None)
 
+    def _replan_knowledge(self, pid, stage, focus):
+        """Knowledge for a re-plan: the vault searched for THIS problem now (goal + current failure or feedback),
+        other projects only. Provenance is recorded even when nothing matched, so absence is visible."""
+        try:
+            hits = [h for h in knowledge.retrieve(self.vault, f"{self.store.project(pid)['goal']} {focus}"[:1500],
+                                                  limit=3, chars=3000) if h.get('project') != pid]
+        except OSError:
+            hits = []
+        self.store.event(pid, 'context_used', stage=stage, vault_notes=[h['note'] for h in hits],
+                         projects=[h.get('project') for h in hits])
+        return hits
+
     def _owner_rework(self, pid):
         """Owner reported a problem/change: reproduce, let the CEO diagnose, revise the SAME project's plan."""
         p = self.store.project(pid)
@@ -1175,6 +1193,8 @@ class Engine:
                    'delivered_artifact': ({'path': last['path'], 'content': artifacts.text_of(last)[:60000]}
                                           if last else None),
                    'runtime_evidence_current': before,
+                   'relevant_knowledge': self._replan_knowledge(pid, 'owner_rework', ' '.join(
+                       f['text'] for f in feedback if f['handled_iteration'] is None)[:900]),
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
                                              'findings': actionable(v['result']['findings'])}
                                             for v in self.store.verifications(pid)],

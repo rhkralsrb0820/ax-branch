@@ -3,6 +3,33 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.33] - 2026-10-10
+
+Re-planning uses knowledge searched for the current problem (autonomy gap 6).
+
+### Added
+- `Engine._replan_knowledge(pid, stage, focus)`: before a strategy review (after FAILs) and before an Owner-feedback
+  diagnosis, the vault is searched for the goal plus the current failure findings or the new Owner feedback.
+  - Other projects only; the result goes to the CEO as `relevant_knowledge`.
+  - Provenance is recorded as `context_used` {stage, vault_notes, projects}, even when nothing matched.
+- The STRATEGY and DIAGNOSE prompts ask the CEO to use what applies and name it.
+
+### Changed
+- Nothing else; the keyword retrieval is unchanged (no vector search).
+
+### Fixed
+- Knowledge was retrieved only at initial planning. A re-plan after a failure or Owner feedback never looked for
+  lessons matching that failure.
+
+### Verification
+- engine tests pass (72 + 1 new): a matching lesson from another project reaches the strategy prompt with recorded
+  provenance; the project's own note is excluded; a missing vault yields an empty result.
+- Specified for Codex; Codex hit its usage limit before writing code, so Claude implemented it (engine failover per
+  plan).
+
+### Known issues
+- Whether the CEO's decisions change because of a retrieved lesson is not yet observed on a real project.
+
 ## [0.1.32] - 2026-10-10
 
 CEO executive acceptance: Verification PASS is no longer automatically handed to the Owner.

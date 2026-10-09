@@ -1205,6 +1205,27 @@ class FailureRoutingTests(unittest.TestCase):
 class GateAndImmutabilityTests(unittest.TestCase):
     setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
 
+    def test_replanning_retrieves_lessons_for_the_current_failure(self):
+        note = ('# add tool\n\n- project: `P-OTHER`\n\n## 요약 (Summary)\nx\n\n## 재사용 지식 (Reusable Knowledge)\n'
+                '- [검증 교훈] wrong sum: add must use + not -\n')
+        (self.vault / 'Projects').mkdir(parents=True, exist_ok=True)
+        (self.vault / 'Projects' / 'other.md').write_text(note, encoding='utf-8')
+        script = Script([BROKEN, BROKEN + '\n', GOOD], ['FAIL', 'FAIL', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        strategy = next(prompt for schema, _, prompt in script.prompts if 'decision' in schema.get('properties', {}))
+        self.assertIn('relevant_knowledge', strategy)
+        self.assertIn('add must use +', strategy)
+        used = [e['detail'] for e in self.store.events(pid, {'context_used'}) if e['detail'].get('stage') == 'strategy']
+        self.assertEqual(used[0]['projects'], ['P-OTHER'])
+        own = note.replace('P-OTHER', pid)                                  # its own archive never counts
+        (self.vault / 'Projects' / 'other.md').write_text(own, encoding='utf-8')
+        self.assertEqual(eng._replan_knowledge(pid, 'strategy', 'wrong sum'), [])
+        missing = E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'no-vault', gai_db=self.tmp / 'x.db',
+                           llm=script)
+        self.assertEqual(missing._replan_knowledge(pid, 'strategy', 'wrong sum'), [])
+
     def test_interrupted_acceptance_resumes_without_reverifying(self):
         # A PASS is recorded, then the CEO acceptance (REPORT) call is refused for quota.
         script = Script([GOOD], ['PASS'], fail_on=E.REPORT)
