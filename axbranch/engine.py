@@ -17,7 +17,8 @@ import time
 import traceback
 from pathlib import Path
 
-from . import GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, metrics, permissions, providers, runtime, sandbox, supervisor
+from . import (GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, library, metrics, permissions, providers,
+               runtime, sandbox, supervisor)
 from .state import ACTIVE, Rejected, Store, run_lock
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
@@ -92,6 +93,9 @@ You decide what it means, what knowledge it needs, which temporary specialist ag
 and the pipeline they run. You do not do specialist work yourself.
 {gov.SUMMARY}
 Rules:
+- develop_from (when present): the Owner is developing an existing artifact further. Interpret the goal as a
+  change to that artifact: start from its current_version, keep its still-valid acceptance criteria and confirmed
+  behaviour, apply its verification lessons and Owner feedback, and keep its title.
 - title: a short project name for the Owner's project list (at most 20 characters, the Owner's language,
   no request verbs), e.g. '주식 분석 프로그램' for '주식 분석 프로그램 만들어봐'.
 - The deliverable is produced by the LAST pipeline stage: ONE file (artifact_kind markdown or python),
@@ -351,9 +355,15 @@ class Engine:
                    'prior_knowledge': knowledge.retrieve(self.vault, goal),
                    'intelligence': knowledge.intel(self.gai_db, goal),
                    'provider_track_record': metrics.provider_record(self.store)}
+        base = library.develops(self.store, pid)
+        if base:
+            context['develop_from'] = library.develop_context(self.store, base, lambda q: knowledge.retrieve(self.vault, q),
+                                                              artifact=library.base_artifact(self.store, pid))
         # Provenance: exactly which prior knowledge and intelligence the CEO was shown.
         self.store.event(pid, 'context_used', vault_notes=[n['note'] for n in context['prior_knowledge']],
-                         intelligence=[f"{i['title']} <{i['url']}>" for i in context['intelligence']])
+                         intelligence=[f"{i['title']} <{i['url']}>" for i in context['intelligence']],
+                         **({'develop_from': base, 'develop_knowledge': [n['note'] for n in context['develop_from']['knowledge']]}
+                            if base else {}))
         plan, used = self._ask(pid, 'CEO', CEO_SYSTEM, 'Interpret the Owner goal and design the pipeline.',
                                context, PLAN, prefer='claude')
         plan = self._sanitize(plan)
@@ -478,6 +488,8 @@ class Engine:
             context['owner_rework'] = plan['owner_rework']
             system += '\n\n' + OWNER_REWORK
         context.update({k: v for k, v in baseline.items() if k == 'owner_confirmed_version'})
+        if latest is not None and not history and latest['project_id'] != pid:
+            context['previous_artifact'] = baseline['current_version']['content']    # Develop: the base version
         if history:
             if latest is not None:
                 context['previous_artifact'] = baseline['current_version']['content']
@@ -702,9 +714,28 @@ class Engine:
                                          'Resume re-verifies this version.', resume_state='VERIFYING')
         self._after_fail(pid, p)
 
+    def develop(self, base_pid, goal):
+        """Develop: a NEW autonomous project that builds the next version of an existing verified artifact. The Owner
+        gives only the goal; the CEO gets the artifact, its project, lessons and knowledge (library.develop_context).
+        The base project and its versions are never changed."""
+        art = library.verified_artifact(self.store, base_pid)
+        if art is None:
+            raise Rejected(f'{base_pid} has no verified artifact to develop.')
+        changed = artifacts.problems(art)
+        if changed:
+            raise Rejected(f"The verified artifact of {base_pid} changed on disk: {'; '.join(changed)}")
+        with self.store.tx():                       # never a Develop project without its pinned base
+            pid = self.store.new_project(goal)
+            self.store.event(pid, 'develop_from', base_project=base_pid, base_artifact=art['id'],
+                             base_iteration=art['iteration'], library=library.root(self.store, base_pid))
+        return pid
+
     def _baselines(self, pid):
-        """(latest non-empty artifact, latest artifact the Owner confirmed works) — either may be None."""
+        """(latest non-empty artifact, latest artifact the Owner confirmed works) — either may be None.
+        A developed project with no build of its own starts from the verified artifact it develops."""
         real = [a for a in self.store.artifacts(pid) if not artifacts.is_empty(a)]
+        if not real and (art := library.base_artifact(self.store, pid)):
+            return art, None                      # the pinned, integrity-checked base version
         works = {f['iteration'] for f in self.store.feedback(pid) if f['verdict'] == 'works'}
         latest = real[-1] if real else None
         confirmed = next((a for a in reversed(real) if a['iteration'] in works), None)
@@ -1160,6 +1191,9 @@ class Engine:
         evidence = [', '.join(f'{k}: {v}' for k, v in e['detail'].items())
                     for e in self.store.events(pid, {'audit', 'provider_handoff', 'context_used', 'reproduction'})]
         evidence += [f"Owner feedback round {f['iteration']} ({f['verdict']}): {f['text']}" for f in self.store.feedback(pid)]
+        evidence += [f"Develop lineage: developed from {e['detail']['base_project']} (verified iteration "
+                     f"{e['detail']['base_iteration']}), library {e['detail']['library']}"
+                     for e in self.store.events(pid, {'develop_from'})]
         notes = self.store.events(pid, {'satisfaction_note'})
         closed = [e['at'] for e in self.store.events(pid, {'state'}) if e['detail'].get('to') == 'CLOSED']
         effort = metrics.project_effort(self.store, pid)

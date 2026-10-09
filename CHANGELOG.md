@@ -3,6 +3,53 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.26] - 2026-10-10
+
+Artifact Library + Develop.
+
+### Added
+- `axbranch/library.py`: the Artifact Library as an index over the existing projects/artifacts/verifications (no file
+  copies).
+  - Item = a lineage's verified result: title, type (Apps / Reports / Documents / Research / Data / Other,
+    deterministic), current version, path, source project, created/updated, verification, versions and projects.
+  - Version = depth in the lineage (v1 = the root project).
+- Develop: `Engine.develop(base_project, goal)` creates a NEW project plus one immutable `develop_from` event that
+  pins the exact verified base artifact (sha256 checked).
+  - The CEO's planning gets `develop_from`: the base excerpt, base plan, Owner feedback, verification lessons,
+    lineage and vault knowledge.
+  - The first build starts from the pinned base version (`previous_artifact`; edit mode works on it).
+  - Everything after that is the normal autonomous lifecycle. The base project and its versions are never changed.
+- GUI [Library] window:
+  - artifacts grouped by type, each with its current version, and its versions as children;
+  - [실행] for Apps, [보기] for the others;
+  - [Develop], which asks only for the goal;
+  - [관련 프로젝트].
+- CLI: `axbranch library`, `axbranch develop <project> "<goal>"`.
+
+### Changed
+- The archive evidence records a project's Develop lineage.
+- `project_title` moved to `library` (the GUI imports it).
+
+### Fixed
+- Nothing.
+
+### Verification
+- 160 tests run: 159 pass; 1 headless-Edge test (test_collapsed_details) errored while two suites ran concurrently and passes when run alone (2/2). Scripted end to end:
+  - develop → plan with develop_from → first build gets the base as previous_artifact → PASS → OWNER_REVIEW;
+  - the library shows one artifact v2 with versions [base, new];
+  - the base project, artifacts and verifications are unchanged.
+- Branches keep their depth, and a changed base file is refused.
+- Live (real DB, no AI call):
+  - `axbranch library` lists 7 artifacts by type;
+  - the develop context for 주식 분석 프로그램 holds lineage, v33 files, 35 base criteria, 9 Owner feedback
+    entries, 10 lessons and its archive note.
+- Independent Codex review: 6 findings fixed.
+
+### Known issues
+- Sibling branches of one artifact share a version number (both v2). The Library shows them as separate version
+  rows, with their source project.
+- No real Develop project has been run yet (no AI calls were spent).
+
 ## [0.1.25] - 2026-10-09
 
 The Owner sees the verified result in one click, whatever its type.

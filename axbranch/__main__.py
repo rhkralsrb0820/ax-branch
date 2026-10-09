@@ -47,6 +47,10 @@ def main(argv=None):
     sub.add_parser('upgrade-proposal')
     ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
     sv = sub.add_parser('supervise'); sv.add_argument('--watch', action='store_true')
+    sub.add_parser('library', help='completed artifacts by type, with their current version and lineage')
+    dv = sub.add_parser('develop', help='Owner: continue a completed artifact with a new goal (new project, new version)')
+    dv.add_argument('id', help='the project of the artifact version to develop'); dv.add_argument('goal')
+    dv.add_argument('--run', action='store_true')
     au = sub.add_parser('autostart', help='Owner: supervision while AX Branch is closed (Windows Task Scheduler)')
     au.add_argument('action', choices=('on', 'off', 'status'))
     rv = sub.add_parser('review'); rv.add_argument('id')
@@ -129,6 +133,19 @@ def _dispatch(a):
         p = engine.decide_network(a.id, a.network == 'yes', a.note)
         print(f"[{p['id']}] external connection(s) {'approved' if a.network == 'yes' else 'declined'}; "
               f"continue with: python -m axbranch resume {p['id']}")
+    elif a.cmd == 'library':
+        from . import library
+        for e in library.entries(store):
+            print(f"[{e['type']}] {e['title']}  v{e['version']}  ({e['verification']})  <- {e['project']}")
+            for v in e['versions']:
+                print(f"    v{v['version']} <- {v['project']}  {v['goal'][:60]}")
+    elif a.cmd == 'develop':
+        from .supervisor import channel
+        pid = engine.develop(a.id, a.goal)
+        store.event(pid, 'owner_action', action='develop', channel=channel())
+        print(pid)
+        if a.run:
+            _show(engine.run(pid))
     elif a.cmd == 'autostart':
         from . import autostart
         if a.action == 'on':

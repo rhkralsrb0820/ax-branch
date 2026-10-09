@@ -10,7 +10,8 @@ import time
 import tkinter as tk
 from tkinter import font as tkfont, messagebox, scrolledtext, ttk
 
-from . import WORKSPACE, __version__, live, supervisor
+from . import WORKSPACE, __version__, library, live, supervisor
+from .library import project_title
 from .engine import open_engine
 from .state import Busy, Store
 
@@ -100,7 +101,8 @@ class App(tk.Tk):
             tabs.add(widget, text=title)
 
         bar = ttk.Frame(self, padding=8); bar.pack(fill='x')
-        for text, cmd in (('리뷰 / 피드백…', self.review_dialog), ('외부 연결 승인', lambda: self.network(True)),
+        for text, cmd in (('Library', self.library_window), ('리뷰 / 피드백…', self.review_dialog),
+                          ('외부 연결 승인', lambda: self.network(True)),
                           ('외부 연결 거절', lambda: self.network(False)),
                           ('계속 실행 / 재개', self.resume), ('중단', self.stop), ('프로젝트 종료…', self.finish),
                           ('폴더 열기', self.open_folder)):
@@ -298,6 +300,112 @@ class App(tk.Tk):
             messagebox.showwarning('AX Branch', str(e))
         finally:
             engine.store.close()
+
+    # ---- Artifact Library: what was made, its current version, and Develop
+    def library_window(self):
+        """Completed artifacts by type. Each shows its current version; its versions (one per project in its
+        lineage) are listed under it. Actions: 보기/실행, Develop (a goal only), 관련 프로젝트."""
+        win = tk.Toplevel(self)
+        win.title('AX Branch — Library')
+        win.geometry('860x520')
+        tree = ttk.Treeview(win, columns=('version', 'status', 'updated'), show='tree headings', selectmode='browse')
+        tree.heading('#0', text='결과물')
+        tree.column('#0', width=420)
+        for col, text, width in (('version', '버전', 80), ('status', '검증', 70), ('updated', '업데이트', 140)):
+            tree.heading(col, text=text)
+            tree.column(col, width=width, stretch=False)
+        rows = {}
+        items = library.entries(self.store)
+        for kind in library.TYPES:
+            group = [e for e in items if e['type'] == kind]
+            if not group:
+                continue
+            parent = tree.insert('', 'end', text=f'{kind} ({len(group)})', open=True)
+            for e in group:
+                node = tree.insert(parent, 'end', text=e['title'], values=(
+                    f"v{e['version']}", e['verification'], time.strftime('%Y-%m-%d %H:%M', time.localtime(e['updated']))))
+                rows[node] = (e, e['project'])
+                for v in reversed(e['versions']):
+                    child = tree.insert(node, 'end', text=f"v{v['version']} ← {v['project']}  {v['goal'][:50]}",
+                                        values=(f"v{v['version']}", '', ''))
+                    rows[child] = (e, v['project'])
+        row = ttk.Frame(win, padding=6)
+        row.pack(fill='x', side='bottom')
+        act = ttk.Button(row, text='보기', command=lambda: self._library_open(rows.get(tree.focus())))
+        act.pack(side='left', padx=3)
+        ttk.Button(row, text='Develop', command=lambda: self._develop_dialog(rows.get(tree.focus()), win)).pack(side='left', padx=3)
+        ttk.Button(row, text='관련 프로젝트', command=lambda: self._library_project(rows.get(tree.focus()), win)).pack(side='left', padx=3)
+        ttk.Label(row, text='결과물을 고르고 보기/실행하거나, Develop으로 새 목표를 이어서 맡기세요.', font=FONT).pack(side='left', padx=12)
+
+        def relabel(_e=None):
+            picked = rows.get(tree.focus())
+            act.config(text='실행' if picked and picked[0]['type'] == 'Apps' else '보기')
+        tree.bind('<<TreeviewSelect>>', relabel)
+        tree.pack(fill='both', expand=True, padx=6, pady=6)
+        win.tree, win.rows = tree, rows
+        self._library = win
+        return win
+
+    def _library_open(self, picked):
+        if not picked:
+            return
+        engine = self.engine_factory()
+        try:
+            engine.open_result(picked[1], show_text=self.show_text)
+        except Exception as e:
+            messagebox.showwarning('AX Branch', str(e))
+        finally:
+            engine.store.close()
+
+    def _library_project(self, picked, win):
+        if picked:
+            self.selected = picked[1]
+            self._rows = None
+            self.refresh_list()
+            self.show()
+            win.destroy()
+
+    def _develop_dialog(self, picked, win):
+        """Develop: the Owner gives only the new goal; 淸月 CEO takes it from there (knowledge, agents, engines,
+        verification). The new project starts from the selected artifact's current version."""
+        if not picked:
+            messagebox.showinfo('AX Branch', 'Develop할 결과물을 고르세요.', parent=win)
+            return
+        entry, base = picked                              # the version row the Owner picked (default: current)
+        version = next((v['version'] for v in entry['versions'] if v['project'] == base), entry['version'])
+        dlg = tk.Toplevel(win)
+        dlg.title(f"Develop — {entry['title']} v{version}")
+        ttk.Label(dlg, text=f"'{entry['title']}' v{version}을 바탕으로 이어서 할 일을 적어 주세요.",
+                  font=FONT, padding=(10, 8)).pack(anchor='w')
+        goal = tk.Text(dlg, height=5, width=70, font=FONT, wrap='word')
+        goal.pack(padx=10, fill='x')
+
+        def start():
+            text = goal.get('1.0', 'end').strip()
+            if not text:
+                return
+            pid = self.develop(base, text)
+            if pid:
+                dlg.destroy()
+                win.destroy()
+        ttk.Button(dlg, text='淸月 CEO에게 맡기기', command=start).pack(anchor='e', padx=10, pady=8)
+        dlg.goal, dlg.start = goal, start
+        self._develop = dlg
+
+    def develop(self, base_pid, goal):
+        engine = self.engine_factory()
+        try:
+            pid = engine.develop(base_pid, goal)
+        except Exception as e:
+            messagebox.showwarning('AX Branch', str(e))
+            return None
+        finally:
+            engine.store.close()
+        self.store.event(pid, 'owner_action', action='develop', channel='app')
+        self.selected = pid
+        self._rows = None
+        self._launch(pid)
+        return pid
 
     def show_text(self, title, text, path):
         """A report inside AX Branch (read-only), with the program run one click away when there is one."""
@@ -564,19 +672,7 @@ def indicator(state, status):
     return 'waiting', '●'                                 # PAUSED, WAITING_FOR_PROVIDER
 
 
-_ASK = re.compile(r'\s*(?:을|를)?\s*(?:만들어\s*(?:줘|봐|주세요|주십시오)|해\s*(?:줘|봐|주세요)|부탁(?:해|합니다)?)[.!?\s]*$')
-
-
 LIST_WIDTH, LIST_PAD, LIST_FONT = 280, 8, ('Malgun Gothic', 11)
-
-
-def project_title(p):
-    """The CEO's title from planning; for older projects a short title derived from the goal (the goal is unchanged)."""
-    title = ((p.get('plan') or {}).get('title') or '').strip()
-    if not title:
-        goal = re.sub(r'^\s*\[[^\]]*\]\s*', '', p['goal'].splitlines()[0] if p['goal'] else '')
-        title = _ASK.sub('', re.split(r'[:.(]', goal, 1)[0]).strip() or goal.strip()
-    return title
 
 
 def fit(text, room, measure):

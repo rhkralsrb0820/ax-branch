@@ -204,6 +204,17 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
 - Old findings have no kind (counted as 미분류).
 - D-SEC-1 is open.
 
+## Artifact Library + Develop (0.1.26, 2026-10-10)
+- Project = record of the work, Artifact = what the Owner uses, Knowledge = vault notes.
+- The Library is an index over the existing tables (no copies).
+- Lineage = an immutable `develop_from` event per developed project; the exact base artifact is pinned and sha256-checked.
+- Develop takes a goal only: the CEO gets the base artifact, plan, lessons, feedback and knowledge, then runs the
+  normal lifecycle. Owner Escape 0 (GUI).
+- Open:
+  - first real Develop run (Owner);
+  - sibling branches share a version number;
+  - Library refresh is on open only.
+
 ## D-AUTO-1 (recorded 2026-10-06 20:57, Owner; implemented 0.1.21 — see above): recovery depends on a live UI or a prompt
 **What works (verified in code):** one engine worker (`python -m axbranch run <id>`, launched detached by the
 supervisor) runs the whole loop by itself: stage → VERIFYING → REWORK/strategy/replan → … → OWNER_REVIEW,
