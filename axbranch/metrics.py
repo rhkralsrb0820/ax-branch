@@ -144,7 +144,10 @@ def provider_record(store):
             if json.loads(d).get('seconds') is not None)
         builds = db.execute(
             "SELECT v.verdict FROM verifications v JOIN artifacts a ON a.id = v.artifact_id "
-            "JOIN agents g ON g.id = a.agent_id WHERE g.provider = ?", (name,)).fetchall()
+            "JOIN agents g ON g.id = a.agent_id WHERE COALESCE("
+            "(SELECT s.provider FROM stage_outputs s WHERE s.project_id = a.project_id "
+            "AND s.iteration = a.iteration ORDER BY s.stage DESC LIMIT 1), g.provider) = ?",
+            (name,)).fetchall()
         empty = db.execute("SELECT COUNT(*) FROM events WHERE kind='build_rejected' AND detail LIKE ?",
                            (f'%"provider": "{name}"%',)).fetchone()[0]
         label = 'Claude Code' if name == 'claude' else 'Codex'

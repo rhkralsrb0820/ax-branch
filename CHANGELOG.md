@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.29] - 2026-10-10
+
+Independent verification is routed by the engine that actually built the artifact (autonomy gap 4, provenance).
+
+### Added
+- `Engine._actual_producer(pid, artifact)`: the provider recorded for the artifact's final production stage
+  (stage_outputs). It falls back to the configured engine only when that record is gone, and says so.
+
+### Changed
+- `_verifying` prefers the engine other than the actual producer. The "verification ran on the producer's engine"
+  decision compares against the actual producer and records `actual_producer` and `producer_source`.
+- `metrics.provider_record` attributes verified/passed builds to the actual producer when recorded.
+
+### Fixed
+- After a quota failover of the final producer (e.g. configured claude, used codex), verification could run on the
+  same engine that built the artifact without the same-engine warning (Test #1 had 31 provider handoffs).
+
+### Verification
+- engine/metrics/supervisor/library tests pass (82). New: failover routing, same-engine detection after failover,
+  artifact-iteration scoping, metrics attribution, legacy fallback.
+- Implemented by Codex; reviewed and integrated by Claude.
+
+### Known issues
+- Projects closed with their working context discarded have no stage records: their builds use the configured
+  engine (marked 'configured fallback').
+
 ## [0.1.28] - 2026-10-10
 
 Attempt memory (autonomy gap 3, minimal): the CEO sees which approach led to which result and does not pay to

@@ -262,16 +262,72 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(self.engine(Script([], [])).checks(path, 'python')['ok'])
 
     def test_verifier_on_producer_engine_is_recorded(self):
-        script = Script([GOOD], ['PASS'])
+        for discarded in (False, True):
+            with self.subTest(discarded=discarded):
+                script = Script([GOOD], ['PASS'])
 
-        def other_engine_limited(prompt, schema, **kw):
-            result, used, notes = script(prompt, schema, **kw)
-            return (result, 'claude', notes) if schema is E.VERDICT else (result, used, notes)
-        eng = self.engine(other_engine_limited)     # producer is claude; verifier forced onto claude too
+                def other_engine_limited(prompt, schema, **kw):
+                    result, used, notes = script(prompt, schema, **kw)
+                    return (result, 'claude', notes) if schema is E.VERDICT else (result, used, notes)
+                eng = self.engine(other_engine_limited)     # producer and verifier both use claude
+                pid = self.store.new_project('make an add tool')
+                self.assertEqual(eng.run(pid, stop_at='VERIFYING')['state'], 'VERIFYING')
+                if discarded:
+                    self.store.discard_context(pid)
+                self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+                decision = next(e['detail'] for e in self.store.events(pid, {'decision'})
+                                if e['detail']['what'] == "verification ran on the producer's engine")
+                self.assertEqual(decision['actual_producer'], 'claude')
+                self.assertEqual(decision['producer_source'], 'configured fallback' if discarded else 'recorded')
+                self.assertEqual([prefer for schema, prefer, _ in script.prompts if schema is E.VERDICT], ['codex'])
+
+    def test_verifier_is_chosen_against_the_actual_producer(self):
+        class FailoverScript(Script):
+            def __call__(self, prompt, schema, **kw):
+                result, used, notes = super().__call__(prompt, schema, **kw)
+                return (result, 'codex', ['claude: quota']) if schema is E.BUILD else (result, used, notes)
+
+        script = FailoverScript([GOOD], ['PASS'])
+        eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
-        eng.run(pid)
-        whats = [e['detail']['what'] for e in self.store.events(pid, {'decision'})]
-        self.assertIn("verification ran on the producer's engine", whats)
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual(p['plan']['pipeline'][-1]['provider'], 'claude')
+        self.assertEqual([prefer for schema, prefer, _ in script.prompts if schema is E.VERDICT], ['claude'])
+        self.assertFalse(any(e['detail']['what'] == "verification ran on the producer's engine"
+                             for e in self.store.events(pid, {'decision'})))
+
+    def test_same_engine_verification_is_detected_after_failover(self):
+        class FailoverScript(Script):
+            def __call__(self, prompt, schema, **kw):
+                result, used, notes = super().__call__(prompt, schema, **kw)
+                if schema is E.BUILD or schema is E.VERDICT:
+                    return result, 'codex', ['claude: quota']
+                return result, used, notes
+
+        script = FailoverScript([GOOD], ['PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        decision = next(e['detail'] for e in self.store.events(pid, {'decision'})
+                        if e['detail']['what'] == "verification ran on the producer's engine")
+        self.assertEqual(decision['actual_producer'], 'codex')
+        self.assertEqual(decision['producer_source'], 'recorded')
+        self.assertEqual([prefer for schema, prefer, _ in script.prompts if schema is E.VERDICT], ['claude'])
+
+    def test_actual_producer_uses_final_stage_of_artifact_iteration(self):
+        eng = self.engine(Script([], []))
+        pid = self.store.new_project('producer provenance')
+        other = self.store.new_project('unrelated project')
+        self.store.update(pid, iteration=2, plan_version=2, plan={'pipeline': [{'provider': 'claude'}]})
+        artifact = {'iteration': 1}
+        self.store.save_output(pid, 1, 1, 1, None, 'codex', {})
+        self.store.save_output(pid, 1, 1, 0, None, 'claude', {})
+        self.store.save_output(pid, 2, 2, 2, None, 'claude', {})
+        self.store.save_output(other, 1, 1, 2, None, 'claude', {})
+        self.assertEqual(eng._actual_producer(pid, artifact), ('codex', False))
+        self.store.discard_context(pid)
+        self.assertEqual(eng._actual_producer(pid, artifact), ('claude', True))
 
     def test_owner_problem_reopens_same_project_reproduces_and_redelivers(self):
         script = Script([GOOD, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'])

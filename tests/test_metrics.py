@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from axbranch import engine as E
-from axbranch.metrics import effort
+from axbranch.metrics import effort, provider_record
 from axbranch.state import Store
 from tests.test_engine import BROKEN, LAUNCHABLE, Script
 
@@ -71,6 +71,30 @@ class MetricsTests(unittest.TestCase):
             'by_action': {'run': 1, 'review': 1}, 'in_app_actions': 1, 'excluded_development': 1,
         })
         self.assertEqual(combined['automatic_recoveries'], 2)
+
+    def test_provider_record_attributes_pass_to_actual_producer(self):
+        pid = self.store.new_project('producer provenance')
+        other = self.store.new_project('unrelated project')
+        agent = self.store.add_agent(pid, 'Developer', 'claude')
+        artifact = self.store.add_artifact(pid, 1, self.tmp / 'build.py', 'sha', 'python', agent)
+        self.store.save_output(pid, 1, 1, 1, agent, 'codex', {})
+        self.store.save_output(pid, 1, 1, 0, agent, 'claude', {})
+        self.store.save_output(pid, 2, 2, 2, agent, 'claude', {})
+        self.store.save_output(other, 1, 1, 2, None, 'claude', {})
+        self.store.add_verification(pid, artifact, 1, 'PASS', {}, {}, 'claude')
+
+        recorded = provider_record(self.store)
+        self.assertEqual(recorded['codex']['final_builds_verified'], 1)
+        self.assertEqual(recorded['codex']['final_builds_passed'], 1)
+        self.assertEqual(recorded['claude']['final_builds_verified'], 0)
+        self.assertEqual(recorded['claude']['final_builds_passed'], 0)
+
+        self.store.discard_context(pid)
+        fallback = provider_record(self.store)
+        self.assertEqual(fallback['claude']['final_builds_verified'], 1)
+        self.assertEqual(fallback['claude']['final_builds_passed'], 1)
+        self.assertEqual(fallback['codex']['final_builds_verified'], 0)
+        self.assertEqual(fallback['codex']['final_builds_passed'], 0)
 
     def test_effort_counts(self):
         script = Script([BROKEN, LAUNCHABLE, '', LAUNCHABLE], ['PASS', 'PASS', 'PASS'])

@@ -649,6 +649,15 @@ class Engine:
             code, output = sandbox.run([python, '-E', '-s', '-X', 'utf8', entry, '--self-test'], cwd, gov.CHECK_TIMEOUT)
         return self._result(ran, code, output)
 
+    def _actual_producer(self, pid, artifact):
+        """Return (provider, is_fallback) for the artifact's final production stage."""
+        row = self.store.db.execute(
+            'SELECT provider FROM stage_outputs WHERE project_id=? AND iteration=? '
+            'ORDER BY stage DESC LIMIT 1', (pid, artifact['iteration'])).fetchone()
+        if row is not None:
+            return row['provider'], False
+        return self.store.project(pid)['plan']['pipeline'][-1]['provider'], True
+
     def _verifying(self, pid):
         p = self.store.project(pid)
         plan = p['plan']
@@ -671,7 +680,7 @@ class Engine:
             checks['output'] = (checks.get('output', '') + '\nRUNTIME ACCEPTANCE FAILED: '
                                 + '; '.join(f"{s['name']}: {', '.join(s['problems'])}"
                                             for s in checks['runtime']['steps'] if not s['ok']))[-3000:]
-        producer = plan['pipeline'][-1]['provider']
+        producer, fallback = self._actual_producer(pid, artifact)
         context = {'owner_goal': p['goal'],
                    'acceptance_criteria': [{'index': i, 'criterion': c} for i, c in enumerate(plan['acceptance_criteria'])],
                    'lenses': plan['verification_lenses'], **self._connections(pid),
@@ -693,6 +702,8 @@ class Engine:
                                  prefer=_other(producer))
         if used == producer:
             self.store.event(pid, 'decision', what="verification ran on the producer's engine",
+                             actual_producer=producer,
+                             producer_source='configured fallback' if fallback else 'recorded',
                              why=f'{_other(producer)} unavailable (usage limit or not installed); the Verification '
                                  f'Agent is still a separate role with its own prompt and no production context, '
                                  f'but engine diversity was lost for round {p["iteration"]}', by='engine')
