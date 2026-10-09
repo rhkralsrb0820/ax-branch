@@ -3,6 +3,38 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.30] - 2026-10-10
+
+Explicit stop outcome (autonomy gap 1, minimal): why the engine stopped is recorded as one code.
+
+### Added
+- `state.stop_outcome(project)`, a deterministic mapping with no lifecycle change. Codes:
+  - VERIFIED (OWNER_REVIEW);
+  - BUDGET_REACHED;
+  - EXHAUSTED (the same failure recurred after a forced change of approach);
+  - OWNER_DECISION_REQUIRED (decisions, approvals, tools);
+  - BLOCKED (harness/infra/quota/rejected/internal error);
+  - OWNER_STOPPED;
+  - CLOSING.
+- A `stop_outcome` event is recorded when an engine session ends, without duplicating an unchanged outcome.
+  HANDOFF shows the outcome.
+
+### Changed
+- Nothing else; pause texts and transitions are unchanged.
+
+### Fixed
+- A budget pause and an exhausted approach were indistinguishable to the Owner and the next session
+  (both "paused, needs the Owner").
+
+### Verification
+- engine/supervisor/library/GUI/live tests pass (99). New: table over all stop texts, no duplicate outcome on a
+  repeated run, VERIFIED in handoff.
+- Implemented by Codex; reviewed by Claude.
+
+### Known issues
+- Classification follows the existing reason wording (an unknown pause defaults to OWNER_DECISION_REQUIRED).
+- SUFFICIENT is not produced: verified sufficiency is PASS against the approved criteria.
+
 ## [0.1.29] - 2026-10-10
 
 Independent verification is routed by the engine that actually built the artifact (autonomy gap 4, provenance).

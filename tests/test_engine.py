@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from axbranch import artifacts, engine as E, governance as gov, knowledge, providers
-from axbranch.state import Rejected, Store
+from axbranch.state import Rejected, Store, stop_outcome
 
 GOOD = "def add(a, b):\n    return a + b\n\nif __name__ == '__main__':\n    assert add(2, 3) == 5\n    print('ok')\n"
 BROKEN = "def add(a, b):\n    return a - b\n\nif __name__ == '__main__':\n    assert add(2, 3) == 5\n"
@@ -76,6 +76,46 @@ class Script:
         raise AssertionError('unexpected schema')
 
 
+class StopOutcomeTests(unittest.TestCase):
+    def test_stop_outcome(self):
+        self.assertIs(E.stop_outcome, stop_outcome)
+        paused = [
+            ('3 builds failed verification. The standard is not lowered; Owner may resume with more rounds.',
+             'BUDGET_REACHED'),
+            ('NEEDS_DECISION: the same failure (product:self-test) recurred after a forced change of approach. '
+             'The Owner decides how to continue.', 'EXHAUSTED'),
+            ('NEEDS_DECISION: automatic recovery did not resolve INFRA_FAILED: timeout', 'OWNER_DECISION_REQUIRED'),
+            ('NEEDS_DECISION: automatic recovery did not resolve 3 builds failed verification',
+             'OWNER_DECISION_REQUIRED'),
+            ('NEEDS_DECISION: choose an approach', 'OWNER_DECISION_REQUIRED'),
+            ('HARNESS_BLOCKED: missing evidence', 'BLOCKED'),
+            ('INFRA_FAILED: browser failed', 'BLOCKED'),
+            ('RateLimited: usage limit', 'BLOCKED'),
+            ('No provider available: both quotas exhausted', 'BLOCKED'),
+            ('Owner approval needed (external_connection): example.com', 'OWNER_DECISION_REQUIRED'),
+            ('Owner action needed (install_tool): blender', 'OWNER_DECISION_REQUIRED'),
+            ('Owner stopped the run', 'OWNER_STOPPED'),
+            ('Rejected: Owner stopped the run', 'OWNER_STOPPED'),
+            ('Rejected: Codex: 오너가 중단했습니다. 프로세스 트리 전체를 종료했습니다.', 'OWNER_STOPPED'),
+            ('Rejected: unusable reply', 'BLOCKED'),
+            ('Internal error ValueError: invalid value', 'BLOCKED'),
+            ('Unrecognized pause reason', 'OWNER_DECISION_REQUIRED'),
+            ('Rejected: ' + 'x' * 220, 'BLOCKED'),
+        ]
+        cases = [('PAUSED', reason, (code, reason[:200])) for reason, code in paused]
+        cases += [('PAUSED', reason, ('OWNER_DECISION_REQUIRED', 'waiting for an Owner decision'))
+                  for reason in (None, '')]
+        cases += [('OWNER_REVIEW', None, ('VERIFIED', 'verified; waiting for the Owner review'))]
+        cases += [(state, None, ('CLOSING', 'Owner closing steps'))
+                  for state in ('PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL', 'ARCHIVING', 'CLOSED')]
+        cases += [(state, reason, None) for state in E.ACTIVE for reason in (None, 'Owner stopped the run')]
+        for state, reason, expected in cases:
+            with self.subTest(state=state, reason=reason):
+                project = {'state': state, 'pause_reason': reason}
+                self.assertEqual(stop_outcome(project), expected)
+                self.assertEqual(project, {'state': state, 'pause_reason': reason})
+
+
 class EngineTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -96,6 +136,9 @@ class EngineTests(unittest.TestCase):
         pid = self.store.new_project('make an add tool')
         p = eng.run(pid)
         self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual([e['detail'] for e in self.store.events(pid, {'stop_outcome'})], [
+            {'code': 'VERIFIED', 'detail': 'verified; waiting for the Owner review', 'iteration': p['iteration']}])
+        self.assertEqual(self.store.handoff(pid)['stop_outcome'][0], 'VERIFIED')
         vs = self.store.verifications(pid)
         # Deterministic self-test overrides the model's PASS on the broken build.
         self.assertEqual([v['verdict'] for v in vs], ['FAIL', 'PASS'])
@@ -187,6 +230,30 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(p['plan']['pipeline'][-1]['provider'], 'codex')            # switched after 2 fails
         self.assertIn('replaced', {a['status'] for a in self.store.agents(pid, active_only=False)})
         self.assertEqual(gov.MAX_ROUNDS, old)
+        outcomes = self.store.events(pid, {'stop_outcome'})
+        self.assertEqual([e['detail'] for e in outcomes], [
+            {'code': 'BUDGET_REACHED', 'detail': p['pause_reason'][:200], 'iteration': p['iteration']}])
+        self.assertEqual(self.store.handoff(pid)['stop_outcome'], ('BUDGET_REACHED', p['pause_reason'][:200]))
+        self.assertEqual(eng.run(pid), p)
+        self.assertEqual(self.store.events(pid, {'stop_outcome'}), outcomes)
+
+    def test_stop_outcome_compares_code_and_detail_with_latest_event(self):
+        eng = self.engine(Script([], []))
+        pid = self.store.new_project('record stop reasons')
+        self.store.pause(pid, 'Owner stopped the run')
+        eng.run(pid)
+        outcomes = self.store.events(pid, {'stop_outcome'})
+        self.store.update(pid, iteration=2)
+        eng.run(pid)
+        self.assertEqual(self.store.events(pid, {'stop_outcome'}), outcomes)
+        for reason in ('Owner stopped again', 'Rejected: unusable reply', 'Owner stopped the run'):
+            self.store.update(pid, pause_reason=reason)
+            eng.run(pid)
+        self.assertEqual([e['detail'] for e in self.store.events(pid, {'stop_outcome'})], [
+            {'code': 'OWNER_STOPPED', 'detail': 'Owner stopped the run', 'iteration': 1},
+            {'code': 'OWNER_STOPPED', 'detail': 'Owner stopped again', 'iteration': 2},
+            {'code': 'BLOCKED', 'detail': 'Rejected: unusable reply', 'iteration': 2},
+            {'code': 'OWNER_STOPPED', 'detail': 'Owner stopped the run', 'iteration': 2}])
 
     def test_discard_needs_confirmation(self):
         eng = self.engine(Script([GOOD], ['PASS']))
@@ -233,6 +300,8 @@ class EngineTests(unittest.TestCase):
         pid = self.store.new_project('make an add tool')
         p = eng.run(pid, stop_at='VERIFYING')
         self.assertEqual(p['state'], 'VERIFYING')                 # left ACTIVE, like an interrupted engine
+        self.assertEqual(self.store.events(pid, {'stop_outcome'}), [])
+        self.assertIsNone(self.store.handoff(pid)['stop_outcome'])
         self.assertEqual(eng.consistency(pid), [])
         handoff = (self.tmp / 'ws' / 'projects' / pid / 'HANDOFF.md').read_text(encoding='utf-8')
         self.assertIn('Verification Agent judges the latest artifact', handoff)

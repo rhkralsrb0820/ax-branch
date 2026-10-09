@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import (GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, knowledge, library, metrics, permissions, providers,
                runtime, sandbox, supervisor)
-from .state import ACTIVE, Rejected, Store, run_lock
+from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
 
 # ---- response schemas (strict: valid for both Claude --json-schema and Codex --output-schema)
 STR, BOOL, INT = {'type': 'string'}, {'type': 'boolean'}, {'type': 'integer'}
@@ -329,6 +329,13 @@ class Engine:
             if self.store.db.in_transaction:
                 self.store.db.execute('ROLLBACK')
             self.store.pause(pid, f'Internal error {type(e).__name__}: {e} (traceback: {log})')
+        p = self.store.project(pid)
+        outcome = stop_outcome(p)
+        if outcome is not None:
+            events = self.store.events(pid, {'stop_outcome'})
+            last = events[-1]['detail'] if events else {}
+            if outcome != (last.get('code'), last.get('detail')):
+                self.store.event(pid, 'stop_outcome', code=outcome[0], detail=outcome[1], iteration=p['iteration'])
         self.write_handoff(pid)
         return self.store.project(pid)
 

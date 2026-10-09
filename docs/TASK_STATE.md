@@ -226,7 +226,8 @@ Plan (sequential, all touch engine.py; Codex implements, Claude integrates, loca
   70 engine/supervisor/library tests pass.
 - T2 DONE in 0.1.28: attempt ledger in strategy reviews + identical-build guard (Codex implemented; Claude limited it to product FAILs).
 - T3 DONE in 0.1.29: verifier routed by the actual (recorded) producer; metrics attribute builds to it (Codex implemented).
-- T4–T5 (resumed 2026-10-10): Next: T2 attempt memory + exact-repeat guard. Give Codex a bounded spec using
+- T4 DONE in 0.1.30: explicit stop outcome (VERIFIED/BUDGET_REACHED/EXHAUSTED/OWNER_DECISION_REQUIRED/BLOCKED/OWNER_STOPPED/CLOSING) recorded and in HANDOFF (Codex implemented).
+- T5 (resumed 2026-10-10): Next: T2 attempt memory + exact-repeat guard. Give Codex a bounded spec using
   `docs/AUTONOMY_AUDIT.md` §3, editing engine.py + tests only; then run tests locally (Python is blocked in Codex's sandbox).
 - Nothing is BLOCKED_OWNER_APPROVAL.
 

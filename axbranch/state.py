@@ -81,6 +81,32 @@ SCHEMA_VERSION = 4   # 1 = 0.1.0-0.1.4 (no marker), 2 = artifacts.manifest (0.1.
                      # 4 = approvals (0.1.9)
 
 
+def stop_outcome(project):
+    """Why the engine stopped, without changing the project's lifecycle."""
+    state = project['state']
+    if state in ACTIVE:
+        return None
+    reason = project.get('pause_reason') or ''
+    if state == 'OWNER_REVIEW':
+        return 'VERIFIED', reason[:200] or 'verified; waiting for the Owner review'
+    if state in ('PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL', 'ARCHIVING', 'CLOSED'):
+        return 'CLOSING', reason[:200] or 'Owner closing steps'
+    if 'Owner stopped' in reason or '오너가 중단' in reason:
+        code = 'OWNER_STOPPED'
+    elif reason.startswith('NEEDS_DECISION: the same failure'):
+        code = 'EXHAUSTED'
+    elif reason.startswith(('NEEDS_DECISION:', 'Owner approval needed', 'Owner action needed')):
+        code = 'OWNER_DECISION_REQUIRED'
+    elif reason.startswith(('HARNESS_BLOCKED:', 'INFRA_FAILED:', 'RateLimited:',
+                            'No provider available', 'Rejected:', 'Internal error')):
+        code = 'BLOCKED'
+    elif 'builds failed verification' in reason:
+        code = 'BUDGET_REACHED'
+    else:
+        code = 'OWNER_DECISION_REQUIRED'
+    return code, reason[:200] or 'waiting for an Owner decision'
+
+
 class Rejected(Exception):
     pass
 
@@ -356,6 +382,7 @@ class Store:
             'generated_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'project_id': pid, 'goal': p['goal'], 'state': p['state'],
             'resume_state': p['resume_state'], 'pause_reason': p['pause_reason'],
+            'stop_outcome': stop_outcome(p),
             'next_action': NEXT[p['resume_state'] if p['state'] == 'PAUSED' else p['state']],
             'iteration': p['iteration'], 'plan_version': p['plan_version'], 'round_budget': p['budget'],
             'interpretation': plan.get('interpretation'),
