@@ -879,6 +879,7 @@ class Engine:
             raise Rejected('An Owner ruling needs text.')
         self.store.event(pid, 'owner_ruling', criterion=criterion, ruling=ruling.strip(), channel=supervisor.channel(),
                          criterion_text=p['plan']['acceptance_criteria'][criterion])
+        self.store.event(pid, 'owner_action', action='ruling', channel=supervisor.channel())
         return self.store.project(pid)
 
     def beat(self, pid, detail):
@@ -1089,6 +1090,59 @@ class Engine:
             self.store.set_state(pid, 'OWNER_REVIEW', reason='verified artifact delivered; Owner to test it')
 
     # ---- Owner lifecycle
+    def note_satisfaction(self, pid, reason):
+        """The Owner's reason for the satisfaction score, kept with the project and its archive."""
+        self.store.project(pid)
+        if reason and reason.strip():
+            self.store.event(pid, 'satisfaction_note', text=reason.strip())
+
+    def _archive_inputs(self, pid):
+        evidence = [', '.join(f'{k}: {v}' for k, v in e['detail'].items())
+                    for e in self.store.events(pid, {'audit', 'provider_handoff', 'context_used', 'reproduction'})]
+        evidence += [f"Owner feedback round {f['iteration']} ({f['verdict']}): {f['text']}" for f in self.store.feedback(pid)]
+        notes = self.store.events(pid, {'satisfaction_note'})
+        closed = [e['at'] for e in self.store.events(pid, {'state'}) if e['detail'].get('to') == 'CLOSED']
+        effort = metrics.project_effort(self.store, pid)
+        return dict(project=self.store.project(pid), verifications=self.store.verifications(pid),
+                    decisions=[e['detail'] for e in self.store.events(pid, {'decision'})], evidence=evidence,
+                    artifacts=self.store.artifacts(pid), feedback=self.store.feedback(pid), effort=effort,
+                    satisfaction_note=notes[-1]['detail']['text'] if notes else '',
+                    approvals=self.store.approvals(pid),
+                    rulings=[e['detail'] for e in self.store.events(pid, {'owner_ruling'})],
+                    closed_at=closed[-1] if closed else None)
+
+    def rearchive(self, pid):
+        """Rewrite a saved project's note in the current readable structure, from the same SQLite records
+        (no content change; the previous note is kept in the project folder). The note keeps the name the
+        Owner gave it in the vault."""
+        p = self.store.project(pid)
+        if p['closed_mode'] != 'save':
+            raise Rejected(f'{pid} was not saved & closed.')
+        marker = f'project: `{pid}`'
+        current = Path(p['archive_note'] or '')
+        if not (current.is_file() and marker in current.read_text(encoding='utf-8', errors='replace')):
+            hits = [n for n in Path(self.vault).rglob('*.md') if marker in n.read_text(encoding='utf-8', errors='replace')]
+            if len(hits) != 1:
+                raise Rejected(f'Archive note of {pid} not found uniquely in the vault ({len(hits)} matches).')
+            current = hits[0]
+        with self.lock(pid):
+            before = current.read_bytes()
+            backup = self.workspace / 'projects' / pid / f"archive-before-{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 10**9}.md"
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            with backup.open('xb') as f:          # never overwrites an earlier backup
+                f.write(before)
+            inputs = self._archive_inputs(pid)
+            note, sha = knowledge.archive(self.vault, **inputs, path=current)
+            self._record_restructure(pid, note, sha, backup, before, inputs)
+        return note, sha
+
+    def _record_restructure(self, pid, note, sha, backup, before, inputs):
+        with self.store.tx():
+            self.store.event(pid, 'archive_restructured', note=str(note), sha256=sha, backup=str(backup),
+                             previous_sha256=hashlib.sha256(before).hexdigest())
+            self.store.event(pid, 'owner_effort', **inputs['effort'])
+            self.store.update(pid, archive_note=str(note))
+
     def close(self, pid, choice=None, confirm=False, satisfaction=None):
         """Owner says the project is finished. Without a choice, the CEO only asks.
         choice: 'save' (SAVE & CLOSE), 'pause' (PAUSE), 'discard' (CLOSE WITHOUT SAVE)."""
@@ -1119,16 +1173,14 @@ class Engine:
                 self.store.discard_context(pid)
                 self.store.update(pid, closed_mode='discard')
                 self.store.set_state(pid, 'CLOSED', reason='Owner: close without save')
+                self.store.event(pid, 'owner_effort', **metrics.project_effort(self.store, pid))
         elif choice == 'save':
             self.store.set_state(pid, 'ARCHIVING')
-            evidence = [', '.join(f'{k}: {v}' for k, v in e['detail'].items())
-                        for e in self.store.events(pid, {'audit', 'provider_handoff', 'context_used', 'reproduction'})]
-            evidence += [f"Owner feedback round {f['iteration']} ({f['verdict']}): {f['text']}" for f in self.store.feedback(pid)]
-            note, sha = knowledge.archive(self.vault, self.store.project(pid), self.store.verifications(pid),
-                                          [e['detail'] for e in self.store.events(pid, {'decision'})],
-                                          evidence, self.store.artifacts(pid))
+            inputs = self._archive_inputs(pid)
+            note, sha = knowledge.archive(self.vault, **inputs)
             with self.store.tx():
                 self.store.event(pid, 'archived', note=str(note), sha256=sha)
+                self.store.event(pid, 'owner_effort', **inputs['effort'])
                 self.store.end_agents(pid, 'terminated')
                 self.store.discard_context(pid)
                 self.store.update(pid, closed_mode='save', archive_note=str(note))

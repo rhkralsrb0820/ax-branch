@@ -158,13 +158,53 @@ P-bbad3c is PAUSED (Owner stop, resume_state EXECUTING); the Stock Analyzer was 
 
 #### Existing product work
 
-0. Owner: test the improved stock analyzer (P-20261003-bbad3c) and answer the two review questions.
+0. Done: Test #1 (P-20261003-bbad3c) SAVE & CLOSE, 2026-10-09, satisfaction 60/100.
 1. Reduce operator dependence: automatic recovery re-plan when a plan is proven misdirected (needs evidence of a reliable trigger).
 2. Record Owner review time (UNKNOWN today) to measure Owner Effort in minutes.
 3. Owner decisions: close finished projects; stronger isolation needs a dedicated Windows account (Owner action).
 4. Later: AI Intelligence digest ("what matters today"), AX Works seams once it has data.
 
-## Open defect D-AUTO-1 (recorded 2026-10-06 20:57, Owner): recovery depends on a live UI or a prompt
+## 0.2 preparation (0.1.21, 2026-10-09) — done; Test #2 not started
+
+**1. Knowledge.**
+- Archive notes are Korean-first and readable:
+  요약 / 최종 결과 / 문제 → 원인 → 해결 / Verification Lessons / Owner Feedback / 남은 과제 / 재사용 지식 / Owner Effort.
+- The complete original record is kept under Evidence.
+- Test #1 note restructured in place under the Owner's file name. The pre-restructure note is backed up in
+  `workspace/projects/P-20261003-bbad3c/`. No original content was lost; only the header line gained the restructure date.
+- Satisfaction 60/100, reason (Owner): UI readability, information hierarchy, report design, Obsidian document readability.
+
+**2. Retrieval.**
+- The existing keyword retrieval in planning now returns the 재사용 지식 + 요약 of matching notes, with note,
+  project and evidence location.
+- Live check: two related goals (Korean and English) → P-20261003-bbad3c; an unrelated goal → nothing.
+- No vector search (not needed at this vault size).
+
+**3. Owner Effort.**
+- `owner_effort` event at every close and restructure.
+- Test #1: interventions 15, manual recovery 9, Owner Escape 10. All three count only from 2026-10-06 06:18;
+  earlier values are UNKNOWN.
+- Test #1: feedback rounds 9, rework rounds 39, verification rounds 35, automatic recoveries 12,
+  elapsed 139.5 h, agent-active 374 min, satisfaction 60.
+- Owner review minutes: UNKNOWN.
+
+**4. D-AUTO-1** (implemented 0.1.21).
+- Task "AX Branch Supervisor" is registered for the Owner's account: at logon + every 5 min, IgnoreNew.
+- It runs the existing deterministic `axbranch supervise` pass (D-ORCH rules, supervise.lock, no AI).
+- One Windows notification per waiting episode (OWNER_REVIEW / Owner decision).
+- Every pass appends a line to `workspace/logs/supervisor.log`.
+- Live: a real scheduled task in a throwaway workspace recovered a dead STAFFING worker (one resume, one worker,
+  window closed) and then notified once. The real task: LastResult 0, pass logged.
+
+**Remaining:**
+- The task runs the source checkout; AXBranch.exe is 0.1.12.
+- No supervision while the user is logged off (per-user task).
+- The notification's real on-screen appearance is not Owner-confirmed.
+- Owner review minutes are not recorded.
+- Old findings have no kind (counted as 미분류).
+- D-SEC-1 is open.
+
+## D-AUTO-1 (recorded 2026-10-06 20:57, Owner; implemented 0.1.21 — see above): recovery depends on a live UI or a prompt
 **What works (verified in code):** one engine worker (`python -m axbranch run <id>`, launched detached by the
 supervisor) runs the whole loop by itself: stage → VERIFYING → REWORK/strategy/replan → … → OWNER_REVIEW,
 stopping only at a governed pause (approval, failure budget, NEEDS_DECISION). No prompt is needed for that.

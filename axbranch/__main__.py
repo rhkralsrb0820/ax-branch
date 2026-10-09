@@ -47,6 +47,8 @@ def main(argv=None):
     sub.add_parser('upgrade-proposal')
     ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
     sv = sub.add_parser('supervise'); sv.add_argument('--watch', action='store_true')
+    au = sub.add_parser('autostart', help='Owner: supervision while AX Branch is closed (Windows Task Scheduler)')
+    au.add_argument('action', choices=('on', 'off', 'status'))
     rv = sub.add_parser('review'); rv.add_argument('id')
     gv = rv.add_mutually_exclusive_group()
     gv.add_argument('--works', action='store_true', help='it runs correctly')
@@ -86,7 +88,9 @@ def _dispatch(a):
     engine = open_engine(log=lambda m: print('  ·', m, flush=True))
     store = engine.store
     if a.cmd == 'new':
+        from .supervisor import channel
         pid = store.new_project(a.goal)
+        store.event(pid, 'owner_action', action='new', channel=channel())
         print(pid)
         if a.run:
             _show(engine.run(pid))
@@ -125,15 +129,27 @@ def _dispatch(a):
         p = engine.decide_network(a.id, a.network == 'yes', a.note)
         print(f"[{p['id']}] external connection(s) {'approved' if a.network == 'yes' else 'declined'}; "
               f"continue with: python -m axbranch resume {p['id']}")
+    elif a.cmd == 'autostart':
+        from . import autostart
+        if a.action == 'on':
+            autostart.register()
+        elif a.action == 'off':
+            print(autostart.unregister())
+        if a.action in ('on', 'status'):
+            print(autostart.status())
     elif a.cmd == 'supervise':
-        from . import supervisor
+        from . import autostart, supervisor
         while True:
+            done = []
             for pid in supervisor.candidates(store):
                 rec = supervisor.status(engine.workspace, store, pid)
                 action = supervisor.supervise(engine, pid,
                                               launch=lambda p: supervisor.launch_detached(engine.workspace, p),
                                               stop=lambda p, w: supervisor.stop_worker(w, pid=p))
                 print(f"{pid} [{rec['status']}] {rec['reason'][:120]}" + (f' -> {action}' if action else ''))
+                done.append(f"{pid}:{rec['status']}" + (f'->{action}' if action else ''))
+            sent = autostart.notify_waiting(engine)
+            autostart.log_pass(engine.workspace, f"supervised [{', '.join(done)}] notified {sent}")
             if not a.watch or not any(supervisor.status(engine.workspace, store, p)['status'] in
                                       ('ACTIVE', 'RECOVERING', 'STALLED', 'FAILED', 'WAITING_FOR_PROVIDER')
                                       for p in supervisor.candidates(store)):

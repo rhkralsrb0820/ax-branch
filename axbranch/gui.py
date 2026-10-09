@@ -311,6 +311,9 @@ class App(tk.Tk):
         row = ttk.Frame(win, padding=6); row.pack()
         ttk.Label(row, text='만족도(%)').pack(side='left')
         ttk.Spinbox(row, from_=0, to=100, textvariable=sat, width=5).pack(side='left')
+        ttk.Label(row, text='  이유(선택)').pack(side='left')
+        why = tk.StringVar()
+        ttk.Entry(row, textvariable=why, width=48).pack(side='left')
 
         def choose(choice):
             confirm = False
@@ -320,7 +323,10 @@ class App(tk.Tk):
                 if not confirm:
                     return
             try:
+                if choice != 'discard':
+                    engine.note_satisfaction(p['id'], why.get())
                 engine.close(p['id'], choice, confirm, sat.get())
+                engine.store.event(p['id'], 'owner_action', action=f'close_{choice}', channel='app')
             except Exception as e:
                 messagebox.showerror('AX Branch', str(e), parent=win)
             win.destroy(); engine.store.close(); gc.collect()   # Tk cycles freed on the Tk thread

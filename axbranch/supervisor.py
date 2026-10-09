@@ -322,9 +322,12 @@ def launch_detached(workspace, pid):
     frozen = getattr(sys, 'frozen', False)                 # AXBranch.exe dispatches `run` to the CLI
     cmd = [sys.executable, 'run', pid] if frozen else [sys.executable, '-X', 'utf8', '-m', 'axbranch', 'run', pid]
     with (folder / 'supervised-run.log').open('ab') as log:
-        subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL, creationflags=flags,
-                         env={**os.environ, 'AXB_SUPERVISED': '1'},
-                         cwd=None if frozen else str(Path(__file__).resolve().parents[1]))
+        kwargs = dict(stdout=log, stderr=log, stdin=subprocess.DEVNULL, env={**os.environ, 'AXB_SUPERVISED': '1'},
+                      cwd=None if frozen else str(Path(__file__).resolve().parents[1]))
+        try:     # leave the launcher's job (a scheduled pass ends right after this) when the job allows it
+            subprocess.Popen(cmd, creationflags=flags | (0x01000000 if os.name == 'nt' else 0), **kwargs)
+        except OSError:
+            subprocess.Popen(cmd, creationflags=flags, **kwargs)
 
 
 def channel():

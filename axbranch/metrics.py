@@ -94,6 +94,45 @@ def effort(store, pid=None):
     }
 
 
+RECOVERY_ACTIONS = ('resume', 'resume_point', 'replan', 'run', 'stop')
+
+
+def project_effort(store, pid):
+    """Owner Effort for one project, stored with its archive. Every value is counted from recorded events;
+    what the records cannot show is UNKNOWN, never estimated.
+    owner_interventions  Owner actions (app, CLI, developer CLI; AX Branch development excluded)
+    rework_rounds        transitions into REWORK
+    verification_rounds  verification records
+    manual_recovery      resume/replan/run/stop done outside the app (a person recovering the run)
+    owner_escape         Owner actions that needed a CLI / developer session instead of the app
+    elapsed              creation -> close (wall clock); agent_active = sum of agent call durations"""
+    import time
+    p = store.project(pid)
+    events = store.events(pid)
+    first = store.db.execute("SELECT MIN(at) FROM events WHERE kind='owner_action'").fetchone()[0]
+    partial = first is None or p['created'] < first
+    since = time.strftime('%Y-%m-%d %H:%M', time.localtime(first)) if first else None
+    owner = [e['detail'] for e in events if e['kind'] == 'owner_action' and e['detail'].get('channel') != 'dev']
+    manual = [a for a in owner if a.get('action') in RECOVERY_ACTIONS and a.get('channel') != 'app']
+    escape = [a for a in owner if a.get('channel') in ('cli', 'developer_cli')]
+    closed = [e['at'] for e in events if e['kind'] == 'state' and e['detail'].get('to') == 'CLOSED']
+    end = closed[-1] if closed else time.time()
+    counted = lambda n: n if not partial else (f'{n} (기록: {since} 이후; 그 이전 UNKNOWN)' if since else 'UNKNOWN')
+    return {
+        'owner_interventions': counted(len(owner)),
+        'owner_feedback_rounds': len(store.feedback(pid)),
+        'rework_rounds': sum(e['kind'] == 'state' and e['detail'].get('to') == 'REWORK' for e in events),
+        'verification_rounds': len(store.verifications(pid)),
+        'manual_recovery': counted(len(manual)),
+        'owner_escape': counted(len(escape)),
+        'automatic_recoveries': sum(e['kind'] == 'recovery' for e in events),
+        'elapsed_hours': round((end - p['created']) / 3600, 1),
+        'agent_active_minutes': round(sum(e['detail'].get('seconds') or 0 for e in events if e['kind'] == 'call') / 60),
+        'satisfaction': p['satisfaction'] if p['satisfaction'] is not None else 'UNKNOWN',
+        'owner_review_minutes': 'UNKNOWN',
+    }
+
+
 def provider_record(store):
     """Measured history per execution engine on this PC, for the CEO's engine choices (experience ->
     better routing, without training). Final builds are judged by their verification outcome."""

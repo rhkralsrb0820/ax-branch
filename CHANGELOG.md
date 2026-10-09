@@ -3,6 +3,48 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.21] - 2026-10-09
+
+0.2 preparation: reuse past experience, measure Owner Effort, supervise while AX Branch is closed (D-AUTO-1).
+
+### Added
+- Readable Korean-first archive notes: 요약 / 최종 결과 / 문제 → 원인 → 해결 / Verification Lessons / Owner Feedback /
+  남은 과제 / 재사용 지식 (each line names its source) / Owner Effort. The complete original record follows,
+  unchanged, under Evidence, plus full Owner rulings and approvals.
+  `Engine.rearchive(pid)` restructures a saved note in place: it keeps the Owner's file name, backs the old
+  note up in the project folder and takes the closure date from the record.
+- Satisfaction reason: an optional field in the finish dialog and `Engine.note_satisfaction`; written into the archive.
+- `metrics.project_effort`: Owner interventions, feedback rounds, rework rounds, verification rounds, manual
+  recovery, Owner Escape, automatic recoveries, elapsed hours, agent-active minutes, satisfaction. Counts
+  predating the owner_action records are marked UNKNOWN. Stored as an `owner_effort` event at every close
+  and restructure.
+- D-AUTO-1: `axbranch autostart on|off|status` registers a per-user Windows Task Scheduler task (at logon + every
+  5 minutes, one instance, no elevation) that runs the existing deterministic `axbranch supervise` pass: same
+  recovery rules, supervise.lock, no AI. The pass sends one Windows notification per waiting episode when a
+  project reaches OWNER_REVIEW or needs an Owner decision (closing steps excluded; a failed toast is retried)
+  and appends `workspace/logs/supervisor.log`.
+
+### Changed
+- `knowledge.retrieve` (already in the CEO's planning context): a structured note is matched and excerpted by
+  its title, 재사용 지식 and 요약, and returns note, project and evidence location. Korean request stopwords are
+  dropped, and one trailing particle is stripped from Korean words.
+- Detached workers leave the launcher's job object when allowed (a scheduled pass ends right after launching).
+- `new`, `ruling` and the finish-dialog choices are recorded as Owner actions.
+
+### Fixed
+- Planning context received the first 1500 characters of a 200 KB archive (title and goal), not its lessons.
+
+### Verification
+- 152 tests pass. Live: Test #1 archive restructured with 0 original lines lost. Retrieval returns Test #1's
+  reusable knowledge for related goals and nothing for an unrelated one. A real scheduled task in a throwaway
+  workspace recovered a dead STAFFING worker with one resume and one worker, with no window open, then
+  notified once. The real task is registered: LastResult 0, pass logged. Independent Codex review: 8 findings fixed.
+
+### Known issues
+- The scheduled task runs the source checkout (development mode); AXBranch.exe is still 0.1.12.
+- A Task Scheduler task is per user and logon-bound: no supervision while the user is logged off.
+- Retrieval is keyword-based; vector search was not added (not needed for the current vault).
+
 ## [0.1.20] - 2026-10-09
 
 A project paused for provider quota resumes by itself after the stated reset time.
