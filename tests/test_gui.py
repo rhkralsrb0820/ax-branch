@@ -139,6 +139,24 @@ class GuiTests(unittest.TestCase):
         run.assert_called_once_with(pid)
         self.assertIn('[결과 실행]', self.app.owner_note.cget('text'))
 
+    def test_project_list_shows_short_title_and_status_dot_not_internal_state(self):
+        from axbranch.gui import indicator, project_title
+        pid = self.app.store.new_project('주식 분석 프로그램 만들어봐')
+        self.app.refresh_list()
+        line = self.app.list.get('1.0', '1.end')
+        self.assertEqual(line, '주식 분석 프로그램\t●')                     # no goal text, no 'CREATED'
+        self.assertIn('waiting', self.app.list.tag_names('1.end-1c'))      # created, not started: blue
+        self.assertEqual(self.app.store.project(pid)['goal'], '주식 분석 프로그램 만들어봐')   # goal unchanged
+        self.assertEqual(project_title({'goal': 'x', 'plan': {'title': '리만 가설 연구'}}), '리만 가설 연구')
+        cases = {('EXECUTING', 'ACTIVE'): 'working', ('OWNER_REVIEW', 'WAITING_FOR_OWNER'): 'owner',
+                 ('PAUSED', 'WAITING_FOR_PROVIDER'): 'waiting', ('EXECUTING', 'STALLED'): 'error',
+                 ('PAUSED', 'FAILED'): 'error', ('CLOSED', 'COMPLETED'): 'done'}
+        for (state, status), tag in cases.items():
+            self.assertEqual(indicator(state, status)[0], tag, (state, status))
+        self.app.selected = None
+        self.app.select(type('E', (), {'x': 1, 'y': 1})())                # a click on the first line
+        self.assertEqual(self.app.selected, pid)
+
     def test_busy_project_is_reported_not_run(self):
         pid = self.app.store.new_project('make an add tool')
         self.app.selected = pid

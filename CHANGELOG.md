@@ -3,6 +3,31 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.22] - 2026-10-09
+
+Readable project list.
+
+### Added
+- The CEO's existing planning call also returns a short `title` (stored in the plan, no extra AI call). Older
+  projects show a title derived from the goal; the goal itself is never changed.
+- A status dot after each title, mapped from the internal state / supervisor status (DB state unchanged):
+  green = 작업 중, orange = Owner 확인/승인 필요, blue = 대기/일시정지 (also not started yet), red = 오류/복구 필요,
+  gray ✓ = 완료.
+
+### Changed
+- The left list shows only `title  ●`, not the internal state and the whole goal. The exact internal state stays in
+  the project view on the right. No animation.
+
+### Fixed
+- The project list was hard to read (internal state prefix, the full goal as the name).
+
+### Verification
+- GUI, engine and release tests pass (new: the list shows title + dot, not the goal or the internal state;
+  status mapping; click selection; goal unchanged).
+
+### Known issues
+- The list is a read-only text view: no keyboard navigation (mouse selection only).
+
 ## [0.1.21] - 2026-10-09
 
 0.2 preparation: reuse past experience, measure Owner Effort, supervise while AX Branch is closed (D-AUTO-1).

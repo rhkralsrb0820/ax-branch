@@ -37,7 +37,7 @@ def ENUM(*values):
 
 
 STAGE = S(name=STR, agent_role=STR, why=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
-PLAN = S(interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
+PLAN = S(title=STR, interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
          runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE))
 DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=STR,
@@ -92,6 +92,8 @@ You decide what it means, what knowledge it needs, which temporary specialist ag
 and the pipeline they run. You do not do specialist work yourself.
 {gov.SUMMARY}
 Rules:
+- title: a short project name for the Owner's project list (at most 20 characters, the Owner's language,
+  no request verbs), e.g. '주식 분석 프로그램' for '주식 분석 프로그램 만들어봐'.
 - The deliverable is produced by the LAST pipeline stage: ONE file (artifact_kind markdown or python),
   or, only when the goal truly needs several files, a bundle (artifact_kind bundle; artifact_filename
   is then the relative path of the python entry file that runs the bundle's self-test). Earlier stages produce notes
@@ -367,6 +369,8 @@ class Engine:
         self.store.set_state(pid, 'STAFFING')
 
     def _sanitize(self, plan):
+        if plan.get('title'):
+            plan['title'] = re.sub(r'\s+', ' ', plan['title']).strip()[:30]
         if not plan['pipeline']:
             raise Rejected('CEO returned an empty pipeline.')
         plan['pipeline'] = plan['pipeline'][:gov.MAX_STAGES]

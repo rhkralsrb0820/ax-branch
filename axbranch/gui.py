@@ -3,6 +3,7 @@ connection; this window only reads the database on a timer, so it never blocks
 and always shows the persisted truth."""
 import gc
 import os
+import re
 import threading
 import time
 import tkinter as tk
@@ -39,9 +40,15 @@ class App(tk.Tk):
         ttk.Button(top, text='淸月 CEO에게 맡기기', command=self.start).pack(anchor='e', pady=4)
 
         body = ttk.PanedWindow(self, orient='horizontal'); body.pack(fill='both', expand=True, padx=8)
-        self.list = tk.Listbox(body, font=FONT, width=48, activestyle='none')
-        self.list.bind('<<ListboxSelect>>', self.select)
+        # Project list: short title + one colored status dot (a Listbox can only color whole rows).
+        self.list = tk.Text(body, font=('Malgun Gothic', 11), width=30, wrap='none', cursor='arrow',
+                            spacing1=4, spacing3=4, tabs=(250,), padx=6, state='disabled')
+        for tag, color in INDICATOR_COLORS.items():
+            self.list.tag_configure(tag, foreground=color)
+        self.list.tag_configure('selected', background='#d6e8ff')
+        self.list.bind('<Button-1>', self.select)
         body.add(self.list, weight=1)
+        self.ids, self._rows = [], None
         right = ttk.PanedWindow(body, orient='vertical')
         body.add(right, weight=3)
         self.right = right
@@ -339,27 +346,40 @@ class App(tk.Tk):
             os.startfile(target)
 
     # ---- display
-    def select(self, _event=None):
-        sel = self.list.curselection()
-        if sel:
-            self.selected = self.ids[sel[0]]
+    def select(self, event=None):
+        line = int(self.list.index(f'@{event.x},{event.y}').split('.')[0]) - 1 if event else -1
+        if 0 <= line < len(self.ids):
+            self.selected = self.ids[line]
+            self._rows = None                             # redraw the highlight
+            self.refresh_list()
             self.show()
+        return 'break'
 
-    def refresh(self):
+    def refresh_list(self):
+        """Titles with a status dot. The exact internal state stays in the project view on the right."""
         projects = self.store.projects()
-        self.ids = [p['id'] for p in projects]
         watch = supervisor.candidates(self.store)
-        labels = {pid: supervisor.status(self.workspace, self.store, pid)['status'] for pid in watch}
+        labels = {p['id']: supervisor.status(self.workspace, self.store, p['id'])['status'] for p in projects}
         if self.selected is None and watch:                  # open on the work in progress
             self.selected = next((pid for pid in watch if labels[pid] == 'ACTIVE'), watch[0])
-        rows = [f"{'▶ ' if labels.get(p['id']) == 'ACTIVE' else '  '}{p['state']:<12} "
-                + (f"[{labels[p['id']]}] " if p['id'] in labels else '') + p['goal'][:40] for p in projects]
-        if rows != list(self.list.get(0, 'end')):
-            self.list.delete(0, 'end')
-            for i, row in enumerate(rows):
-                self.list.insert('end', row)
-                if self.ids[i] == self.selected:
-                    self.list.selection_set(i)
+        rows = [(p['id'], project_title(self.store.project(p['id'])), indicator(p['state'], labels[p['id']]))
+                for p in projects]
+        if rows == self._rows:
+            return
+        self._rows, self.ids = rows, [r[0] for r in rows]
+        self.list.config(state='normal')
+        self.list.delete('1.0', 'end')
+        for pid, title, (tag, mark) in rows:
+            start = self.list.index('end-1c')
+            self.list.insert('end', f'{title}\t')
+            self.list.insert('end', mark, tag)
+            self.list.insert('end', '\n')
+            if pid == self.selected:
+                self.list.tag_add('selected', start, f'{start} lineend+1c')
+        self.list.config(state='disabled')
+
+    def refresh(self):
+        self.refresh_list()
         self.show()
         self.status.config(text=self._notice[0] or f'실행 중 {len(self.running)}건')
         if time.monotonic() - self._last_supervision > 30:
@@ -452,6 +472,35 @@ class App(tk.Tk):
         for cancel in self.running.values():
             cancel.set()
         self.destroy()
+
+
+# User-facing status, mapped from the internal state / supervisor status (the DB state is never changed).
+INDICATOR_COLORS = {'working': '#2e9e44', 'owner': '#e8870e', 'waiting': '#2f74d0', 'error': '#d0342c', 'done': '#8a8a8a'}
+
+
+def indicator(state, status):
+    """(color tag, mark): 작업 중 green · Owner 확인/승인 필요 orange · 대기/일시정지 blue · 오류/복구 필요 red · 완료 gray ✓."""
+    if state == 'CLOSED' or status == 'COMPLETED':
+        return 'done', '✓'
+    if status == 'WAITING_FOR_OWNER':
+        return 'owner', '●'
+    if status in ('STALLED', 'FAILED'):
+        return ('waiting', '●') if state == 'CREATED' else ('error', '●')    # not started yet is not an error
+    if status in ('ACTIVE', 'RECOVERING'):
+        return 'working', '●'
+    return 'waiting', '●'                                 # PAUSED, WAITING_FOR_PROVIDER
+
+
+_ASK = re.compile(r'\s*(?:을|를)?\s*(?:만들어\s*(?:줘|봐|주세요|주십시오)|해\s*(?:줘|봐|주세요)|부탁(?:해|합니다)?)[.!?\s]*$')
+
+
+def project_title(p):
+    """The CEO's title from planning; for older projects a short title derived from the goal (the goal is unchanged)."""
+    title = ((p.get('plan') or {}).get('title') or '').strip()
+    if not title:
+        goal = re.sub(r'^\s*\[[^\]]*\]\s*', '', p['goal'].splitlines()[0] if p['goal'] else '')
+        title = _ASK.sub('', re.split(r'[:.(]', goal, 1)[0]).strip() or goal.strip()
+    return title if len(title) <= 22 else title[:21].rstrip() + '…'
 
 
 def _put(widget, text):
