@@ -76,6 +76,48 @@ class Script:
         raise AssertionError('unexpected schema')
 
 
+class PreserveProbesTests(unittest.TestCase):
+    def test_preserves_dropped_probes_and_assertions_without_mutating_inputs(self):
+        launch = {'name': 'launch', 'args': [], 'stdin': '', 'http_method': '', 'http_path': '',
+                  'http_body': '', 'expect_exit': 0, 'expect_status': 0,
+                  'expect_contains': ['ok'], 'expect_absent': ['Traceback']}
+        flow = {**launch, 'name': 'flow', 'args': ['--old'], 'stdin': 'old', 'http_method': 'BROWSER',
+                'http_path': '/old', 'http_body': '#old', 'expect_status': 200,
+                'expect_contains': ['ok', 'summary'], 'expect_absent': ['Traceback', 'invented']}
+        repaired = {**flow, 'args': ['--offline'], 'stdin': 'new', 'http_method': 'POST',
+                    'http_path': '/repaired', 'http_body': '{"sample": 1}', 'expect_exit': -1, 'expect_status': 0,
+                    'expect_contains': ['summary', 'extra', 'extra'], 'expect_absent': ['invented', 'error', 'error']}
+        added = {**launch, 'name': 'added'}
+        old, new = [launch, flow], [repaired, added]
+        before = json.loads(json.dumps([old, new]))
+
+        probes, notes = E.preserve_probes(old, new)
+
+        self.assertEqual(probes, [
+            {**repaired, 'expect_exit': 0, 'expect_status': 200,
+             'expect_contains': ['ok', 'summary', 'extra'], 'expect_absent': ['Traceback', 'invented', 'error']},
+            added, launch])
+        self.assertEqual(notes, ['kept assertions of flow', 'kept dropped probe launch'])
+        self.assertEqual([old, new], before)
+
+    def test_numeric_assertions_and_additions_only_note_restored_assertions(self):
+        base = {'name': 'flow', 'args': [], 'stdin': '', 'http_method': 'GET', 'http_path': '/',
+                'http_body': '', 'expect_contains': ['ok'], 'expect_absent': ['Traceback']}
+        cases = [
+            (0, -1, 201, 2, 201, 2, []),
+            (200, 0, 201, 2, 200, 0, ['kept assertions of flow']),
+            (200, 0, 200, 0, 200, 0, []),
+        ]
+        for old_status, old_exit, new_status, new_exit, status, exit_code, notes in cases:
+            with self.subTest(old=(old_status, old_exit), new=(new_status, new_exit)):
+                old = {**base, 'expect_status': old_status, 'expect_exit': old_exit}
+                new = {**base, 'expect_status': new_status, 'expect_exit': new_exit,
+                       'expect_contains': ['added', 'ok'], 'expect_absent': ['warning', 'Traceback']}
+                self.assertEqual(E.preserve_probes([old], [new]), ([
+                    {**new, 'expect_status': status, 'expect_exit': exit_code,
+                     'expect_contains': ['ok', 'added'], 'expect_absent': ['Traceback', 'warning']}], notes))
+
+
 class StopOutcomeTests(unittest.TestCase):
     def test_stop_outcome(self):
         self.assertIs(E.stop_outcome, stop_outcome)
@@ -619,6 +661,38 @@ class EngineTests(unittest.TestCase):
         eng.decide_network(pid, True)
         self.store.resume(pid)
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+
+    def test_strategy_preserves_runtime_probes_and_assertions(self):
+        launch = {'name': 'launch', 'args': [], 'stdin': '', 'http_method': '', 'http_path': '',
+                  'http_body': '', 'expect_exit': 0, 'expect_status': 0,
+                  'expect_contains': ['ok'], 'expect_absent': ['Traceback']}
+        self_test = {**launch, 'name': 'self-test', 'args': ['--self-test']}
+
+        class ProbeScript(Script):
+            def __call__(self, prompt, schema, **kw):
+                result, used, notes = super().__call__(prompt, schema, **kw)
+                if schema is E.PLAN:
+                    result['runtime']['probes'] = [launch, self_test]
+                elif schema is E.STRATEGY:
+                    result['runtime']['probes'] = [
+                        {**launch, 'args': ['--repaired'], 'expect_exit': -1,
+                         'expect_contains': [], 'expect_absent': []}]
+                return result, used, notes
+
+        script = ProbeScript([GOOD + f'# attempt {i}\n' for i in range(3)], ['FAIL', 'FAIL', 'PASS'],
+                             strategy='continue')
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['FAIL', 'FAIL', 'PASS'])
+        self.assertEqual(sum(schema is E.STRATEGY for schema, _, _ in script.prompts), 1)
+        self.assertEqual(p['plan']['runtime']['probes'], [{**launch, 'args': ['--repaired']}, self_test])
+        self.assertEqual([e['detail'] for e in self.store.events(pid, {'decision'})
+                          if e['detail']['what'] == 'runtime probes preserved'], [
+            {'what': 'runtime probes preserved', 'why': 'kept assertions of launch; kept dropped probe self-test',
+             'by': 'engine'}])
 
     def test_strategy_cannot_silently_drop_approved_connections_and_agents_see_approval(self):
         # P-bbad3c: a strategy review set network access to 'none' after the Owner approved it, and the agents,

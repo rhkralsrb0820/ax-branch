@@ -3,6 +3,39 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.31] - 2026-10-10
+
+Strategy reviews can no longer lower the verification bar (autonomy gap 5).
+
+### Added
+- `engine.preserve_probes(old, new)`, applied when a strategy review returns a runtime spec.
+  - Every existing Runtime Acceptance probe is kept.
+  - A same-name probe may change how it runs (args, stdin, method, path, selectors), but its assertions only
+    stay or grow: expect_contains/absent are united, and the status/exit expectations are kept.
+  - New probes are added.
+
+### Changed
+- The decision "runtime probes dropped by strategy" became "runtime probes preserved", listing what was kept.
+  STRATEGY_SYSTEM says probes are kept automatically.
+- Owner-feedback diagnosis (an Owner change) is unchanged.
+
+### Fixed
+- In Test #1, strategy reviews dropped probes 13 times without the Owner. Verification checks could be removed or
+  weakened under the same name.
+- 0.1.28 identical-build guard: a bundle rebuild that dropped a refused (unsafe) file has the same hash as the
+  refused build. It was wrongly rejected as identical; the guard now also compares the refused-files list.
+
+### Verification
+- Full suite 175: all pass except test_prose_or_missing_click_selector (headless Edge under load; passes alone).
+  The bundle regression found by the full run was fixed and re-tested (bundle + engine: 65 pass).
+- engine/runtime/supervisor tests pass (104). New: a dropped probe is restored; weakened assertions are restored
+  and additions kept; integration with a scripted strategy.
+- Implemented by Codex; reviewed by Claude.
+
+### Known issues
+- An existing probe whose expectation is itself wrong can only be changed through the Owner (feedback/ruling),
+  by design.
+
 ## [0.1.30] - 2026-10-10
 
 Explicit stop outcome (autonomy gap 1, minimal): why the engine stopped is recorded as one code.

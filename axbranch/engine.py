@@ -211,12 +211,44 @@ that should prove usability from now on (the current one if unchanged); if usabi
 strengthen it (e.g. BROWSER probes for rendered pages). Always return network_access: every domain the
 finished program contacts at run time with its risk (the current list if unchanged); new ones go to the
 Owner for approval before the build.
+Existing probes and their assertions are kept automatically; you may repair how a probe runs or add probes, never remove or weaken them.
 Approaches in attempt_ledger that already failed with the same failure_code must not be proposed again unchanged; say what is different this time in the rationale.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
   by the engine (self-test, Runtime Acceptance incl. rendered-page checks) and the permanent
   Verification Agent. The LAST stage must be a producer who writes the complete deliverable."""
+
+
+def preserve_probes(old_probes, new_probes):
+    """Keep the existing verification bar while accepting execution repairs and new probes."""
+    old_by_name = {probe['name']: probe for probe in old_probes}
+    probes, notes = [], []
+    for new in new_probes:
+        probe = dict(new)
+        previous = old_by_name.get(probe['name'])
+        if previous is not None:
+            restored = False
+            for key in ('expect_contains', 'expect_absent'):
+                before, proposed = previous.get(key, []), new.get(key, [])
+                probe[key] = list(dict.fromkeys(before + proposed))
+                if any(value not in proposed for value in before):
+                    restored = True
+            for key, unspecified in (('expect_status', 0), ('expect_exit', -1)):
+                value = previous.get(key, unspecified)
+                if value != unspecified:
+                    if value != new.get(key, unspecified):
+                        restored = True
+                    probe[key] = value
+            if restored:
+                notes.append(f"kept assertions of {probe['name']}")
+        probes.append(probe)
+    proposed_names = {probe['name'] for probe in new_probes}
+    for probe in old_probes:
+        if probe['name'] not in proposed_names:
+            probes.append(dict(probe))
+            notes.append(f"kept dropped probe {probe['name']}")
+    return probes, notes
 
 
 def gating(f, n=None):
@@ -593,7 +625,10 @@ class Engine:
         failed = {v['artifact_id'] for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'
                   and any(f.get('kind', 'product') == 'product' for f in v['result'].get('findings', [])
                           if f.get('severity') in ('critical', 'major') and gating(f))}
-        duplicate = next((a for a in self.store.artifacts(pid) if a['id'] in failed and a['sha256'] == sha), None)
+        # Same bytes AND the same refused files: a rebuild that drops a refused (unsafe) file is not a repeat.
+        refused = lambda m: (json.loads(m).get('rejected') if isinstance(m, str) else (m or {}).get('rejected')) or []
+        duplicate = next((a for a in self.store.artifacts(pid) if a['id'] in failed and a['sha256'] == sha
+                          and refused(a.get('manifest')) == refused(manifest)), None)
         if duplicate:
             shutil.rmtree(folder, ignore_errors=True)       # only the folder claimed for this build
             return self._no_deliverable(pid, final, used, build,
@@ -934,14 +969,12 @@ class Engine:
                 self.store.event(pid, 'decision', what='network access revised by strategy',
                                  why=', '.join(f"{a['domain']} [{a['risk']}]" for a in access) or 'none', by=used)
             if decision.get('runtime', {}).get('probes'):
-                # A strategy review may strengthen how usability is proven (e.g. add rendered-page probes);
-                # it never silently weakens it: probes the old spec had stay unless the CEO renamed them.
-                old = {pr['name'] for pr in (plan.get('runtime') or {}).get('probes', [])}
-                plan['runtime'] = runtime.normalize(decision['runtime'])[0]
-                dropped = old - {pr['name'] for pr in plan['runtime']['probes']}
+                probes, notes = preserve_probes((plan.get('runtime') or {}).get('probes', []),
+                                                decision['runtime']['probes'])
+                plan['runtime'] = runtime.normalize({**decision['runtime'], 'probes': probes})[0]
                 self.store.update(pid, plan=plan)
-                if dropped:
-                    self.store.event(pid, 'decision', what='runtime probes dropped by strategy', why=', '.join(sorted(dropped)), by=used)
+                if notes:
+                    self.store.event(pid, 'decision', what='runtime probes preserved', why='; '.join(notes), by='engine')
             self.store.event(pid, 'decision', what=f"strategy: {decision['decision']}", why=decision['rationale'], by=used)
 
     def replan(self, pid, reason):

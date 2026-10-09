@@ -227,7 +227,43 @@ Plan (sequential, all touch engine.py; Codex implements, Claude integrates, loca
 - T2 DONE in 0.1.28: attempt ledger in strategy reviews + identical-build guard (Codex implemented; Claude limited it to product FAILs).
 - T3 DONE in 0.1.29: verifier routed by the actual (recorded) producer; metrics attribute builds to it (Codex implemented).
 - T4 DONE in 0.1.30: explicit stop outcome (VERIFIED/BUDGET_REACHED/EXHAUSTED/OWNER_DECISION_REQUIRED/BLOCKED/OWNER_STOPPED/CLOSING) recorded and in HANDOFF (Codex implemented).
-- T5 (resumed 2026-10-10): Next: T2 attempt memory + exact-repeat guard. Give Codex a bounded spec using
+- T5 DONE in 0.1.31: a strategy review cannot drop or weaken Runtime Acceptance probes (preserve_probes).
+  The full run also exposed a T2 guard bug with refused bundle files; fixed.
+
+**HANDOFF — overnight 2026-10-10 (complete; safe stop: planned high-value bounded tasks done)**
+1. Start: 0.1.26, Library/Develop just shipped; no autonomy audit.
+2. Audit: `docs/AUTONOMY_AUDIT.md`; six ranked gaps.
+3. Implemented (0.1.27 → 0.1.31):
+   - T1: an interrupted strategy review resumes before any rebuild, and the budget is re-checked;
+   - T2: the attempt ledger (approach → outcome) goes to strategy reviews; identical failed rebuilds are not
+     re-verified;
+   - T3: the verifier is chosen against the engine that actually built the artifact;
+   - T4: explicit stop outcome (VERIFIED/BUDGET_REACHED/EXHAUSTED/OWNER_DECISION_REQUIRED/BLOCKED/OWNER_STOPPED/CLOSING);
+   - T5: strategy cannot lower the verification bar.
+4. Codex implemented T1–T5 and their tests, and wrote the audit.
+5. Claude chose and specified each gap, reviewed the diffs, ran all tests locally, and fixed integration issues:
+   - T1: only the newest pending review counts;
+   - T2: the guard applies only to product FAILs and compares refused files.
+6. Cross-engine: Codex implemented, Claude reviewed. No separate Codex adversarial pass over T1–T5 (not needed for
+   these bounded diffs).
+7. Autonomy evidence (scripted, deterministic tests):
+   - after a quota refusal the CEO re-plans before building;
+   - repeated identical failures turn into a forced change of approach without spending a verification;
+   - verification stays on a different engine after failover;
+   - stop reasons are explicit;
+   - checks survive strategy changes.
+8. Tests: full suite 175 — all pass except one headless-Edge test that is flaky under load (passes alone).
+9. Commits: 6e3d987, 69f38fa, 9a815bd, fc902cf, and the 0.1.31 commit.
+10. Remaining:
+    - gap 6 (adaptive retrieval during strategy/diagnosis) is not done;
+    - research/operation execution strategies (gap 1, full) are not done;
+    - no semantic duplicate-approach detection;
+    - the headless-Edge test is flaky under load.
+11. BLOCKED_OWNER_APPROVAL: none.
+12. Owner decision: none required.
+13. Next: gap 6 (knowledge.retrieve in _strategy/_owner_rework with provenance), then a real Develop run to observe
+    the new attempt ledger and stop outcomes live.
+ Next: T2 attempt memory + exact-repeat guard. Give Codex a bounded spec using
   `docs/AUTONOMY_AUDIT.md` §3, editing engine.py + tests only; then run tests locally (Python is blocked in Codex's sandbox).
 - Nothing is BLOCKED_OWNER_APPROVAL.
 
