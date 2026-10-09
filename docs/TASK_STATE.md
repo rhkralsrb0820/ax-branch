@@ -267,6 +267,18 @@ Plan (sequential, all touch engine.py; Codex implements, Claude integrates, loca
   `docs/AUTONOMY_AUDIT.md` §3, editing engine.py + tests only; then run tests locally (Python is blocked in Codex's sandbox).
 - Nothing is BLOCKED_OWNER_APPROVAL.
 
+## Executive-standard session (2026-10-10, from 0.1.31)
+Highest-value gap found: Verification PASS went straight to the Owner, with no CEO judgment of Goal satisfaction.
+- Evidence: Test #1's final CEO judgment said the core goal (real prices) had no evidence of being solved, yet the
+  engine delivered it as done.
+- Implemented:
+  - 0.1.32: CEO executive acceptance (goal_satisfied / missing_evidence / next_action / directive). The CEO orders
+    its own rework, bounded at 2 per Owner action and by the budget. Claude implemented; Codex wrote tests and an
+    adversarial review (5 findings fixed, incl. a pre-existing re-verify-after-PASS bug).
+  - 0.1.33: knowledge retrieval at re-planning (gap 6). Claude implemented after Codex hit its usage limit.
+- Verification status: CODE_VERIFIED + INTEGRATION_VERIFIED (scripted engine). A REAL_PROJECT check is running
+  in a throwaway workspace (scratchpad live-exec).
+
 ## Artifact Library + Develop (0.1.26, 2026-10-10)
 - Project = record of the work, Artifact = what the Owner uses, Knowledge = vault notes.
 - The Library is an index over the existing tables (no copies).
