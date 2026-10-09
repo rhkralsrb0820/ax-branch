@@ -276,8 +276,24 @@ Highest-value gap found: Verification PASS went straight to the Owner, with no C
     its own rework, bounded at 2 per Owner action and by the budget. Claude implemented; Codex wrote tests and an
     adversarial review (5 findings fixed, incl. a pre-existing re-verify-after-PASS bug).
   - 0.1.33: knowledge retrieval at re-planning (gap 6). Claude implemented after Codex hit its usage limit.
-- Verification status: CODE_VERIFIED + INTEGRATION_VERIFIED (scripted engine). A REAL_PROJECT check is running
-  in a throwaway workspace (scratchpad live-exec).
+- REAL_PROJECT_VERIFIED (executive acceptance), with real engines in a throwaway workspace. The project
+  (P-20261010-caf6ae) was a safe file organizer with a preview.
+  - The CEO staffed a file-system safety/UX designer and a Python engineer, and used Test #1 knowledge at planning.
+  - v1 PASS. The CEO judged the goal only "partly" met: the GUI path was inferred, not verified, and a
+    shortcut-safety claim was untrue. It ordered an executive rework itself.
+  - v2 PASS. The CEO found the goal met and delivered with three explicit limits outside its authority: the Owner's
+    real Downloads folder, OneDrive placeholders, and a human using the window.
+  - Codex was at its usage limit, so verification ran on Claude. The same-engine loss of diversity was detected and recorded.
+- Gap 6 (re-plan retrieval) is CODE_VERIFIED only: the live run had no FAIL, so no re-plan happened.
+
+**HANDOFF (executive-standard session)**
+- Remaining high-value gaps:
+  - real Owner test of executive acceptance on a goal with a real-world gap;
+  - research/operation execution strategies;
+  - semantic duplicate-approach detection.
+- No Owner approval is blocked.
+- Codex was at its usage limit (reset ~10:44); nothing is pending for it.
+- Next step: an Owner-run Develop or a new goal, to observe executive acceptance and re-plan retrieval in normal use.
 
 ## Artifact Library + Develop (0.1.26, 2026-10-10)
 - Project = record of the work, Artifact = what the Owner uses, Knowledge = vault notes.
