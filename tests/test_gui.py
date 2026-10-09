@@ -157,6 +157,22 @@ class GuiTests(unittest.TestCase):
         self.app.select(type('E', (), {'x': 1, 'y': 1})())                # a click on the first line
         self.assertEqual(self.app.selected, pid)
 
+    def test_long_title_is_cut_only_when_needed_and_shown_whole_on_hover(self):
+        from axbranch.gui import LIST_WIDTH, fit
+        measure = len                                                       # 1 px per character
+        self.assertEqual(fit('short', 10, measure), 'short')                # fits: untouched
+        self.assertEqual(fit('a much longer project title', 10, measure), 'a much lo…')
+        self.assertEqual(self.app.list.master.cget('width'), LIST_WIDTH)    # ~280 px list pane
+        long = '섭씨/화씨/켈빈 온도를 서로 변환하는 Python 함수와 CLI'
+        self.app.store.new_project(long)
+        self.app.refresh_list(force=True)
+        self.assertNotIn('\n', self.app.list.get('1.0', '1.end'))          # one line per project
+        event = type('E', (), {'x': 1, 'y': 1, 'x_root': 10, 'y_root': 10})()
+        self.app._tip(event)
+        self.assertEqual(self.app._tipwin.text, long)                       # the full title on hover
+        self.app._tip(None)
+        self.assertIsNone(self.app._tipwin)
+
     def test_busy_project_is_reported_not_run(self):
         pid = self.app.store.new_project('make an add tool')
         self.app.selected = pid

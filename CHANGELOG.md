@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.23] - 2026-10-09
+
+Project list layout.
+
+### Added
+- Hover tooltip with the full project title.
+
+### Changed
+- The list pane starts at ~280 px and keeps its width when the window is resized; the main area takes the rest.
+  The divider can be dragged.
+- Titles stay on one line and are cut with '…' only when they do not fit the measured pixel width. The status
+  dot sits on a right-aligned tab at the pane's right edge, and the title gets all space left of it.
+
+### Fixed
+- 0.1.22 cut every title at 22 characters inside a narrow list, so projects were hard to tell apart.
+
+### Verification
+- GUI and release tests pass (new: cut only when needed, ~280 px pane, one line per project, full title on hover).
+- Live layout check on a copy of the real DB:
+  - 1180 px window: list 280 px, dots at x≈252;
+  - resized to 900 px: list still 280 px, main area shrank;
+  - divider dragged to 420 px: longer titles shown in full, dots at x≈392.
+
+### Known issues
+- The divider position is not remembered between sessions.
+
 ## [0.1.22] - 2026-10-09
 
 Readable project list.

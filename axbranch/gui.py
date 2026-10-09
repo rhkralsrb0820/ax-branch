@@ -7,7 +7,7 @@ import re
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import font as tkfont, messagebox, scrolledtext, ttk
 
 from . import WORKSPACE, __version__, live, supervisor
 from .engine import open_engine
@@ -41,16 +41,23 @@ class App(tk.Tk):
 
         body = ttk.PanedWindow(self, orient='horizontal'); body.pack(fill='both', expand=True, padx=8)
         # Project list: short title + one colored status dot (a Listbox can only color whole rows).
-        self.list = tk.Text(body, font=('Malgun Gothic', 11), width=30, wrap='none', cursor='arrow',
-                            spacing1=4, spacing3=4, tabs=(250,), padx=6, state='disabled')
+        holder = ttk.Frame(body, width=LIST_WIDTH)       # starting width of the list pane (~280 px)
+        holder.pack_propagate(False)
+        self.list = tk.Text(holder, font=LIST_FONT, width=1, wrap='none', cursor='arrow',
+                            spacing1=4, spacing3=4, padx=LIST_PAD, state='disabled')
+        self.list.pack(fill='both', expand=True)
         for tag, color in INDICATOR_COLORS.items():
             self.list.tag_configure(tag, foreground=color)
         self.list.tag_configure('selected', background='#d6e8ff')
         self.list.bind('<Button-1>', self.select)
-        body.add(self.list, weight=1)
-        self.ids, self._rows = [], None
+        # Widths change -> titles are re-fitted; hover shows the full title.
+        self.list.bind('<Configure>', lambda _e: self.refresh_list(force=True))
+        self.list.bind('<Motion>', self._tip)
+        self.list.bind('<Leave>', lambda _e: self._tip(None))
+        body.add(holder, weight=0)                        # the main area takes any extra width; divider draggable
+        self.ids, self._rows, self._titles, self._tipwin = [], None, [], None
         right = ttk.PanedWindow(body, orient='vertical')
-        body.add(right, weight=3)
+        body.add(right, weight=1)
         self.right = right
         self.owner_box = ttk.LabelFrame(right, text='Owner 결정 — AX Branch가 기다리고 있습니다', padding=6)
         self.owner_note = ttk.Label(self.owner_box, font=FONT, wraplength=820, justify='left')
@@ -355,7 +362,7 @@ class App(tk.Tk):
             self.show()
         return 'break'
 
-    def refresh_list(self):
+    def refresh_list(self, force=False):
         """Titles with a status dot. The exact internal state stays in the project view on the right."""
         projects = self.store.projects()
         watch = supervisor.candidates(self.store)
@@ -364,19 +371,39 @@ class App(tk.Tk):
             self.selected = next((pid for pid in watch if labels[pid] == 'ACTIVE'), watch[0])
         rows = [(p['id'], project_title(self.store.project(p['id'])), indicator(p['state'], labels[p['id']]))
                 for p in projects]
-        if rows == self._rows:
+        if rows == self._rows and not force:
             return
-        self._rows, self.ids = rows, [r[0] for r in rows]
-        self.list.config(state='normal')
+        self._rows, self.ids, self._titles = rows, [r[0] for r in rows], [r[1] for r in rows]
+        width = self.list.winfo_width() if self.list.winfo_width() > 1 else LIST_WIDTH
+        font = tkfont.Font(font=self.list.cget('font'))
+        # The dot sits on a right-aligned tab at the right edge; the title gets everything left of it.
+        edge = max(60, width - 2 * LIST_PAD - 6)
+        room = edge - font.measure('  ●') - 4
+        self.list.config(state='normal', tabs=(edge, 'right'))
         self.list.delete('1.0', 'end')
         for pid, title, (tag, mark) in rows:
             start = self.list.index('end-1c')
-            self.list.insert('end', f'{title}\t')
+            self.list.insert('end', f'{fit(title, room, font.measure)}\t')
             self.list.insert('end', mark, tag)
             self.list.insert('end', '\n')
             if pid == self.selected:
                 self.list.tag_add('selected', start, f'{start} lineend+1c')
         self.list.config(state='disabled')
+
+    def _tip(self, event):
+        """Hover: the full project title in a small tooltip."""
+        line = int(self.list.index(f'@{event.x},{event.y}').split('.')[0]) - 1 if event else -1
+        text = self._titles[line] if 0 <= line < len(self._titles) else None
+        if self._tipwin is not None and (text is None or self._tipwin.text != text):
+            self._tipwin.destroy()
+            self._tipwin = None
+        if text and self._tipwin is None:
+            tip = tk.Toplevel(self)
+            tip.wm_overrideredirect(True)
+            tip.text = text
+            tk.Label(tip, text=text, font=FONT, background='#ffffe0', relief='solid', borderwidth=1, padx=4).pack()
+            tip.wm_geometry(f'+{event.x_root + 14}+{event.y_root + 12}')
+            self._tipwin = tip
 
     def refresh(self):
         self.refresh_list()
@@ -494,13 +521,25 @@ def indicator(state, status):
 _ASK = re.compile(r'\s*(?:을|를)?\s*(?:만들어\s*(?:줘|봐|주세요|주십시오)|해\s*(?:줘|봐|주세요)|부탁(?:해|합니다)?)[.!?\s]*$')
 
 
+LIST_WIDTH, LIST_PAD, LIST_FONT = 280, 8, ('Malgun Gothic', 11)
+
+
 def project_title(p):
     """The CEO's title from planning; for older projects a short title derived from the goal (the goal is unchanged)."""
     title = ((p.get('plan') or {}).get('title') or '').strip()
     if not title:
         goal = re.sub(r'^\s*\[[^\]]*\]\s*', '', p['goal'].splitlines()[0] if p['goal'] else '')
         title = _ASK.sub('', re.split(r'[:.(]', goal, 1)[0]).strip() or goal.strip()
-    return title if len(title) <= 22 else title[:21].rstrip() + '…'
+    return title
+
+
+def fit(text, room, measure):
+    """text on one line within `room` pixels; '…' only when it does not fit."""
+    if measure(text) <= room:
+        return text
+    while text and measure(text + '…') > room:
+        text = text[:-1]
+    return text.rstrip() + '…'
 
 
 def _put(widget, text):
