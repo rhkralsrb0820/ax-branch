@@ -221,6 +221,13 @@ Plan (sequential, all touch engine.py; Codex implements, Claude integrates, loca
 - T4 stop-outcome classification (gap 1, minimal);
 - T5 probe/criteria preservation in strategy (gap 5).
 
+**HANDOFF (Claude usage limit reached, 2026-10-10):**
+- T1 DONE in 0.1.27 (6e3d987): durable strategy review; Codex implemented, Claude reviewed and fixed;
+  70 engine/supervisor/library tests pass.
+- T2–T5 NOT started. Next: T2 attempt memory + exact-repeat guard. Give Codex a bounded spec using
+  `docs/AUTONOMY_AUDIT.md` §3, editing engine.py + tests only; then run tests locally (Python is blocked in Codex's sandbox).
+- Nothing is BLOCKED_OWNER_APPROVAL.
+
 ## Artifact Library + Develop (0.1.26, 2026-10-10)
 - Project = record of the work, Artifact = what the Owner uses, Knowledge = vault notes.
 - The Library is an index over the existing tables (no copies).
