@@ -286,6 +286,22 @@ Highest-value gap found: Verification PASS went straight to the Owner, with no C
   - Codex was at its usage limit, so verification ran on Claude. The same-engine loss of diversity was detected and recorded.
 - Gap 6 (re-plan retrieval) is CODE_VERIFIED only: the live run had no FAIL, so no re-plan happened.
 
+- CEO Final Goal Judgment, live evidence on P-20261009-bd147a (Test #2, Riemann hypothesis), 2026-10-10:
+  - Setup: the legacy v5 PASS had been delivered before 0.1.32, so the 0.1.33 judgment ran once on it at the
+    Owner's request. The recorded PASS was reused: no re-verification, no Owner direction. A DB checkpoint was taken first.
+  - The CEO judged the goal PARTLY met without Owner instruction. It ordered one autonomous rework itself:
+    correct the Λ≤0.2 citation against the source, and show this round's executed results first.
+  - v6 was built and passed verification.
+  - The second CEO judgment sorted the remaining gaps and decided DELIVER (stays OWNER_REVIEW; v1–v6 kept):
+    - outside its authority: independent expert verification of proof attempts A/B, the unpublished Oesterlé source;
+    - low value: a rigorous-library cross-check of zeros already certified to 3·10¹²;
+    - minor: wording.
+- Verification status:
+  - CEO Final Judgment: REAL_PROJECT_VERIFIED in 2 cases (file organizer, throwaway workspace; Test #2 re-judgment).
+    Generalization is UNPROVEN.
+  - Gap 6 (re-plan retrieval): CODE_VERIFIED only, UNPROVEN in real re-planning.
+  - Whether "independent mathematical verification is outside authority" is the right call needs further checking.
+
 **HANDOFF (executive-standard session)**
 - Remaining high-value gaps:
   - real Owner test of executive acceptance on a goal with a real-world gap;

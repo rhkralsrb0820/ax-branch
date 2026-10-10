@@ -1,10 +1,15 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-08 · version **0.1.33** · repo `AX-Branch/ax-branch` (private GitHub `rhkralsrb0820/ax-branch`).
+Updated 2026-10-10 · version **0.1.33** · repo `AX-Branch/ax-branch` (private GitHub `rhkralsrb0820/ax-branch`).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
 
 ## Working now (verified)
+- 0.1.32–0.1.33 (checkpoint before Test #3).
+  - After a PASS, the CEO judges Goal satisfaction and may order its own bounded rework. REAL_PROJECT_VERIFIED in
+    2 cases (incl. the Test #2 re-judgment: PARTLY → 1 autonomous rework → v6 PASS → DELIVER with classified gaps).
+  - Generalization is UNPROVEN.
+  - Re-plan knowledge retrieval: CODE_VERIFIED only.
 - Goal -> CEO plan -> dynamic pipeline -> temporary agents -> artifact -> independent verification
   -> FAIL rebuild -> PASS -> CEO report. Proven live on project `P-20261003-906ead`.
 - One session per project (OS run lock; GUI threads, CLI and Codex sessions cannot overlap).

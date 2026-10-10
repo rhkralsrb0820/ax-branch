@@ -27,6 +27,11 @@ Re-planning uses knowledge searched for the current problem (autonomy gap 6).
 - Specified for Codex; Codex hit its usage limit before writing code, so Claude implemented it (engine failover per
   plan).
 
+- Live (2026-10-10, no code change), P-20261009-bd147a:
+  - the 0.1.33 CEO judgment was applied once to the legacy v5 PASS (no re-verification);
+  - result: PARTLY → one autonomous rework → v6 PASS → DELIVER with gaps classified (outside authority / low
+    value / minor).
+
 ### Known issues
 - Whether the CEO's decisions change because of a retrieved lesson is not yet observed on a real project.
 
