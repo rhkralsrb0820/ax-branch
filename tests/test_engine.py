@@ -23,10 +23,11 @@ LAUNCHABLE = ("import sys\ndef add(a, b):\n    return a + b\n\nif __name__ == '_
 class Script:
     """Answers by schema. `builds` and `verdicts` are consumed in order."""
 
-    def __init__(self, builds, verdicts, strategy='continue', fail_on=None):
+    def __init__(self, builds, verdicts, strategy='continue', fail_on=None, probe_disposition='UNRESOLVED'):
         self.builds, self.verdicts, self.strategy = list(builds), list(verdicts), strategy
         self.fail_on, self.prompts = fail_on, []
         self.network = []
+        self.probe_disposition = probe_disposition
 
     def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
         self.prompts.append((schema, prefer, prompt))
@@ -55,6 +56,11 @@ class Script:
                     'criteria': [{'index': c['index'], 'criterion': c['criterion'], 'met': v == 'PASS', 'evidence': 'e'}
                                  for c in approved],
                     'findings': [] if v == 'PASS' else [{'severity': 'major', 'issue': 'wrong sum', 'evidence': 'a - b'}]}, prefer, []
+        if schema is E.PROBE_REVIEW:
+            return {'disposition': self.probe_disposition, 'rationale': 'scripted review',
+                    'evidence': 'The normal launch prints ok instead of the required result: 5.'
+                                if self.probe_disposition == 'PRODUCT_DEFECT' else '',
+                    'runtime': {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []}}, 'claude', []
         if schema is E.STRATEGY or 'decision' in schema.get('properties', {}):
             return {'decision': self.strategy, 'rationale': 'r', 'pipeline': [],
                     'runtime': {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': []},
@@ -108,9 +114,9 @@ class PreserveProbesTests(unittest.TestCase):
         probes, notes = E.preserve_probes(old, new)
 
         self.assertEqual(probes, [
-            {**repaired, 'expect_exit': 0, 'expect_status': 200,
+            launch, {**flow, 'expect_exit': 0, 'expect_status': 200,
              'expect_contains': ['ok', 'summary', 'extra'], 'expect_absent': ['Traceback', 'invented', 'error']},
-            added, launch])
+            added])
         self.assertEqual(notes, ['kept assertions of flow', 'kept dropped probe launch'])
         self.assertEqual([old, new], before)
 
@@ -455,7 +461,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(eng._actual_producer(pid, artifact), ('claude', True))
 
     def test_owner_problem_reopens_same_project_reproduces_and_redelivers(self):
-        script = Script([GOOD, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'])
+        script = Script([GOOD, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'], probe_disposition='PRODUCT_DEFECT')
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
@@ -503,7 +509,7 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(all('seconds' in e['detail'] for e in self.store.events(pid, {'call'})))
 
     def test_works_plus_plain_language_request_reopens_without_classification(self):
-        script = Script([LAUNCHABLE, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'])
+        script = Script([LAUNCHABLE, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'], probe_disposition='PRODUCT_DEFECT')
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         eng.run(pid)
@@ -631,11 +637,17 @@ class EngineTests(unittest.TestCase):
             return real(*args)
         eng.runtime_evidence = misconfigured
         pid = self.store.new_project('make an add tool')
-        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
-        strategy = [pr for s, _, pr in script.prompts if s is E.STRATEGY]
-        self.assertEqual(len(strategy), 1)
-        self.assertIn('MISCONFIGURED', strategy[0])
+        p = eng.run(pid)
+        strategy = [pr for s, _, pr in script.prompts if s is E.PROBE_REVIEW]
+        self.assertEqual(len(strategy), 1)                                  # the CEO reviews the probe
+        self.assertIn('NO product evidence', strategy[0])
         self.assertIn('#sample-1', strategy[0])
+        # no repair from the CEO: harness-only -> HARNESS_BLOCKED, never a product rebuild
+        self.assertTrue(p['pause_reason'].startswith('HARNESS_BLOCKED'))
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
+        self.store.resume(pid)                                              # resume re-verifies the same version
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
 
     def test_feedback_loop_is_generic_math_proof_document(self):
         proof1 = '# Proof that sqrt(2) is irrational\n' + 'Step 1. Assume sqrt(2)=p/q in lowest terms.\n' * 8
@@ -702,10 +714,10 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(p['state'], 'OWNER_REVIEW')
         self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['FAIL', 'FAIL', 'PASS'])
         self.assertEqual(sum(schema is E.STRATEGY for schema, _, _ in script.prompts), 1)
-        self.assertEqual(p['plan']['runtime']['probes'], [{**launch, 'args': ['--repaired']}, self_test])
+        self.assertEqual(p['plan']['runtime']['probes'], [launch, self_test])
         self.assertEqual([e['detail'] for e in self.store.events(pid, {'decision'})
                           if e['detail']['what'] == 'runtime probes preserved'], [
-            {'what': 'runtime probes preserved', 'why': 'kept assertions of launch; kept dropped probe self-test',
+            {'what': 'runtime probes preserved', 'why': 'kept assertions of launch; kept dropped probe self-test; kept runtime owner_launch',
              'by': 'engine'}])
 
     def test_strategy_cannot_silently_drop_approved_connections_and_agents_see_approval(self):
@@ -1160,15 +1172,134 @@ class FailureRoutingTests(unittest.TestCase):
         self.assertEqual([a['iteration'] for a in self.store.artifacts(pid)], [p['iteration']])
 
     def test_rebuild_from_a_built_iteration_gets_a_new_version(self):
-        # 10-08: a recovery re-plan from VERIFYING rebuilt into the built v31 -> IntegrityError twice.
-        script = HarnessScript([GOOD, GOOD + '\n'], ['FAIL', 'PASS'])
+        script = Script([GOOD, GOOD + '\n'], ['FAIL', 'PASS'])
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
-        built = eng.run(pid)['iteration']
-        eng.replan(pid, 'operator re-plan')           # PAUSED(VERIFYING) -> REWORK, iteration unchanged
+        eng.run(pid, stop_at='REWORK')
+        built = self.store.artifacts(pid)[-1]['iteration']
+        self.store.update(pid, iteration=built)  # a legacy recovery left the built iteration selected
         p = eng.run(pid)
         self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
         self.assertEqual([a['iteration'] for a in self.store.artifacts(pid)], [built, built + 1])
+
+    def test_preserve_probes_separates_intent_from_harness_configuration(self):
+        base = {'name': 'add', 'http_method': 'POST', 'http_path': '/api/x', 'expect_contains': ['ok'], 'expect_absent': []}
+        # Unspecified may become specific; explicit positive statuses remain exact.
+        merged, _ = E.preserve_probes([{**base, 'expect_status': -1}], [{**base, 'expect_status': 200}])
+        self.assertEqual(merged[0]['expect_status'], 200)
+        merged, notes = E.preserve_probes([{**base, 'expect_status': 201}], [{**base, 'expect_status': 200}])
+        self.assertEqual(merged[0]['expect_status'], 201)
+        self.assertIn('kept assertions of add', notes)
+        # weakening is undone: a specific status removed, or its meaning changed
+        for weaker in (0, -1, 404):
+            merged, notes = E.preserve_probes([{**base, 'expect_status': 200}], [{**base, 'expect_status': weaker}])
+            self.assertEqual(merged[0]['expect_status'], 200, weaker)
+            self.assertIn('kept assertions of add', notes)
+        merged, _ = E.preserve_probes([{**base, 'expect_status': 200}], [{**base, 'expect_contains': []}])
+        self.assertEqual(merged[0]['expect_contains'], ['ok'])
+
+    def test_harness_repair_reverifies_the_same_version(self):
+        # The probe launches with a wrong argument; the product is fine. The CEO repairs how the probe runs.
+        prog = ("import sys\nif __name__ == '__main__':\n    if len(sys.argv) > 1 and sys.argv[1] != '--self-test':\n"
+                "        print('unknown option'); sys.exit(0)\n    print('ok')\n")
+        bad = {'name': 'launch', 'args': ['--bad'], 'stdin': '', 'http_method': '', 'http_path': '', 'http_body': '',
+               'expect_exit': -1, 'expect_status': 0, 'expect_contains': ['ok'], 'expect_absent': []}
+
+        class Repairing(Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                if schema is E.PROBE_EQUIVALENCE:
+                    return {'equivalent': True, 'evidence': 'No arguments exercises the required normal launch.'}, 'codex', []
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.PLAN:
+                    result['runtime'] = {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': [bad]}
+                if schema is E.PROBE_REVIEW:
+                    result.update(disposition='HARNESS_REPAIR', evidence='The artifact treats no arguments as the normal launch.')
+                    result['runtime'] = {'mode': 'cli', 'owner_launch': 'x', 'launch_args': [], 'probes': [{**bad, 'args': []}]}
+                return result, used, notes
+        script = Repairing([prog], ['PASS', 'PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make a tool')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual(len(self.store.artifacts(pid)), 1)                     # never rebuilt
+        self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['FAIL', 'PASS'])
+        self.assertEqual({v['artifact_id'] for v in self.store.verifications(pid)}, {self.store.artifacts(pid)[0]['id']})
+        self.assertTrue(self.store.events(pid, {'probe_review'})[0]['detail']['repaired'])
+        self.assertNotEqual(self.store.verifications(pid)[0]['result']['findings'][-1]['kind'], 'product')
+
+    def test_harness_defect_never_rebuilds_the_artifact(self):
+        script = Script([GOOD], ['PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        broken_check = {'ok': False, 'mode': 'cli', 'notes': [],
+                        'steps': [{'name': 'p', 'ok': False, 'probe_misconfigured': True, 'problems': ['probe misconfigured: x']}]}
+        with mock.patch.object(eng, 'runtime_evidence', return_value=broken_check):
+            p = eng.run(pid)
+        self.assertEqual((p['state'], p['resume_state']), ('PAUSED', 'VERIFYING'))
+        self.assertTrue(p['pause_reason'].startswith('HARNESS_BLOCKED'))
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
+        self.assertEqual(sum(schema is E.BUILD for schema, _, _ in script.prompts), 1)
+
+    # ---- Codex review of the Test #3 harness fix: six confirmed defects
+    def test_d1_invalid_selector_text_is_harness_not_product(self):
+        step = {'ok': False, 'probe_misconfigured': True,
+                'problems': ["probe misconfigured: click selector 'crashed[' is not a CSS selector"]}
+        self.assertEqual(E.runtime.classify_step(step), 'harness')
+
+    def test_d2_same_artifact_recovery_cannot_add_unapproved_connections(self):
+        script = Script([GOOD], ['PASS'])
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid, stop_at='VERIFYING')
+        script.network = [{'domain': 'evil.example.com', 'purpose': 'x', 'risk': 'public_read'}]
+        eng._strategy(pid, recovery_note='probe review')
+        self.assertEqual(self.store.project(pid)['plan'].get('network_access') or [], [])
+        self.assertTrue(any(e['detail'].get('what') == 'network expansion deferred'
+                            for e in self.store.events(pid, {'decision'})))
+
+    def test_d3_owner_feedback_can_replace_the_contract(self):
+        class Replacing(Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.DIAGNOSIS:
+                    result['acceptance_criteria'] = ['a web page shows the sum']
+                    result['removed_criteria'] = [{'criterion': 'add(2,3)==5', 'owner_quote': self.quote}]
+                return result, used, notes
+        for quote, expected in (('replace the CLI with a web page', ['a web page shows the sum']),      # Owner's words
+                                ('the model thinks this is better', ['a web page shows the sum', 'add(2,3)==5'])):
+            script = Replacing([GOOD, GOOD + '\n'], ['PASS', 'PASS'])
+            script.quote = quote
+            eng = self.engine(script)
+            pid = self.store.new_project('make an add tool')
+            eng.run(pid)
+            eng.owner_review(pid, works=True, text='replace the CLI with a web page')
+            eng.run(pid)
+            self.assertEqual(self.store.project(pid)['plan']['acceptance_criteria'], expected, quote)
+            change = self.store.events(pid, {'requirements_changed_by_owner'})[-1]['detail']
+            self.assertEqual(bool(change['removed']), quote.startswith('replace'))
+            self.assertEqual(bool(change['restored_without_owner_provenance']), not quote.startswith('replace'))
+
+    def test_d4_out_of_range_finding_does_not_count_as_a_product_failure(self):
+        eng = self.engine(Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        art = self.store.artifacts(pid)[0]
+        self.store.add_verification(pid, art['id'], 1, 'FAIL', {'verdict': 'FAIL', 'criteria': [], 'findings': [
+            {'severity': 'major', 'kind': 'product', 'criterion': 999, 'issue': 'idea', 'evidence': 'e'}]},
+            {'ok': True}, 'codex')
+        self.assertEqual(eng._product_failures(pid), [])
+
+    def test_d5_rework_and_its_strategy_obligation_commit_together(self):
+        eng = self.engine(Script([BROKEN, BROKEN + '\n', GOOD], ['FAIL', 'FAIL', 'PASS']))
+        pid = self.store.new_project('make an add tool')
+        seen = []
+        real = eng._strategy
+        def spy(p, **kw):
+            seen.append((self.store.project(p)['state'], len(self.store.events(p, {'strategy_pending'}))))
+            return real(p, **kw)
+        eng._strategy = spy
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        self.assertEqual(seen[0], ('REWORK', 1))          # REWORK and its pending review were already committed
 
     def test_failure_code_ignores_verifier_wording(self):
         def v(issue, steps=('Rendered home',), provider='codex', output=''):
@@ -1244,13 +1375,15 @@ class GateAndImmutabilityTests(unittest.TestCase):
         self.assertEqual(stop_outcome(project), ('OWNER_DECISION_REQUIRED', 'needs a paid data source'))
         self.assertEqual(stop_outcome({**project, 'report': {'next_action': 'deliver'}})[0], 'VERIFIED')
 
-    def test_identical_rebuild_after_a_harness_only_fail_is_verified(self):
+    def test_replan_after_harness_failure_reverifies_without_rebuilding(self):
         script = HarnessScript([GOOD, GOOD], ['FAIL', 'PASS'])        # FAIL #1: harness findings only
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         eng.run(pid)
         eng.replan(pid, 'operator re-plan')
-        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')       # same bytes, verified again, not rejected
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
+        self.assertEqual(len(script.builds), 1)
         self.assertEqual(self.store.events(pid, {'build_rejected'}), [])
 
     def test_identical_rebuild_is_not_verified_again(self):
@@ -1384,11 +1517,10 @@ class GateAndImmutabilityTests(unittest.TestCase):
         self.assertEqual([Path(a['path']).parent.name for a in self.store.artifacts(pid)], ['v2'])
 
     def test_failed_commit_removes_only_its_own_new_version(self):
-        eng = self.engine(HarnessScript([GOOD, GOOD + '\n'], ['FAIL', 'PASS']))
+        eng = self.engine(Script([GOOD, GOOD + '\n'], ['FAIL', 'PASS']))
         pid = self.store.new_project('make an add tool')
-        eng.run(pid)                                   # v1 built, HARNESS_BLOCKED
+        eng.run(pid, stop_at='REWORK')                  # v1 has a product defect; rebuild -> v2
         v1 = self.store.artifacts(pid)[0]
-        eng.replan(pid, 'operator re-plan')            # rebuild -> v2
         with mock.patch.object(self.store, 'add_artifact', side_effect=RuntimeError('disk full (simulated)')):
             p = eng.run(pid)
         self.assertIn('Internal error', p['pause_reason'])

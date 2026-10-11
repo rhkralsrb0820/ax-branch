@@ -44,7 +44,8 @@ PLAN = S(title=STR, interpretation=STR, artifact_kind=ENUM('markdown', 'python',
 DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=STR,
               artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
-              network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE))
+              network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE),
+              removed_criteria=ARR(S(criterion=STR, owner_quote=STR)))
 WORK = S(output=STR, key_points=ARR(STR), evidence=ARR(STR), counterpoints=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), edits=ARR(S(path=STR, find=STR, replace=STR)),
           summary=STR, changes_from_previous=STR)
@@ -61,6 +62,9 @@ VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
                            issue=STR, evidence=STR)))
 STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE),
              runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))))
+PROBE_REVIEW = S(disposition=ENUM('HARNESS_REPAIR', 'PRODUCT_DEFECT', 'UNRESOLVED'),
+                 rationale=STR, evidence=STR, runtime=runtime.SPEC)
+PROBE_EQUIVALENCE = S(equivalent=BOOL, evidence=STR)
 REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR), goal_satisfied=ENUM('yes', 'partly', 'no', 'unknown'),
            missing_evidence=ARR(STR), next_action=ENUM('deliver', 'rework', 'owner_decision'), directive=STR)
 MAX_EXECUTIVE_REWORKS = 2      # CEO-ordered rounds after a PASS, per Owner action (Autonomous != infinite)
@@ -76,6 +80,7 @@ RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the
   cli for terminal tools, none only for documents or pure libraries. If the goal is vague about the
   interface ('make a program'), choose what a non-technical Owner can use by double-clicking.
   cli: probes run `python <file> *args` with stdin; expect_exit (-1 = any) and expect_contains.
+  expect_status 0 (or -1) = any HTTP status; give a specific status only when the response code itself matters.
   web: the program must accept `--port PORT` and `--no-browser` and bind 127.0.0.1 only; launch_args
   must be e.g. ["--port", "{port}", "--no-browser"] (the engine substitutes a free port); probes are
   HTTP requests (http_method/path/body, expect_status, expect_contains) that walk the primary user flow
@@ -86,8 +91,7 @@ RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the
   browser (its JavaScript runs and makes its own requests) and checks expect_contains against the
   RENDERED text. To click, put CSS selectors in http_body separated by '||' (e.g.
   "#sample-1||button.analyze"): each is clicked in order after the page loads. http_body is ONLY
-  selectors — never instructions in words; a selector that matches nothing fails the probe as
-  misconfigured. Prefer stable ids the deliverable defines (and names in its acceptance criteria).
+  selectors — never instructions in words; invalid selector syntax is a harness defect; a missing element is ambiguous. Prefer stable ids the deliverable defines (and names in its acceptance criteria).
   Probes must use realistic input and check meaningful output, not just that something answered."""
 
 CEO_SYSTEM = f"""You are 淸月 AI CEO, the executive of AX Branch. The Owner gave a Goal.
@@ -210,7 +214,9 @@ interpretation, the complete acceptance criteria (existing still-valid ones plus
 spec whose probes exercise the new requirements end to end (they should FAIL on the current version
 if it lacks them) while keeping probes for confirmed behaviour, network_access, and the pipeline
 (reuse suitable roles; add the specialists the new requirements need). Never drop or weaken existing
-requirements unless the Owner asked for that change.
+requirements unless the Owner asked for that change. To remove or replace an existing acceptance criterion, list it in
+removed_criteria with owner_quote = the Owner's exact words from owner_feedback that ask for that change; a removal
+without the Owner's words is reverted (your own diagnosis or retrieved knowledge is not the Owner).
 relevant_knowledge holds lessons from other projects that match the current problem; use what applies and say which
 one in your diagnosis.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
@@ -242,8 +248,28 @@ relevant_knowledge holds lessons from other projects that match the current prob
   Verification Agent. The LAST stage must be a producer who writes the complete deliverable."""
 
 
-def preserve_probes(old_probes, new_probes):
+def grounded_criteria(old, new, removals, owner_texts):
+    """Owner explicit change > prior contract: an existing criterion may leave the contract only when the diagnosis
+    cites the Owner's own words asking for it (verbatim in a new Owner feedback text). Anything else is restored.
+    Returns (criteria, granted [(criterion, quote)], restored [criterion])."""
+    norm = lambda t: ' '.join(str(t or '').split()).lower()
+    said = [norm(t) for t in owner_texts]
+    quotes = {r.get('criterion'): r.get('owner_quote', '') for r in removals or []}
+    granted, restored = [], []
+    for c in [c for c in old if c not in new]:
+        quote = norm(quotes.get(c))
+        if len(quote) >= 6 and any(quote in t for t in said):
+            granted.append((c, quotes[c]))
+        else:
+            restored.append(c)
+    return list(new) + restored, granted, restored
+
+
+def preserve_probes(old_probes, new_probes, *, equivalent=False):
     """Keep the existing verification bar while accepting execution repairs and new probes."""
+    for probes in (old_probes, new_probes):
+        if len({probe['name'] for probe in probes}) != len(probes):
+            raise Rejected('Probe names must be unique before acceptance-preserving repair.')
     old_by_name = {probe['name']: probe for probe in old_probes}
     probes, notes = [], []
     for new in new_probes:
@@ -256,12 +282,18 @@ def preserve_probes(old_probes, new_probes):
                 probe[key] = list(dict.fromkeys(before + proposed))
                 if any(value not in proposed for value in before):
                     restored = True
-            for key, unspecified in (('expect_status', 0), ('expect_exit', -1)):
-                value = previous.get(key, unspecified)
-                if value != unspecified:
-                    if value != new.get(key, unspecified):
-                        restored = True
-                    probe[key] = value
+            # Inputs and actions are acceptance intent unless independently validated as equivalent.
+            for key, default in (('args', []), ('stdin', ''), ('http_method', ''),
+                                 ('http_path', ''), ('http_body', '')):
+                if not equivalent and new.get(key, default) != previous.get(key, default):
+                    probe[key], restored = previous.get(key, default), True
+            old_c, new_c = runtime.canonical_probe(previous), runtime.canonical_probe(new)
+            probe['expect_status'] = new_c['expect_status']
+            if old_c['expect_status'] and new_c['expect_status'] != old_c['expect_status']:
+                probe['expect_status'], restored = old_c['expect_status'], True
+            probe['expect_exit'] = new_c['expect_exit']
+            if old_c['expect_exit'] >= 0 and new_c['expect_exit'] != old_c['expect_exit']:
+                probe['expect_exit'], restored = old_c['expect_exit'], True
             if restored:
                 notes.append(f"kept assertions of {probe['name']}")
         probes.append(probe)
@@ -270,7 +302,23 @@ def preserve_probes(old_probes, new_probes):
         if probe['name'] not in proposed_names:
             probes.append(dict(probe))
             notes.append(f"kept dropped probe {probe['name']}")
+    if not equivalent:
+        names = [p['name'] for p in old_probes]
+        by_name = {p['name']: p for p in probes}
+        probes = [by_name[name] for name in names] + [p for p in probes if p['name'] not in names]
     return probes, notes
+
+
+def preserve_runtime(before, proposed, *, equivalent=False):
+    before, proposed = runtime.normalize(before)[0], runtime.normalize(proposed)[0]
+    probes, notes = preserve_probes(before.get('probes', []), proposed.get('probes', []), equivalent=equivalent)
+    result = {**proposed, 'probes': probes}
+    if not equivalent:
+        for key in ('mode', 'launch_args', 'owner_launch'):
+            if result.get(key) != before.get(key):
+                result[key] = before.get(key)
+                notes.append(f'kept runtime {key}')
+    return result, notes
 
 
 def gating(f, n=None):
@@ -648,9 +696,7 @@ class Engine:
             path.write_bytes(content.encode('utf-8'))
             sha = artifacts.sha(content.encode('utf-8'))
         # Only a FAIL that showed a product defect condemns these bytes (a harness/infra-only FAIL does not).
-        failed = {v['artifact_id'] for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'
-                  and any(f.get('kind', 'product') == 'product' for f in v['result'].get('findings', [])
-                          if f.get('severity') in ('critical', 'major') and gating(f))}
+        failed = {v['artifact_id'] for v in self._product_failures(pid)}
         # Same bytes AND the same refused files: a rebuild that drops a refused (unsafe) file is not a repeat.
         refused = lambda m: (json.loads(m).get('rejected') if isinstance(m, str) else (m or {}).get('rejected')) or []
         duplicate = next((a for a in self.store.artifacts(pid) if a['id'] in failed and a['sha256'] == sha
@@ -737,9 +783,15 @@ class Engine:
         if done and done[-1]['verdict'] == 'PASS':
             # Verified already; the CEO acceptance call was interrupted (quota/crash): continue there.
             return self._deliver(pid, artifact, artifacts.text_of(artifact), done[-1]['result'])
+        pending = [e for e in self.store.events(pid, {'probe_review_pending'})
+                   if e['detail']['artifact'] == artifact['id']]
+        applied = {e['detail']['pending'] for e in self.store.events(pid, {'probe_review_applied'})}
+        if pending and pending[-1]['id'] not in applied:
+            return self._probe_review(pid, p, artifact, pending[-1])
         text = artifacts.text_of(artifact)
         rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
         checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
+        selftest_ok = checks['ok']
         checks['runtime'] = self.runtime_evidence(artifact, plan.get('runtime'), plan['artifact_filename'])
         failing = [s for s in checks['runtime']['steps'] if not s['ok']]
         if failing and all(all(pr.startswith('browser did not finish') for pr in s.get('problems', [])) for s in failing):
@@ -797,10 +849,16 @@ class Engine:
         if recommendations:
             self.store.event(pid, 'verification_recommendations', iteration=p['iteration'],
                              items=[f"[{f['severity']}/{f.get('kind')}] {f['issue']}"[:400] for f in recommendations])
-        if not passed and not blocking:
-            # Failed only on deterministic checks or unmet approved criteria: name it, so the failure has a kind.
-            stated = {f.get('kind', 'product') for f in blocking}
-            gate = 'product' if not stated or 'product' in stated else 'harness' if 'harness' in stated else 'infra'
+        failed_steps = [st for st in checks['runtime'].get('steps', []) if not st.get('ok')]
+        step_kinds = {runtime.classify_step(st) for st in failed_steps}
+        product_evidence = (not selftest_ok or 'product' in step_kinds
+                            or any(f.get('kind', 'product') == 'product' for f in blocking)
+                            or bool(unmet and not failed_steps and not blocking))
+        if not passed and (not blocking or (product_evidence and not any(
+                f.get('kind', 'product') == 'product' for f in blocking))):
+            # Failed only on deterministic checks or unmet approved criteria. The kind comes from the evidence:
+            # a verifier PASS alone never makes it a harness failure.
+            gate = ('product' if product_evidence else 'infra' if step_kinds == {'infra'} else 'harness')
             if unmet:
                 result['findings'].append({'severity': 'major', 'kind': gate, 'criterion': unmet[0].get('index', 0),
                                            'issue': 'Gate failed: approved criteria not met: '
@@ -810,11 +868,19 @@ class Engine:
                 result['findings'].append({'severity': 'major', 'kind': gate, 'criterion': -1, 'deterministic': True,
                                            'issue': 'Gate failed: deterministic checks failed.',
                                            'evidence': checks['output'][:500]})
+        review_needed = (failed_steps and not product_evidence and step_kinds <= {'harness', 'ambiguous'}
+                         and not any(e['detail'].get('artifact') == artifact['id']
+                                     for e in self.store.events(pid, {'probe_review_pending'})))
         with self.store.tx():
-            self.store.add_verification(pid, artifact['id'], p['iteration'], 'PASS' if passed else 'FAIL',
-                                        result, checks, used)
+            vid = self.store.add_verification(pid, artifact['id'], p['iteration'], 'PASS' if passed else 'FAIL',
+                                              result, checks, used)
+            if review_needed:
+                self.store.event(pid, 'probe_review_pending', artifact=artifact['id'], verification=vid,
+                                 before=runtime.normalize(plan.get('runtime'))[0], steps=failed_steps)
         if passed:
             return self._deliver(pid, artifact, text, result)
+        if review_needed:
+            return self._probe_review(pid, p, artifact, self.store.events(pid, {'probe_review_pending'})[-1])
         kinds = {f.get('kind', 'product') for f in result['findings']
                  if f['severity'] in ('critical', 'major') and gating(f, n)}
         if kinds and 'product' not in kinds:
@@ -825,6 +891,75 @@ class Engine:
                                          f"{'/'.join(sorted(kinds))} findings; no product rebuild. "
                                          'Resume re-verifies this version.', resume_state='VERIFYING')
         self._after_fail(pid, p)
+
+    def _probe_review(self, pid, p, artifact, pending):
+        """Persist the decision before routing; a restart resumes the outstanding decision."""
+        completed = next((e['detail'] for e in self.store.events(pid, {'probe_review'})
+                          if e['detail'].get('pending') == pending['id']), None)
+        if completed is None:
+            detail = pending['detail']
+            context = {'owner_goal': p['goal'], 'acceptance_criteria': p['plan']['acceptance_criteria'],
+                       'runtime': detail['before'], 'failed_steps': detail['steps'],
+                       'artifact': artifacts.text_of(artifact)}
+            decision, used = self._ask(pid, 'CEO',
+                'Review failed Runtime Acceptance with NO product evidence established. Return HARNESS_REPAIR only '
+                'for an execution-spec error, PRODUCT_DEFECT only with concrete artifact evidence, otherwise UNRESOLVED. '
+                'Unchanged probes do not imply a product defect. Preserve the approved behavior, inputs, actions and '
+                'assertions. Explain the evidence. Do not change pipeline or network access.',
+                'Classify the failure and propose an equivalent execution repair if justified.', context,
+                PROBE_REVIEW, prefer='claude')
+            disposition = decision['disposition']
+            before = detail['before']
+            after, notes = preserve_runtime(before, decision['runtime'])
+            equivalence = None
+            if disposition == 'HARNESS_REPAIR':
+                candidate, _ = preserve_runtime(before, decision['runtime'], equivalent=True)
+                if candidate != after:
+                    equivalence, _ = self._ask(pid, 'Verification',
+                        'Independently validate execution-spec equivalence against the approved criteria and artifact. '
+                        'Changing methods, targets, inputs, CLI args, mode, launch behavior, or click/action order is '
+                        'allowed only when evidence proves it exercises the SAME required behavior. Reject bypasses, '
+                        'self-test substitutions, deleted actions and weaker coverage. Uncertainty means equivalent=false. '
+                        'Explain concrete source/evidence references; the proposer rationale alone is not proof.',
+                        'Validate the proposed harness repair.',
+                        {**context, 'proposed': candidate, 'rationale': decision['rationale']},
+                        PROBE_EQUIVALENCE, prefer=_other(used))
+                    if equivalence['equivalent'] and equivalence['evidence'].strip():
+                        after = candidate
+                    else:
+                        disposition = 'UNRESOLVED'
+                if after == before or not decision['evidence'].strip():
+                    disposition = 'UNRESOLVED'
+            elif disposition == 'PRODUCT_DEFECT':
+                if (not decision['evidence'].strip()
+                        or all(runtime.classify_step(st) == 'harness' for st in detail['steps'])):
+                    disposition = 'UNRESOLVED'
+            if disposition != 'HARNESS_REPAIR':
+                after = before
+            with self.store.tx():
+                if disposition == 'HARNESS_REPAIR':
+                    plan = self.store.project(pid)['plan']
+                    plan['runtime'] = after
+                    self.store.update(pid, plan=plan)
+                if disposition == 'PRODUCT_DEFECT':
+                    v = next(v for v in self.store.verifications(pid) if v['id'] == detail['verification'])
+                    v['result']['findings'].append({'severity': 'major', 'kind': 'product', 'criterion': -1,
+                        'deterministic': True, 'issue': 'Probe review: product defect', 'evidence': decision['evidence']})
+                    self.store.db.execute('UPDATE verifications SET result=? WHERE id=?',
+                                          (json.dumps(v['result'], ensure_ascii=False), v['id']))
+                self.store.event(pid, 'probe_review', pending=pending['id'], artifact=artifact['id'],
+                                 disposition=disposition, rationale=decision['rationale'], evidence=decision['evidence'],
+                                 before=before, after=after, equivalence=equivalence, preservation=notes,
+                                 repaired=disposition == 'HARNESS_REPAIR')
+            completed = self.store.events(pid, {'probe_review'})[-1]['detail']
+        if completed['disposition'] == 'PRODUCT_DEFECT':
+            return self._after_fail(pid, p, review=pending['id'])
+        with self.store.tx():
+            self.store.event(pid, 'probe_review_applied', pending=pending['id'])
+            if completed['disposition'] == 'UNRESOLVED':
+                self.store.pause(pid, 'HARNESS_BLOCKED: probe review unresolved; no product rebuild. '
+                                 'Resume re-verifies this version.', resume_state='VERIFYING')
+        # HARNESS_REPAIR stays VERIFYING and checks the same immutable artifact.
 
     def develop(self, base_pid, goal):
         """Develop: a NEW autonomous project that builds the next version of an existing verified artifact. The Owner
@@ -869,51 +1004,60 @@ class Engine:
                                         'engine')
         self._after_fail(pid, p)
 
-    def _after_fail(self, pid, p):
-        fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
-        with self.store.tx():
-            self.store.update(pid, iteration=p['iteration'] + 1)
-            self.store.set_state(pid, 'REWORK', reason=f'verification FAIL #{fails}')
+    def _product_failures(self, pid):
+        # A product build is counted once; harness checks and rechecks never spend its budget.
+        n = len(((self.store.project(pid)['plan'] or {}).get('acceptance_criteria')) or []) or None
+        failed = {}
+        for v in self.store.verifications(pid):
+            if v['verdict'] == 'FAIL' and any(f.get('kind', 'product') == 'product'
+                    and f.get('severity') in ('critical', 'major') and gating(f, n)
+                    for f in v['result'].get('findings', [])):
+                failed[v['artifact_id'] or ('build', v['iteration'])] = v
+        return list(failed.values())
+
+    def _after_fail(self, pid, p, review=None):
+        latest = self.store.verifications(pid)[-1]
+        if not any(v['id'] == latest['id'] for v in self._product_failures(pid)):
+            return self.store.pause(pid, 'HARNESS_BLOCKED: no product failure; no rebuild.', resume_state='VERIFYING')
+        fails = len(self._product_failures(pid))
         repeated = self._repeated_failure(pid)
         recurred = repeated and any(e['detail'].get('why') == repeated for e in self.store.events(pid, {'decision'})
                                     if e['detail'].get('what') == 'repeated failure signature')
+        obligation = None
         if recurred:
             pass             # already forced a change for this cause once and it recurred: paused below
         elif repeated:
             # Same root cause twice in a row: retrying the same way is waste (v10-v15 on P-bbad3c).
-            recovery_note = (f'The same root cause failed twice in a row: {repeated}. '
-                             'Continuing the same way is not allowed; change provider or approach.')
-            self.store.event(pid, 'strategy_pending', recovery_note=recovery_note, forbid_continue=True,
-                             verification_round=fails, trigger='repeated')
-            pending = self.store.events(pid, {'strategy_pending'})[-1]['id']
-            self._strategy(pid, recovery_note=recovery_note, forbid_continue=True)
-            self.store.event(pid, 'strategy_done', pending=pending)
-            # Recorded only once the change is applied: an interrupted strategy call is not a forced change.
-            self.store.event(pid, 'decision', what='repeated failure signature', why=repeated, by='engine')
-        elif misconfigured := self._misconfigured_probes(pid):
-            # The probe, not the product, is wrong: the CEO who wrote the runtime spec fixes it (a developer
-            # rework cannot make prose clickable). Same checks, valid selectors — the bar is not lowered.
-            recovery_note = ('Runtime Acceptance probes are MISCONFIGURED (not product failures): '
-                             + ' | '.join(misconfigured) + '. Return the runtime spec with these probes fixed: '
-                             "BROWSER http_body = CSS selectors separated by '||' that exist in the deliverable "
-                             '(use the listed ids); keep what each probe checks.')
-            self.store.event(pid, 'strategy_pending', recovery_note=recovery_note, forbid_continue=False,
-                             verification_round=fails, trigger='misconfigured')
-            pending = self.store.events(pid, {'strategy_pending'})[-1]['id']
-            self._strategy(pid, recovery_note=recovery_note)
-            self.store.event(pid, 'strategy_done', pending=pending)
+            obligation = dict(recovery_note=(f'The same root cause failed twice in a row: {repeated}. '
+                                              'Continuing the same way is not allowed; change provider or approach.'),
+                              forbid_continue=True, trigger='repeated', signature=repeated)
         elif fails % gov.STRATEGY_EVERY == 0:
-            self.store.event(pid, 'strategy_pending', recovery_note=None, forbid_continue=False,
-                             verification_round=fails, trigger='periodic')
-            pending = self.store.events(pid, {'strategy_pending'})[-1]['id']
-            self._strategy(pid)
-            self.store.event(pid, 'strategy_done', pending=pending)
-        if fails >= self.store.project(pid)['budget']:
-            self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
-                                  f'with more rounds (resume --rounds N), or change/stop the goal.')
-        elif recurred:       # another rebuild the same way is waste
-            self.store.pause(pid, f'NEEDS_DECISION: the same failure ({repeated}) recurred after a forced change '
-                                  'of approach. The Owner decides how to continue.')
+            obligation = dict(recovery_note=None, forbid_continue=False, trigger='periodic')
+        stop = (f'{fails} builds failed verification. The standard is not lowered; Owner may resume with more '
+                f'rounds (resume --rounds N), or change/stop the goal.' if fails >= p['budget'] else
+                f'NEEDS_DECISION: the same failure ({repeated}) recurred after a forced change of approach. The '
+                'Owner decides how to continue.' if recurred else None)
+        # One transaction: REWORK, the strategy obligation and any stop. A crash in between can no longer
+        # leave REWORK without its decided strategy review (resumed by _rework) or without its stop.
+        with self.store.tx():
+            self.store.update(pid, iteration=p['iteration'] + 1)
+            self.store.set_state(pid, 'REWORK', reason=f'verification FAIL #{fails}')
+            if review is not None:
+                self.store.event(pid, 'probe_review_applied', pending=review)
+            pending = (self.store.event(pid, 'strategy_pending', verification_round=fails, **obligation)
+                       if obligation else None)
+            if stop:
+                self.store.pause(pid, stop)
+        if pending is not None:
+            self._complete_strategy(pid, pending, obligation)
+
+    def _complete_strategy(self, pid, pending, detail):
+        """Run a recorded strategy obligation and mark it done (also used on resume by _rework)."""
+        self._strategy(pid, recovery_note=detail.get('recovery_note'), forbid_continue=detail.get('forbid_continue', False))
+        self.store.event(pid, 'strategy_done', pending=pending)
+        if detail.get('trigger') == 'repeated':
+            # Recorded only once the change is applied: an interrupted strategy call is not a forced change.
+            self.store.event(pid, 'decision', what='repeated failure signature', why=detail.get('signature'), by='engine')
 
     def _connections(self, pid):
         """The delivered program's external connections with the Owner's RECORDED decision, for every agent.
@@ -932,15 +1076,9 @@ class Engine:
                      "approved domain as planned, enabled by default with an offline switch; never a denied or "
                      "unlisted one. This supersedes any earlier note saying approval is pending or declined.")}}
 
-    def _misconfigured_probes(self, pid):
-        """Problems of runtime probes the harness could not execute as written, in the latest verification."""
-        last = (self.store.verifications(pid) or [None])[-1]
-        steps = ((last or {}).get('checks') or {}).get('runtime', {}).get('steps', []) if last else []
-        return [f"{s['name']}: {'; '.join(s.get('problems', []))}"[:600] for s in steps if s.get('probe_misconfigured')]
-
     def _repeated_failure(self, pid):
         """The failure code shared by the last two FAILs, else None."""
-        fails = [v for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'][-2:]
+        fails = self._product_failures(pid)[-2:]
         if len(fails) < 2:
             return None
         codes = [failure_code(v) for v in fails]
@@ -994,6 +1132,15 @@ class Engine:
                     access = access + kept
                     self.store.event(pid, 'decision', what='Owner-approved network access kept',
                                      why=', '.join(e['domain'] for e in kept), by='engine')
+            if access is not None and self.store.project(pid)['state'] == 'VERIFYING':
+                # Same-artifact recovery (probe review / re-verification) never passes the STAFFING approval gate:
+                # a new connection here would bypass the Owner, so only already-approved domains may stay.
+                current = {e['domain'] for e in (plan.get('network_access') or [])}
+                extra = [e['domain'] for e in access if e['domain'] not in current and e['domain'] not in approved]
+                if extra:
+                    access = [e for e in access if e['domain'] not in extra]
+                    self.store.event(pid, 'decision', what='network expansion deferred', by='engine',
+                                     why=f"same-artifact recovery cannot add unapproved connections: {', '.join(extra)}")
             if access is not None and access != (plan.get('network_access') or []):
                 # The program's external connections may change on re-plan; the approval gate before
                 # STAFFING asks the Owner for anything not already approved or reusable.
@@ -1002,9 +1149,7 @@ class Engine:
                 self.store.event(pid, 'decision', what='network access revised by strategy',
                                  why=', '.join(f"{a['domain']} [{a['risk']}]" for a in access) or 'none', by=used)
             if decision.get('runtime', {}).get('probes'):
-                probes, notes = preserve_probes((plan.get('runtime') or {}).get('probes', []),
-                                                decision['runtime']['probes'])
-                plan['runtime'] = runtime.normalize({**decision['runtime'], 'probes': probes})[0]
+                plan['runtime'], notes = preserve_runtime(plan.get('runtime'), decision['runtime'])
                 self.store.update(pid, plan=plan)
                 if notes:
                     self.store.event(pid, 'decision', what='runtime probes preserved', why='; '.join(notes), by='engine')
@@ -1020,7 +1165,8 @@ class Engine:
             with self.store.tx():
                 self.store.event(pid, 'recovery_replan', reason=reason, by='Owner/operator')
                 if p['state'] == 'PAUSED':
-                    self.store.update(pid, resume_state='REWORK')
+                    if p['resume_state'] != 'VERIFYING':
+                        self.store.update(pid, resume_state='REWORK')
                     self.store.resume(pid)
             self._strategy(pid, recovery_note=reason)
             self.write_handoff(pid)
@@ -1032,12 +1178,15 @@ class Engine:
         events = self.store.events(pid, {'strategy_pending', 'strategy_done'})
         pending = next((e for e in reversed(events) if e['kind'] == 'strategy_pending'), None)
         if pending and not any(e['kind'] == 'strategy_done' and e['detail'].get('pending') == pending['id'] for e in events):
-            detail = pending['detail']
-            self._strategy(pid, recovery_note=detail['recovery_note'], forbid_continue=detail['forbid_continue'])
-            self.store.event(pid, 'strategy_done', pending=pending['id'])
+            self._complete_strategy(pid, pending['id'], pending['detail'])
         if self.store.feedback(pid, pending_only=True):
             return self._owner_rework(pid)
-        fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+        history = self.store.verifications(pid)
+        if history and history[-1]['verdict'] == 'FAIL' and not any(
+                v['id'] == history[-1]['id'] for v in self._product_failures(pid)):
+            return self.store.pause(pid, 'HARNESS_BLOCKED: recovery requires re-verification, not a rebuild.',
+                                    resume_state='VERIFYING')
+        fails = len(self._product_failures(pid))
         if fails >= self.store.project(pid)['budget']:
             return self.store.pause(pid, f'{fails} builds failed verification. The standard is not lowered; Owner may resume '
                                         f'with more rounds (resume --rounds N), or change/stop the goal.')
@@ -1188,7 +1337,7 @@ class Engine:
         feedback = self.store.feedback(pid)
         context = {'owner_goal': p['goal'], 'current_plan': plan, **self._connections(pid),
                    'owner_confirmed_working_versions': sorted({f['iteration'] for f in feedback if f['verdict'] == 'works'}),
-                   'owner_feedback': [{'round': f['iteration'], 'verdict': f['verdict'], 'text': f['text'],
+                   'owner_feedback': [{'feedback_id': f['id'], 'round': f['iteration'], 'verdict': f['verdict'], 'text': f['text'],
                                        'new': f['handled_iteration'] is None} for f in feedback],
                    'delivered_artifact': ({'path': last['path'], 'content': artifacts.text_of(last)[:60000]}
                                           if last else None),
@@ -1206,6 +1355,15 @@ class Engine:
         new = self._sanitize({**plan, **{k: d[k] for k in ('interpretation', 'artifact_kind', 'artifact_filename',
                                                           'acceptance_criteria', 'verification_lenses', 'runtime',
                                                           'network_access', 'pipeline')}})
+        # Owner explicit change > prior contract; the CEO, retrieved knowledge or a trace alone cannot weaken it.
+        # A criterion leaves only with the Owner's own words as provenance; otherwise it is restored, and the
+        # runtime contract is then preserved too (T5). A grounded Owner change may revise the runtime as diagnosed.
+        owner_texts = [f['text'] for f in feedback if f['handled_iteration'] is None and f['verdict'] in ('problem', 'request')]
+        new['acceptance_criteria'], granted, restored = grounded_criteria(
+            plan['acceptance_criteria'], new['acceptance_criteria'], d.get('removed_criteria'), owner_texts)
+        if not granted:
+            new['runtime'], _ = preserve_runtime(plan.get('runtime'), new['runtime'])
+        new.pop('removed_criteria', None)
         # Reproduce: the revised acceptance run against the version the Owner has. If the problem is
         # real, this should fail now — and the rebuilt version must pass it.
         repro = self.runtime_evidence(last, new['runtime'], old_entry) if last else nothing
@@ -1217,8 +1375,12 @@ class Engine:
                                'diagnosis': d['diagnosis'], 'root_cause': d['root_cause'],
                                'change_summary': d['change_summary'],
                                'reproduced_on_previous_version': not repro['ok'], 'reproduction_failures': failed[:10]}
-        fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+        fails = len(self._product_failures(pid))
         with self.store.tx():
+            self.store.event(pid, 'requirements_changed_by_owner', before=plan['acceptance_criteria'],
+                             effective=new['acceptance_criteria'],
+                             removed=[{'criterion': c, 'owner_quote': q} for c, q in granted],
+                             restored_without_owner_provenance=restored)
             self.store.update(pid, plan=new, plan_version=p['plan_version'] + 1, budget=fails + gov.MAX_ROUNDS)
             self.store.event(pid, 'decision', what='owner feedback diagnosis',
                              why=f"{d['diagnosis']} | root cause: {d['root_cause']}", by=used)
@@ -1285,7 +1447,7 @@ class Engine:
                 self.store.update(pid, resume_state='PENDING_CLOSE')
                 self.store.resume(pid)
             elif text:
-                fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+                fails = len(self._product_failures(pid))
                 self.store.add_feedback(pid, it, 'request', text)
                 self.store.update(pid, iteration=it + 1, budget=fails + gov.MAX_ROUNDS, resume_state='REWORK')
                 self.store.resume(pid)                       # REWORK -> the CEO diagnoses the feedback first
@@ -1343,7 +1505,7 @@ class Engine:
         owner_act = max((e['id'] for e in self.store.events(pid, {'owner_action'})), default=0)
         ordered = [e for e in self.store.events(pid, {'decision'})
                    if e['detail'].get('what') == 'executive rework' and e['id'] > owner_act]
-        fails = sum(v['verdict'] == 'FAIL' for v in self.store.verifications(pid))
+        fails = len(self._product_failures(pid))
         plan = p['plan']
         if decision == 'rework' and report.get('directive') and len(ordered) < MAX_EXECUTIVE_REWORKS \
                 and fails < p['budget']:

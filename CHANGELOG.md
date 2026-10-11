@@ -3,6 +3,41 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## Unreleased - 2026-10-12
+
+Test #3 harness fix only (the Decision/Experience Trace work is kept out of main, preserved in
+workspace/checkpoints/2026-10-12-full-tree-with-decision-trace-B). Test #3 has not been re-run.
+
+### Added
+- Canonical probe semantics shared by planner, runtime and T5: expect_status <= 0 (incl. -1) = any status;
+  expect_exit < 0 = any exit.
+- Runtime failure classification from step evidence: product / harness / infra / ambiguous. Invalid probe
+  specification is harness, and its quoted text is never crash evidence.
+- CEO probe review (HARNESS_REPAIR / PRODUCT_DEFECT / UNRESOLVED) when there is no product evidence; a harness
+  repair re-verifies the SAME artifact. The review is durable across interruption.
+- Owner-grounded contract changes: on Owner-feedback rework, an existing acceptance criterion may be removed or
+  replaced only with the Owner's verbatim words as provenance; otherwise it is restored, and the runtime contract
+  is preserved.
+
+### Changed
+- T5 preserves exact positive statuses, explicit exit codes, assertions, probe inputs and runtime mode unless a
+  repair is validated as equivalent.
+- Product-failure accounting (budget, repeat detection, identical-build guard) uses the same bounded gate as
+  verification; harness checks never spend the product budget.
+- REWORK, its strategy obligation and any budget/recurrence stop commit in one transaction.
+- Same-artifact recovery (still VERIFYING) cannot add unapproved network connections; the expansion is deferred and
+  recorded.
+
+### Fixed
+- Test #3 (P-20261010-c88366): a correct product failed 4 times on "status 201, expected -1", was treated as a product
+  defect, rebuilt, EXHAUSTED; T5 undid the CEO's correct probe repair.
+
+### Verification
+- See the test results recorded with this change (targeted, related, full suite).
+
+### Known issues
+- Not yet validated on a real project (P-20261010-c88366 re-verification awaits Owner approval).
+
 ## [0.1.33] - 2026-10-10
 
 Re-planning uses knowledge searched for the current problem (autonomy gap 6).

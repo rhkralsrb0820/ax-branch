@@ -69,7 +69,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(ev['ok'], ev)
 
     @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
-    def test_prose_or_missing_click_selector_is_a_misconfigured_probe(self):
+    def test_invalid_selector_is_harness_but_missing_element_is_ambiguous(self):
         page = b"<html><body><button id=go>Go</button><div id=out>ready</div></body></html>"
         code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page))
         for body, why in (('Click the first sample and assert the summary', 'matched nothing'), ('Click: [sample', 'is not a CSS selector'),
@@ -78,8 +78,9 @@ class RuntimeTests(unittest.TestCase):
             ev = self.check(code, {**WEB, 'probes': [WEB['probes'][0], browser_probe]})
             step = next(s for s in ev['steps'] if s['name'] == 'click')
             self.assertFalse(step['ok'], step)
-            self.assertTrue(step.get('probe_misconfigured'), step)
-            self.assertIn('probe misconfigured', step['problems'][0])
+            invalid = why == 'is not a CSS selector'
+            self.assertEqual(bool(step.get('probe_misconfigured')), invalid, step)
+            self.assertEqual(runtime.classify_step(step), 'harness' if invalid else 'ambiguous')
             self.assertIn(why, step['problems'][0])
             self.assertIn('#go', step['problems'][0])                   # the ids the CEO can use
 
@@ -348,6 +349,22 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn('refused', ev['steps'][0]['stdout_tail'])
         self.assertIn('local ok', ev['steps'][0]['stdout_tail'])
         self.assertEqual((ev['network']['external_count'], ev['network']['external_unblocked']), (1, 0))
+
+    def test_unspecified_status_accepts_any_success_and_explicit_status_is_enforced(self):
+        # Test #3: expect_status -1 meant "any" to the CEO and "must be -1" to the check.
+        page = probe('page', '/', ['Stock dashboard'])
+        for code, expect, ok in ((200, -1, True), (201, -1, True), (201, 200, False), (201, 0, True)):
+            server = SERVER.replace('MODE', OK_MODE).replace('self.send_response(200)', f'self.send_response({code})')
+            step = self.check(server, {**WEB, 'probes': [{**page, 'expect_status': expect}]})['steps'][1]
+            self.assertEqual(step['ok'], ok, (code, expect, step['problems']))
+        self.assertEqual(runtime.canonical_probe({'expect_status': -1, 'expect_exit': -5}),
+                         {'expect_status': 0, 'expect_exit': -1})
+        self.assertEqual([runtime.classify_step(s) for s in (
+            {'ok': False, 'problems': ['status 201, expected 200'], 'status': 201},
+            {'ok': False, 'problems': ['connection lost: x']},
+            {'ok': False, 'probe_misconfigured': True, 'problems': ['probe misconfigured']},
+            {'ok': False, 'problems': ['browser did not finish within 90s (2 attempts)']})],
+            ['ambiguous', 'product', 'harness', 'ambiguous'])
 
     def test_subprocess_probe_has_no_http_method(self):
         selftest = {**probe('self-test', '', []), 'args': ['selftest']}

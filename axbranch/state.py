@@ -318,8 +318,9 @@ class Store:
                 for r in self.db.execute('SELECT * FROM verifications WHERE project_id=? ORDER BY created', (pid,))]
 
     def event(self, pid, kind, **detail):
-        self.db.execute('INSERT INTO events(project_id,at,kind,detail) VALUES(?,?,?,?)',
-                        (pid, time.time(), kind, json.dumps(detail, ensure_ascii=False)))
+        cursor = self.db.execute('INSERT INTO events(project_id,at,kind,detail) VALUES(?,?,?,?)',
+                                 (pid, time.time(), kind, json.dumps(detail, ensure_ascii=False)))
+        return cursor.lastrowid
 
     def events(self, pid, kinds=None):
         rows = [{**dict(r), 'detail': json.loads(r['detail'])}

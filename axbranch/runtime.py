@@ -136,6 +136,52 @@ def browser():
     return next((p for p in EDGE_PATHS if os.path.isfile(p)), None) or shutil.which('msedge') or shutil.which('chrome')
 
 
+def canonical_probe(probe):
+    """One meaning for every consumer (planner contract, runtime check, strategy preservation):
+    expect_status <= 0 means "any status" (canonical 0); expect_exit < 0 means "any exit" (canonical -1).
+    Test #3: the CEO wrote expect_status -1 ("any", as documented for expect_exit) and the check demanded status -1."""
+    probe = dict(probe)
+    try:
+        status = int(probe.get('expect_status') or 0)
+    except (TypeError, ValueError):
+        status = 0
+    probe['expect_status'] = status if status > 0 else 0
+    try:
+        code = int(probe.get('expect_exit', -1))
+    except (TypeError, ValueError):
+        code = -1
+    probe['expect_exit'] = code if code >= 0 else -1
+    return probe
+
+
+def classify_step(step):
+    """What a failed runtime step shows, from its own evidence only:
+    product   = the program itself misbehaved (crash, lost connection, server error, did not start/stop);
+    harness   = the probe configuration is demonstrably invalid;
+    infra     = the machine/browser failed;
+    ambiguous = a mismatch between the probe's expectation and the response (could be either side)."""
+    if step.get('ok'):
+        return None
+    problems = ' '.join(step.get('problems', []))
+    output = str(step.get('stderr_tail', '')) + str(step.get('output_tail', ''))
+    code = step.get('exit')
+    crashed = code not in (None, 0) and ('Traceback (most recent call last)' in output
+                                       or code < 0 or code >= 0x80000000)
+    if crashed or (step.get('status') or 0) >= 500:
+        return 'product'
+    if 'no headless browser' in problems:
+        return 'infra'
+    if 'browser did not finish' in problems:
+        return 'ambiguous'
+    if step.get('probe_misconfigured') and 'matched nothing' not in problems and not any(
+            c.get('problem') == 'missing' for c in step.get('clicks', [])):
+        return 'harness'                 # invalid probe (e.g. selector syntax): its quoted text is not product evidence
+    if any(k in problems for k in ('crashed', 'connection lost', 'request failed',
+            'did not finish within', 'exited', 'not listening', 'nothing listening', 'before serving', "'Traceback'")):
+        return 'product'
+    return 'ambiguous'
+
+
 def normalize(spec):
     """Enforce the launch contract deterministically (a prompt rule alone was not enough: a live
     plan asked for a web app with launch_args=[], which would bind a fixed port and open the
@@ -162,6 +208,7 @@ def normalize(spec):
                 method = method or 'GET'
             probes.append({**p, 'http_method': method})
         spec['probes'] = probes
+    spec['probes'] = [canonical_probe(p) for p in spec.get('probes', [])]
     return spec, notes
 
 
@@ -726,8 +773,8 @@ def _rendered(port, probe):
     if bad:
         what = 'is not a CSS selector' if bad['problem'] == 'invalid' else 'matched nothing on the page'
         ids = sorted(set(re.findall(r'\bid="([^"]+)"', dom)) - {'axb-report'})[:60]
-        step.update(ok=False, probe_misconfigured=True, clicks=report['clicks'],
-                    problems=[f"probe misconfigured: click selector {bad['selector'][:120]!r} {what} "
+        step.update(ok=False, probe_misconfigured=bad['problem'] == 'invalid', clicks=report['clicks'],
+                    problems=[f"click selector {bad['selector'][:120]!r} {what} "
                               "(http_body of a BROWSER probe = CSS selectors separated by '||'); "
                               f"element ids on the page: {', '.join('#' + i for i in ids) or 'none'}"])
         return step
@@ -774,12 +821,15 @@ def _http(port, probe):
             problems.append(f'response larger than {RESPONSE_LIMIT} bytes; checked only the first part')
         con.close()
         step.update(status=resp.status, body_tail=text[:800])
-        if probe.get('expect_status', 0) and resp.status != probe['expect_status']:
+        if canonical_probe(probe)['expect_status'] and resp.status != canonical_probe(probe)['expect_status']:
             problems.append(f"status {resp.status}, expected {probe['expect_status']}")
         missing = _contains(text, probe.get('expect_contains', []))
         if missing:
             problems.append(f'response lacks {missing}')
         problems += _present(text, probe)
+    except http.client.InvalidURL as e:
+        step['probe_misconfigured'] = True
+        problems.append(f'invalid request target: {e}')
     except (ConnectionResetError, ConnectionAbortedError, http.client.RemoteDisconnected, BrokenPipeError) as e:
         problems.append(f'connection lost: {type(e).__name__}: {e}')
     except (OSError, http.client.HTTPException) as e:
