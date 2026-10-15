@@ -56,5 +56,36 @@ class ProviderTreeTests(unittest.TestCase):
         self.assert_tree_dead()
 
 
+class AuthorityTests(unittest.TestCase):
+    """The recorded authority of a turn must be what the adapter flags actually enforce."""
+    def args_of(self, name, web):
+        seen = {}
+
+        def fake(provider, args, prompt, cwd, cancel, on_tick):
+            seen['args'] = args
+            raise providers.Rejected('stop here')
+        with mock.patch.object(providers, '_contained', fake), mock.patch.object(providers.shutil, 'which', lambda b: b):
+            with self.assertRaises(providers.Rejected):
+                providers.RUN[name]('p', {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False}, web)
+        return ' '.join(seen['args'])
+
+    def test_recorded_authority_matches_the_enforcing_flags(self):
+        for web in (False, True):
+            with self.subTest(web=web):
+                claude, codex = self.args_of('claude', web), self.args_of('codex', web)
+                self.assertEqual(providers.authority('claude', web)['web_research'], '--tools WebSearch,WebFetch' in claude)
+                self.assertIn('--disallowedTools Bash,Write,Edit,NotebookEdit,Task', claude)
+                self.assertIn('--restricted', claude)
+                self.assertIn('{"mcpServers":{}}', claude)
+                self.assertIn('--no-session-persistence', claude)
+                self.assertIn('--sandbox read-only', codex)
+                self.assertIn('features.shell_tool=false', codex)
+                self.assertIn('--ephemeral', codex)
+                self.assertIn(f'web_search="{"live" if web else "disabled"}"', codex)
+                self.assertEqual(providers.authority('codex', web)['web_research'], web)
+                self.assertFalse(providers.authority('claude', web)['shell'] or providers.authority('codex', web)['file_write'])
+        self.assertIsNone(providers.authority('gemini', False))                   # unknown provider: fail closed
+
+
 if __name__ == '__main__':
     unittest.main()

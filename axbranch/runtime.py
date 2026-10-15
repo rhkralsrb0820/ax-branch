@@ -35,9 +35,36 @@ def _obj(**props):
     return {'type': 'object', 'additionalProperties': False, 'properties': props, 'required': list(props)}
 
 
-PROBE = _obj(name=STR, args=_ARR(STR), stdin=STR, http_method={'type': 'string', 'enum': ['', 'GET', 'POST', 'BROWSER']},
-             http_path=STR, http_body=STR, expect_exit=INT, expect_status=INT, expect_contains=_ARR(STR),
-             expect_absent=_ARR(STR))
+HTTP_METHODS = ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
+PROBE = _obj(name=STR, args=_ARR(STR), stdin=STR,
+             http_method={'type': 'string', 'enum': ['', *HTTP_METHODS, 'BROWSER']},
+             http_path=STR, http_body=STR, http_headers=_ARR(STR), expect_exit=INT, expect_status=INT,
+             expect_contains=_ARR(STR), expect_absent=_ARR(STR))
+# Exact request headers ("Name: value") for direct HTTP probes, e.g. a hostile Origin that the app must refuse.
+# Framing headers stay the client's: a probe must not be able to desynchronise the request it is judged on.
+_HEADER_NAME = re.compile(r'^[A-Za-z0-9!#$%&\'*+.^_`|~-]{1,64}$')
+_FRAMING = {'content-length', 'transfer-encoding', 'connection', 'upgrade', 'expect', 'te', 'trailer'}
+MAX_HEADERS, MAX_HEADER_VALUE = 20, 1000
+
+
+def parse_headers(lines):
+    """[(name, value)] from "Name: value" strings, or raise ValueError naming the invalid one."""
+    out = []
+    for line in list(lines or [])[:MAX_HEADERS + 1]:
+        name, sep, value = str(line).partition(':')
+        name, value = name.strip(), value.strip()
+        if not sep or not _HEADER_NAME.match(name) or any(c in value for c in '\r\n\0') or len(value) > MAX_HEADER_VALUE:
+            raise ValueError(f'invalid header {str(line)[:80]!r}')
+        try:
+            value.encode('latin-1')                 # what http.client sends; anything else is not a valid header
+        except UnicodeEncodeError:
+            raise ValueError(f'header {name} value is not Latin-1 (percent-encode it)') from None
+        if name.lower() in _FRAMING:
+            raise ValueError(f'header {name} is set by the client, not by a probe')
+        out.append((name, value))
+    if len(out) > MAX_HEADERS:
+        raise ValueError(f'more than {MAX_HEADERS} headers')
+    return out
 SPEC = _obj(mode={'type': 'string', 'enum': ['none', 'cli', 'web', 'gui']}, owner_launch=STR,
             launch_args=_ARR(STR), probes=_ARR(PROBE))
 
@@ -138,7 +165,8 @@ def browser():
 
 def canonical_probe(probe):
     """One meaning for every consumer (planner contract, runtime check, strategy preservation):
-    expect_status <= 0 means "any status" (canonical 0); expect_exit < 0 means "any exit" (canonical -1).
+    expect_status <= 0 means "any status" (canonical 0) except a server error (5xx fails unless expected
+    explicitly); expect_exit < 0 means "any exit" (canonical -1).
     Test #3: the CEO wrote expect_status -1 ("any", as documented for expect_exit) and the check demanded status -1."""
     probe = dict(probe)
     try:
@@ -154,6 +182,9 @@ def canonical_probe(probe):
     return probe
 
 
+_QUOTES_PROBE = ('output lacks', 'response lacks', 'rendered page lacks', 'browser action', 'harness:')
+
+
 def classify_step(step):
     """What a failed runtime step shows, from its own evidence only:
     product   = the program itself misbehaved (crash, lost connection, server error, did not start/stop);
@@ -162,12 +193,16 @@ def classify_step(step):
     ambiguous = a mismatch between the probe's expectation and the response (could be either side)."""
     if step.get('ok'):
         return None
-    problems = ' '.join(step.get('problems', []))
+    # A message quoting what the probe EXPECTED (its own wording) is not evidence of what the program did:
+    # "expect:connection lost" missing from a healthy page must not read as a lost connection (Codex E1).
+    problems = ' '.join(p for p in step.get('problems', []) if not p.startswith(_QUOTES_PROBE))
     output = str(step.get('stderr_tail', '')) + str(step.get('output_tail', ''))
     code = step.get('exit')
     crashed = code not in (None, 0) and ('Traceback (most recent call last)' in output
                                        or code < 0 or code >= 0x80000000)
-    if crashed or (step.get('status') or 0) >= 500:
+    # server_errors: every 5xx the step observed (e.g. inside the exact Owner launch's flow), as structured evidence:
+    # never inferred from message text, which can quote what a probe wrote (Codex E3/E4).
+    if crashed or (step.get('status') or 0) >= 500 or step.get('server_errors'):
         return 'product'
     if 'no headless browser' in problems:
         return 'infra'
@@ -206,6 +241,8 @@ def normalize(spec):
                 method = ''
             else:
                 method = method or 'GET'
+            if p.get('http_headers') and method in ('', 'BROWSER'):
+                notes.append(f"probe {p.get('name')!r}: http_headers apply only to direct HTTP probes (ignored)")
             probes.append({**p, 'http_method': method})
         spec['probes'] = probes
     spec['probes'] = [canonical_probe(p) for p in spec.get('probes', [])]
@@ -356,9 +393,12 @@ def _check(spec, mode, base, cwd, ev, on_step):
                     ev['steps'].append({**_cli(base, probe), 'dispatch': 'subprocess'})
                 if on_step:
                     on_step(f"runtime: {probe['name']}")
-            first_http = next((pr for pr in probes if _is_http(pr) and pr.get('http_method') != 'BROWSER'), None)
+            # Replaying a POST/PUT/DELETE would mutate the app's data a second time and judge a different state.
+            first_http = next((pr for pr in probes if _is_http(pr) and (pr.get('http_method') or 'GET') == 'GET'), None)
             if first_http:   # still serving after the flow, and the first page still answers
-                again = _http(port, {**first_http, 'name': f"{first_http['name']} (again after flow)"})
+                # Only "it answers without a server error": the flow may have changed the data the first probe saw.
+                again = _http(port, {**first_http, 'name': f"{first_http['name']} (again after flow)",
+                                     'expect_status': 0, 'expect_contains': [], 'expect_absent': []})
                 ev['steps'].append(again)
             alive = proc.alive()
             ev['steps'].append({'name': 'server survived', 'ok': alive,
@@ -449,24 +489,31 @@ def _exact_owner_launch(base, spec):
             step.update(ok=False, problems=[f'nothing listening on {port}'], output_tail=proc.output()[-800:])
             return step
         http_probes = [pr for pr in spec.get('probes', []) if _is_http(pr) and pr.get('http_method') != 'BROWSER']
-        probes = http_probes or [
-            {'name': 'page', 'http_method': 'GET', 'http_path': '/', 'expect_status': 200, 'expect_contains': []}]
-        first = _http(port, {**probes[0], 'name': 'first page'})
+        # The page that is loaded first and again: a GET (replaying a POST/PUT/DELETE would mutate twice).
+        page = next((pr for pr in http_probes if (pr.get('http_method') or 'GET') == 'GET'), None) or {
+            'name': 'page', 'http_method': 'GET', 'http_path': '/', 'expect_status': 0 if http_probes else 200,
+            'expect_contains': []}
+        # Its content is judged only if it really is the first request; a later GET may depend on earlier mutations.
+        lenient = {} if not http_probes or page is http_probes[0] else {'expect_status': 0, 'expect_contains': [],
+                                                                         'expect_absent': []}
+        first = _http(port, {**page, 'name': 'first page', **lenient})
         problems = list(first['problems'])
         # Same process: the whole HTTP flow (e.g. its self-test endpoint), then still serving.
         # The probes were written for the verification launch (launch_args, e.g. --offline): their content
         # expectations are judged there. Here the same process must still answer every request: a lost
         # connection or a server error fails the Owner launch; content differences are recorded only.
         flow = [{k: s.get(k) for k in ('name', 'request', 'status', 'ok', 'problems')}
-                for s in (_http(port, pr) for pr in http_probes[1:])]
+                for s in (_http(port, pr) for pr in http_probes if pr is not page)]
         problems += [f"flow {s['name']}: {p}" for s in flow for p in s['problems']
                      if p.startswith(('connection lost', 'request failed')) or (s.get('status') or 0) >= 500]
         time.sleep(max(0.0, OBSERVE_SECONDS - (time.time() - t0)))
-        again = _http(port, {**probes[0], 'name': f'first page after {OBSERVE_SECONDS}s and the flow'})
+        again = _http(port, {**page, 'name': f'first page after {OBSERVE_SECONDS}s and the flow', 'expect_status': 0,
+                             'expect_contains': [], 'expect_absent': []})      # the flow may have changed the data
         if not again['ok']:
             problems += [f'after the flow: {p}' for p in again['problems']]
         if not proc.alive():
             problems.append(f'server exited (code {proc.proc.poll()})')
+        step['server_errors'] = [s.get('status') for s in (first, *flow, again) if (s.get('status') or 0) >= 500]
         step.update(status=first.get('status'), observed_seconds=round(time.time() - t0, 1),
                     alive_after_observation=proc.alive(), same_process_flow=flow,
                     same_process_flow_note='transport errors and 5xx are judged; content expectations target the '
@@ -582,17 +629,57 @@ const finish = () => {
     out.textContent = JSON.stringify(report).replace(/</g, '\\\\u003c');
     document.body.appendChild(out);
 };
-for (const selector of SELECTORS) {
+for (const item of SELECTORS) {
+    // Actions: "fill:SEL=>TEXT", "select:SEL=>VALUE", "wait:SEL", "expect:TEXT", "dialog:accept|dismiss"; else a click.
+    const m = /^(fill|select|wait|expect|dialog):([\\s\\S]*)$/.exec(item);
+    const op = m ? m[1] : 'click';
+    let selector = m ? m[2] : item, value = null;
+    if (op === 'fill' || op === 'select') {
+        const cut = selector.indexOf('=>');
+        if (cut < 0) { report.clicks.push({selector: item, op, problem: 'bad_action'}); return finish(); }
+        value = selector.slice(cut + 2); selector = selector.slice(0, cut).trim();
+    }
+    if (op === 'dialog') {
+        if (!['accept', 'dismiss'].includes(selector.trim())) { report.clicks.push({selector: item, op, problem: 'bad_action'}); return finish(); }
+        const yes = selector.trim() === 'accept';
+        window.confirm = () => yes; window.alert = () => {}; window.prompt = () => (yes ? '' : null);
+        report.clicks.push({selector: item, op, dialog: selector.trim()});
+        continue;
+    }
+    if (op === 'expect') {
+        const shown = document.body.innerText.includes(selector);
+        report.clicks.push(shown ? {selector: item, op, shown: true} : {selector: item, op, problem: 'expect_missing'});
+        if (!shown) return finish();
+        continue;
+    }
     const deadline = performance.now() + 5000;
     let element;
     try {
         while (!(element = document.querySelector(selector)) && performance.now() < deadline)
             await sleep(50);
-    } catch (e) { report.clicks.push({selector, problem: 'invalid'}); return finish(); }
-    if (!element) { report.clicks.push({selector, problem: 'missing'}); return finish(); }
+    } catch (e) { report.clicks.push({selector, op, problem: 'invalid'}); return finish(); }
+    if (!element) { report.clicks.push({selector, op, problem: 'missing'}); return finish(); }
+    if (op === 'wait') { report.clicks.push({selector, op, found: true}); continue; }
     const before = detailsState();
     const clickedAt = performance.now();
-    element.click();
+    if (op === 'click') element.click();
+    else {
+        const proto = [HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement].find(c => element instanceof c);
+        if (!proto || (op === 'select') !== (proto === HTMLSelectElement)) {
+            report.clicks.push({selector, op, problem: 'not_fillable', tag: element.tagName.toLowerCase()}); return finish();
+        }
+        if (element.matches(':disabled') || element.readOnly) {   // incl. a disabled <fieldset>: the Owner could not type
+            report.clicks.push({selector, op, problem: 'not_editable'}); return finish();
+        }
+        // The native setter + input/change events: what typing does, so frameworks that track input see it.
+        element.focus();
+        Object.getOwnPropertyDescriptor(proto.prototype, 'value').set.call(element, value);
+        element.dispatchEvent(new Event('input', {bubbles: true}));
+        element.dispatchEvent(new Event('change', {bubbles: true}));
+        if (op === 'select' && element.value !== value) {
+            report.clicks.push({selector, op, problem: 'no_such_option', value}); return finish();
+        }
+    }
     let timedOut = false;
     while (true) {
         const now = performance.now();
@@ -600,7 +687,8 @@ for (const selector of SELECTORS) {
         if (now - clickedAt > SETTLE_MS) { timedOut = true; break; }
         await sleep(50);
     }
-    report.clicks.push({selector, clicked: true, tag: element.tagName.toLowerCase(), id: element.id || null,
+    report.clicks.push({selector, op, clicked: op === 'click', filled: op !== 'click' ? value : undefined,
+                        tag: element.tagName.toLowerCase(), id: element.id || null,
                         at_ms: Math.round(clickedAt), requests_settled: !timedOut, pending_at_end: net.pending,
                         settle_ms: Math.round(performance.now() - clickedAt), quiet_ms_required: CLICK_WAIT_MS,
                         details_before: before, details_after: detailsState()});
@@ -733,6 +821,9 @@ def _rendered(port, probe):
     happen) and check the RENDERED text — script source is stripped so code text cannot fake a match."""
     path = probe.get('http_path') or '/'
     step = {'name': probe['name'], 'request': f'BROWSER {path}'}
+    if not path.startswith('/'):        # '@host:port/' after the proxy address would leave the app (Codex E1)
+        step.update(ok=False, probe_misconfigured=True, problems=['http_path must start with /'])
+        return step
     exe = browser()
     if exe is None:
         step.update(ok=False, problems=['no headless browser available on this PC (Edge/Chrome)'])
@@ -771,11 +862,17 @@ def _rendered(port, probe):
                               f'within {SETTLE_MS} ms; later clicks were not run (evidence incomplete)'])
         return step
     if bad:
-        what = 'is not a CSS selector' if bad['problem'] == 'invalid' else 'matched nothing on the page'
+        what = {'invalid': 'is not a CSS selector', 'missing': 'matched nothing on the page',
+                'bad_action': "is not a valid action (fill:SEL=>TEXT, select:SEL=>VALUE, wait:SEL, expect:TEXT, "
+                              "dialog:accept|dismiss)",
+                'not_fillable': f"is a <{bad.get('tag')}>, not a field that action can fill",
+                'no_such_option': f"has no option {bad.get('value')!r}",
+                'expect_missing': 'was not shown on the page at that point of the flow',
+                'not_editable': 'targets a disabled or read-only field the Owner cannot type into'}[bad['problem']]
         ids = sorted(set(re.findall(r'\bid="([^"]+)"', dom)) - {'axb-report'})[:60]
-        step.update(ok=False, probe_misconfigured=bad['problem'] == 'invalid', clicks=report['clicks'],
-                    problems=[f"click selector {bad['selector'][:120]!r} {what} "
-                              "(http_body of a BROWSER probe = CSS selectors separated by '||'); "
+        step.update(ok=False, probe_misconfigured=bad['problem'] in ('invalid', 'bad_action'), clicks=report['clicks'],
+                    problems=[f"browser action {bad['selector'][:120]!r} {what} "
+                              "(http_body of a BROWSER probe = actions separated by '||'); "
                               f"element ids on the page: {', '.join('#' + i for i in ids) or 'none'}"])
         return step
     text = report['innerText']
@@ -812,6 +909,22 @@ def _http(port, probe):
     step = {'name': probe['name'], 'request': f"{method} {probe.get('http_path') or '/'}"}
     problems = []
     try:
+        explicit = parse_headers(probe.get('http_headers'))
+    except ValueError as e:
+        step.update(ok=False, probe_misconfigured=True, problems=[str(e)])
+        return step
+    if method not in HTTP_METHODS:
+        step.update(ok=False, probe_misconfigured=True, problems=[f'unsupported http_method {method!r}'])
+        return step
+    if not (probe.get('http_path') or '/').startswith('/'):
+        step.update(ok=False, probe_misconfigured=True, problems=['http_path must start with /'])
+        return step
+    for name, value in explicit:            # an explicit header replaces the inferred one of the same name
+        headers = {k: v for k, v in headers.items() if k.lower() != name.lower()}
+        headers[name] = value
+    if explicit:
+        step['headers'] = [f'{n}: {v[:200]}' for n, v in explicit]
+    try:
         con = http.client.HTTPConnection('127.0.0.1', port, timeout=PROBE_TIMEOUT)
         con.request(method, probe.get('http_path') or '/', body=body.encode('utf-8') if body else None, headers=headers)
         resp = con.getresponse()
@@ -823,6 +936,8 @@ def _http(port, probe):
         step.update(status=resp.status, body_tail=text[:800])
         if canonical_probe(probe)['expect_status'] and resp.status != canonical_probe(probe)['expect_status']:
             problems.append(f"status {resp.status}, expected {probe['expect_status']}")
+        elif not canonical_probe(probe)['expect_status'] and resp.status >= 500:
+            problems.append(f'status {resp.status} (server error; "any status" never includes one)')
         missing = _contains(text, probe.get('expect_contains', []))
         if missing:
             problems.append(f'response lacks {missing}')

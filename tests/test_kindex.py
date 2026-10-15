@@ -158,5 +158,71 @@ class KnowledgeIndexTests(unittest.TestCase):
         self.assertEqual(knowledge.retrieve(self.vault, '회의록 관리 도구'), before)
 
 
+class RuntimeExperienceTests(unittest.TestCase):
+    """Provisional runtime experience: available without an Owner archive, structured, honest about its status."""
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.store = Store(self.tmp / 'ax.sqlite3')
+
+    def tearDown(self):
+        self.store.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def project(self, goal, title, *rounds):
+        """rounds: (verdict, steps) in order; each on its own artifact version."""
+        pid = self.store.new_project(goal)
+        self.store.update(pid, plan={'title': title, 'acceptance_criteria': ['works']})
+        agent = self.store.add_agent(pid, 'Developer', 'claude')
+        for i, (verdict, steps) in enumerate(rounds, 1):
+            art = self.store.add_artifact(pid, i, self.tmp / f'{pid}{i}.py', f'sha{i}', 'python', agent)
+            self.store.add_verification(pid, art, i, verdict, {'verdict': verdict, 'criteria': [], 'findings': [
+                {'severity': 'major', 'kind': 'product', 'criterion': 0, 'issue': 'SECRET finding text'}]},
+                _checks(*steps) if verdict == 'FAIL' else {'ok': True, 'runtime': {'ok': True, 'steps': steps}},
+                'claude')
+        return pid
+
+    def test_other_projects_runtime_experience_is_available_structured_and_labelled(self):
+        ok_step = {'name': 'add log', 'ok': True}
+        board = self.project('업무 기록 보드 웹 도구', '업무 보드', ('FAIL', [HARNESS]), ('PASS', [ok_step]))
+        other = self.project('업무 기록 메모 웹 도구', '메모', ('FAIL', [HARNESS]), ('PASS', []))
+        current = self.project('업무 기록 타임시트 웹 도구', '타임시트', ('FAIL', [HARNESS]))
+        cards = knowledge.experience(self.store, '업무 기록 타임시트 웹 도구', current)
+        by = {c['project']: c for c in cards}
+        self.assertEqual(set(by), {board, other})                                  # never the current project
+        self.assertTrue(all(c['status'].startswith('PROVISIONAL') for c in cards))
+        self.assertEqual(by[board]['cause'], 'HARNESS (VERIFIED)')                 # attribution status carried
+        self.assertEqual(by[board]['outcome'], 'a later version passed this same check')
+        self.assertEqual(by[other]['outcome'], 'a later run passed verification, but this check was not re-run')
+        self.assertEqual(by[board]['observation'],
+                         'a runtime check failed: HTTP status differed from the expected one (evidence class harness)')
+        for private in ('SECRET', '업무 기록 보드', 'add log', 'expected -1'):     # findings, goal, check name, problem
+            self.assertNotIn(private, str(cards))                                  # text: matched, never shown
+        # the Owner closed it without saving: gone, at once (nothing cached)
+        self.store.update(board, closed_mode='discard')
+        self.assertEqual([c['project'] for c in knowledge.experience(self.store, '업무 기록 타임시트 웹 도구', current)], [other])
+
+    def test_signature_match_time_bound_and_per_project_cap(self):
+        crash = {'name': 'launch', 'ok': False, 'exit': 1, 'problems': ['crashed (exit 1)'],
+                 'output_tail': 'Traceback (most recent call last):\n boom'}
+        far = self.project('주식 분석', '주식', ('FAIL', [HARNESS, crash, {'name': 'api', 'ok': False, 'problems': ['connection lost: reset']}]))
+        cut = self.store.verifications(far)[-1]['created']
+        self.project('주식 분석 2', '주식2', ('PASS', []))
+        cards = knowledge.experience(self.store, '전혀 다른 목표', None, signatures=[KI.signature(HARNESS)])
+        self.assertEqual([c['project'] for c in cards], [far])                     # no shared words needed
+        self.assertEqual(len(knowledge.experience(self.store, '주식 분석 launch api add log', None, limit=5)), 2)
+        late = self.project('주식 분석 3', '주식3', ('FAIL', [HARNESS]))
+        past = knowledge.experience(self.store, '주식 분석', None, before=cut)
+        self.assertNotIn(late, [c['project'] for c in past])
+        self.assertEqual({c['title'] for c in past}, {''})                         # today's title is not a past fact
+
+    def test_re_verifying_the_same_version_is_not_a_later_version(self):
+        pid = self.project('업무 기록 웹 도구', '업무', ('FAIL', [HARNESS]))
+        art = self.store.artifacts(pid)[0]['id']
+        self.store.add_verification(pid, art, 1, 'PASS', {'verdict': 'PASS', 'criteria': [], 'findings': []},
+                                    {'ok': True, 'runtime': {'ok': True, 'steps': [{'name': 'add log', 'ok': True}]}}, 'claude')
+        (card,) = knowledge.experience(self.store, '업무 기록 웹 도구', None)
+        self.assertEqual(card['outcome'], 'the same version passed this check when re-verified')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -223,6 +223,17 @@ def run_codex(prompt, schema, web=False, cancel=None, on_tick=None):
 RUN = {'claude': run_claude, 'codex': run_codex}
 
 
+def authority(name, web):
+    """The authority one turn on `name` actually has, as its adapter flags above enforce it (tests tie this to the
+    flags). Any other provider name has no known enforcement: None (fail closed, recorded as unknown)."""
+    if name not in RUN:
+        return None
+    return {'web_research': bool(web), 'shell': False, 'file_write': False, 'mcp_servers': False,
+            'session_persistence': False, 'workdir': 'empty temp dir, deleted after the turn',
+            'enforced_by': {'claude': '--restricted, --tools/--disallowedTools, empty MCP config, no session persistence',
+                            'codex': '--sandbox read-only, shell_tool/unified_exec off, --ephemeral, web_search flag'}[name]}
+
+
 def call(prompt, schema, prefer='claude', web=False, cancel=None, on_tick=None):
     """One agent turn. Tries `prefer` first, then the other provider ONLY on an
     observed quota refusal (or a missing CLI). Returns (result, provider_used, notes).

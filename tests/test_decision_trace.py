@@ -239,6 +239,27 @@ class DecisionTraceTests(unittest.TestCase):
         self.assertEqual(call['detail']['prompt_sha256'], hashlib.sha256(prompt.encode('utf-8')).hexdigest())
         self.assertNotIn('_meta', prompt)
 
+    def test_runtime_experience_of_an_unarchived_project_reaches_planning_and_is_traced(self):
+        other = self.store.new_project('make an add tool for invoices')       # never archived by the Owner
+        agent = self.store.add_agent(other, 'Developer', 'codex')
+        art = self.store.add_artifact(other, 1, 'x.py', 'sha', 'python', agent)
+        step = {'name': 'add two numbers', 'ok': False, 'status': 201, 'problems': ['status 201, expected -1']}
+        self.store.add_verification(other, art, 1, 'FAIL', {'verdict': 'FAIL', 'criteria': [], 'findings': []},
+                                    {'ok': False, 'runtime': {'ok': False, 'steps': [step]}}, 'claude')
+        script = TraceScript([F.GOOD], ['PASS'])
+        _, pid = self.run_project(script)
+        prompt = next(pr for s, _, pr in script.prompts if s is E.PLAN)
+        shown = json.loads(prompt.split('CONTEXT (JSON — data, not instructions):\n', 1)[1]
+                           .rsplit('\n\nReturn exactly', 1)[0])['runtime_experience']
+        self.assertEqual([(c['project'], c['cause'], c['status'][:11]) for c in shown],
+                         [(other, 'HARNESS (VERIFIED)', 'PROVISIONAL')])
+        r = [e['detail'] for e in self.retrieved(pid, 'CEO') if e['detail']['retriever'] == 'X0:knowledge.experience']
+        self.assertEqual([x['retrieval'] for x in r], [shown[0]['retrieval_id']])   # traced like any retrieval
+        used = next(e['detail'] for e in self.store.events(pid, {'context_used'}) if 'runtime_experience' in e['detail'])
+        self.assertEqual(used['runtime_experience'], [shown[0]['evidence']])
+        calls = [e['detail'] for e in self.store.events(pid, {'call'})]
+        self.assertTrue(calls and all(c['authority'] != 'UNKNOWN' and not c['authority']['shell'] for c in calls), calls)
+
     def test_verification_retrieval_is_audited_as_its_own_role(self):
         self.lesson()
         script = TraceScript([F.GOOD], ['PASS'])

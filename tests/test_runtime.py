@@ -372,6 +372,135 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([p['http_method'] for p in spec['probes']], ['', 'GET'])
         self.assertIn('subprocess probe', notes[0])
 
+    CRUD = '''import sys, json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+port = int(sys.argv[sys.argv.index('--port') + 1]) if '--port' in sys.argv else 0
+items, posts = {}, []
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def reply(self, code, obj):
+        body = json.dumps(obj).encode(); self.send_response(code); self.end_headers(); self.wfile.write(body)
+    def guarded(self):
+        origin = self.headers.get('Origin')
+        if origin and origin != f'http://127.0.0.1:{srv.server_port}':
+            self.reply(403, {'error': 'origin'}); return False
+        return True
+    def do_GET(self): self.reply(200, {'items': items, 'posts': len(posts)})
+    def do_POST(self):
+        if not self.guarded(): return
+        t = json.loads(self.rfile.read(int(self.headers['Content-Length'])))['t']
+        if t in items.values(): self.reply(409, {'error': 'duplicate'}); return
+        posts.append(1); items[str(len(posts))] = t
+        self.reply(201, {'id': str(len(posts))})
+    def do_PUT(self):
+        if not self.guarded(): return
+        items[self.path.rsplit('/', 1)[1]] = json.loads(self.rfile.read(int(self.headers['Content-Length'])))['t']
+        self.reply(200, {'items': items})
+    def do_DELETE(self):
+        if not self.guarded(): return
+        items.pop(self.path.rsplit('/', 1)[1], None); self.reply(200, {'items': items})
+srv = HTTPServer(('127.0.0.1', port), H)
+print(f'Serving at http://127.0.0.1:{srv.server_port}/', flush=True)
+srv.serve_forever()
+'''
+
+    def req(self, name, method, path, body='', headers=(), status=0, contains=(), absent=()):
+        return {'name': name, 'args': [], 'stdin': '', 'http_method': method, 'http_path': path, 'http_body': body,
+                'http_headers': list(headers), 'expect_exit': -1, 'expect_status': status,
+                'expect_contains': list(contains), 'expect_absent': list(absent)}
+
+    def test_put_delete_and_exact_origin_header_without_replaying_a_mutation(self):
+        flow = [self.req('create', 'POST', '/api/items', '{"t": "milk"}', status=201),
+                self.req('rename', 'PUT', '/api/items/1', '{"t": "bread"}', contains=['bread']),
+                self.req('hostile delete', 'DELETE', '/api/items/1', headers=['Origin: http://evil.example'], status=403),
+                self.req('still there', 'GET', '/api/items', contains=['bread', '"posts": 1']),
+                self.req('delete', 'DELETE', '/api/items/1', absent=['bread'])]
+        ev = self.check(self.CRUD, {**WEB, 'probes': flow})
+        self.assertTrue(ev['ok'], [s for s in ev['steps'] if not s['ok']])
+        steps = {s['name']: s for s in ev['steps']}
+        self.assertEqual(steps['hostile delete']['headers'], ['Origin: http://evil.example'])
+        again = steps['still there (again after flow)']                     # the GET is replayed, the POST is not
+        self.assertIn('"posts": 1', again['body_tail'])
+        # the exact Owner launch replays nothing that mutates either (a second POST would be a 409) - Codex E1
+        self.assertTrue(steps['exact Owner launch (no arguments)']['ok'], steps['exact Owner launch (no arguments)'])
+
+    @unittest.skipUnless(runtime.browser(), 'no headless browser on this machine')
+    def test_browser_types_selects_confirms_and_asserts_a_crud_flow(self):
+        # cfa1d6 / 3a4f60 / 3e5ca9: typing, editing and confirmed deletion were never exercised in a browser.
+        page = ("<html><body><input id=t><input id=ro readonly value=x><fieldset disabled><input id=fs></fieldset><select id=c><option value=a>식비</option><option value=b>교통</option>"
+                "</select><button id=add>추가</button><ul id=l></ul><script>"
+                "let n=0; add.onclick=()=>{ if(!t.value) return; const li=document.createElement('li');"
+                "li.textContent=t.value+' / '+c.options[c.selectedIndex].text; const d=document.createElement('button');"
+                "d.className='del'; d.textContent='삭제'; d.onclick=()=>{ if(confirm('삭제?')) li.remove(); };"
+                "li.append(d); l.append(li); t.value=''; };"
+                "</script></body></html>")
+        code = SERVER.replace('MODE', OK_MODE).replace("b'<h1>Stock dashboard</h1>'", repr(page.encode()))
+        code = code.replace('self.end_headers()',
+                            "self.send_header('Content-Type', 'text/html; charset=utf-8' if self.path == '/' else "
+                            "'application/json'); self.send_header('Content-Length', str(len(body))); self.end_headers()")
+
+        def run(body, contains=(), absent=()):
+            p = {**probe('flow', '/', list(contains)), 'http_method': 'BROWSER', 'http_body': body,
+                 'expect_absent': list(absent)}
+            return next(s for s in self.check(code, {**WEB, 'probes': [p]})['steps'] if s['name'] == 'flow')
+
+        add = 'fill:#t=>우유 사기||select:#c=>b||#add||expect:우유 사기 / 교통'
+        kept = run(add + '||dialog:dismiss||.del', contains=['우유 사기 / 교통'])
+        self.assertTrue(kept['ok'], kept)
+        self.assertEqual([c['op'] for c in kept['clicks']], ['fill', 'select', 'click', 'expect', 'dialog', 'click'])
+        gone = run(add + '||dialog:accept||.del', absent=['우유 사기'])
+        self.assertTrue(gone['ok'], gone)
+        for body, misconfigured in (('fill:#t', True), ('dialog:maybe', True), ('fill:#add=>x', False),
+                                    ('select:#c=>zzz', False), ('#add||expect:우유 사기', False), ('fill:#ro=>y', False), ('fill:#fs=>y', False)):
+            with self.subTest(body=body):
+                step = run(body)
+                self.assertEqual((step['ok'], bool(step.get('probe_misconfigured'))), (False, misconfigured), step)
+
+    def test_framing_or_malformed_headers_are_a_harness_defect(self):
+        for bad in ('Content-Length: 0', 'X-Evil: a\r\nInjected: 1', 'no colon here', 'X-Test: 우유'):
+            with self.subTest(bad=bad):
+                ev = self.check(self.CRUD, {**WEB, 'probes': [self.req('p', 'GET', '/', headers=[bad])]})
+                step = next(s for s in ev['steps'] if s['name'] == 'p')
+                self.assertEqual((step['ok'], step.get('probe_misconfigured')), (False, True))
+                self.assertEqual(runtime.classify_step(step), 'harness')
+
+    def test_any_status_never_accepts_a_server_error_in_either_launch(self):
+        code = SERVER.replace('MODE', "if self.path.startswith('/api'): self.send_response(500); self.end_headers(); return")
+        ev = self.check(code, {**WEB, 'probes': [probe('page', '/', ['Stock dashboard']), probe('api', '/api/x', [], 0)]})
+        steps = {s['name']: s for s in ev['steps']}
+        self.assertEqual((steps['api']['ok'], runtime.classify_step(steps['api'])), (False, 'product'))
+        self.assertFalse(steps['exact Owner launch (no arguments)']['ok'])            # Codex E2: flow 5xx counted
+        self.assertIn('flow api: status 500', str(steps['exact Owner launch (no arguments)']['problems']))
+
+    def test_a_server_error_only_in_the_exact_owner_launch_is_product_evidence(self):
+        code = SERVER.replace('MODE', "if '--port' not in sys.argv and self.path.startswith('/api'): "
+                                      "self.send_response(500); self.end_headers(); return")
+        ev = self.check(code, {**WEB, 'probes': [probe('page', '/', ['Stock dashboard']), probe('api', '/api/x', [], 0)]})
+        steps = {s['name']: s for s in ev['steps']}
+        owner = steps['exact Owner launch (no arguments)']
+        self.assertTrue(steps['api']['ok'])                                          # verification launch is fine
+        self.assertEqual((owner['ok'], runtime.classify_step(owner), owner['server_errors']), (False, 'product', [500]))
+        ev = self.check(code, {**WEB, 'probes': [probe('page', '/', ['Stock dashboard']), probe('api', '/api/x', [], 200)]})
+        owner = next(s for s in ev['steps'] if s['name'] == 'exact Owner launch (no arguments)')
+        self.assertEqual(runtime.classify_step(owner), 'product')                    # explicit expected status too (E4)
+
+    def test_probe_paths_cannot_leave_the_fresh_instance(self):
+        # '@127.0.0.1:9999/' after 'http://127.0.0.1:<proxy>' would be userinfo + another server (Codex E1)
+        for method in ('BROWSER', 'GET'):
+            with self.subTest(method=method):
+                step = getattr(runtime, '_rendered' if method == 'BROWSER' else '_http')(
+                    1, self.req('p', method, '@127.0.0.1:9999/'))
+                self.assertEqual((step['ok'], step.get('probe_misconfigured')), (False, True))
+
+    def test_quoted_expectations_are_never_product_evidence(self):
+        for problem in ["browser action 'expect:connection lost' was not shown on the page at that point of the flow",
+                        "response lacks ['request failed']", "rendered page lacks ['crashed']", "output lacks ['exited']"]:
+            with self.subTest(problem=problem):
+                self.assertEqual(runtime.classify_step({'ok': False, 'problems': [problem]}), 'ambiguous')
+        self.assertEqual(runtime.classify_step({'ok': False, 'problems': ["must not contain ['Traceback']"]}), 'product')
+        for text in ("must not contain ['(server error']", "harness: the page's requests after clicking '#crashed' did not settle"):
+            self.assertNotEqual(runtime.classify_step({'ok': False, 'problems': [text]}), 'product')   # Codex E4
+
 
 if __name__ == '__main__':
     unittest.main()

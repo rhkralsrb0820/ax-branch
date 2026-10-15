@@ -56,6 +56,10 @@ class PreservationTests(unittest.TestCase):
             with self.subTest(field=field):
                 kept, _ = E.preserve_probes([PROBE], [{**PROBE, field: value}])
                 self.assertEqual(kept, [PROBE])
+        hostile = {**PROBE, 'http_method': 'DELETE', 'http_headers': ['Origin: http://evil.example'], 'expect_status': 403}
+        for headers in ([], ['Origin: http://127.0.0.1']):             # the hostile Origin is the check itself
+            kept, _ = E.preserve_probes([hostile], [{**hostile, 'http_headers': headers}])
+            self.assertEqual(kept, [hostile])
         click = {**PROBE, 'http_method': 'BROWSER', 'http_body': '#input||#save||#confirm'}
         for body in ('#input', '#confirm||#save||#input', ''):
             kept, _ = E.preserve_probes([click], [{**click, 'http_body': body}])

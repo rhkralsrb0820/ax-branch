@@ -81,6 +81,80 @@ def intel(db_path, query, limit=5):
              'url': r[4], 'verification_status': r[5]} for score, r in scored[:limit] if score >= need]
 
 
+PROVISIONAL = 'PROVISIONAL: derived from recorded runs, not Owner-approved knowledge; an observation, not a lesson'
+# Fixed failure categories: a card never carries a check's name or problem text (free text of another project).
+_CATEGORIES = (('check itself was invalid', ('is not a css selector', 'invalid header', 'invalid request target',
+                                              'must start with /', 'not a valid action')),
+               ('browser unavailable', ('no headless browser',)),
+               ('program crashed or exited', ('crashed', 'traceback', 'exited')),
+               ('server stopped answering', ('connection lost', 'request failed', 'not listening', 'before serving')),
+               ('timed out', ('did not finish',)),
+               ('HTTP status differed from the expected one', ('status ',)),
+               ('exit code differed from the expected one', ('exit ',)),
+               ('forbidden text was shown', ('must not contain',)),
+               ('page element or flow step not found', ('matched nothing', 'browser action', 'not shown on the page')),
+               ('expected text missing', ('lacks',)))
+
+
+def _category(step):
+    text = ' '.join(step.get('problems', [])).lower()
+    return next((name for name, keys in _CATEGORIES if any(k in text for k in keys)), 'other failure')
+
+
+def experience(store, query, exclude_project=None, signatures=(), limit=3, before=None, per_project=2):
+    """Runtime experience from other projects' recorded verifications, available without an Owner archive.
+    Derived at query time (nothing cached, so a source that becomes ineligible is gone at once) from structured
+    fields only: no findings text, no Owner feedback, no artifact content. Each card states its cause with the
+    attribution status (VERIFIED / ESTIMATED / UNKNOWN) and whether a later version passed THE SAME check (a later
+    PASS is not proof of the cause). Projects the Owner closed without saving are excluded. before (a timestamp)
+    limits it to facts recorded by then (offline evaluation; live use is always now)."""
+    from . import attribution, kindex
+    q, wanted, cards = terms(query), set(signatures), []
+    for row in store.projects():
+        p = store.project(row['id'])
+        if p['id'] == exclude_project or p['closed_mode'] == 'discard':
+            continue
+        # The CEO's short project name; never the Owner's goal text; unknown for a historical query (titles change).
+        title = '' if before is not None else str((p['plan'] or {}).get('title') or '')[:20]
+        vs = [v for v in store.verifications(p['id']) if before is None or v['created'] <= before]
+        latest = {}
+        for v in vs:
+            if v['verdict'] != 'FAIL':
+                continue
+            for st in ((v['checks'] or {}).get('runtime') or {}).get('steps', []):
+                if not st.get('ok'):
+                    latest[kindex.signature(st)] = (v, st)            # the latest FAIL with this signature
+        for sig, (v, st) in latest.items():
+            later = [w for w in vs if w['verdict'] == 'PASS' and w['created'] > v['created']]
+            passed = [w for w in later if any(s.get('name') == st.get('name') and s.get('ok')
+                                              for s in ((w['checks'] or {}).get('runtime') or {}).get('steps', []))]
+            # Re-verifying the SAME version (harness repair, retry) is not a later version passing.
+            outcome = ('a later version passed this same check' if any(w['artifact_id'] != v['artifact_id'] for w in passed)
+                       else 'the same version passed this check when re-verified' if passed
+                       else 'a later run passed verification, but this check was not re-run' if later
+                       else 'nothing passed verification after it')
+            try:
+                cause = attribution.verification_causes(store, p['id'], v)
+                cause = f"{cause['primary']} ({cause['primary_status']})"
+            except Exception:                       # observational: a rules error never blocks retrieval
+                cause = 'UNKNOWN (UNKNOWN)'
+            name = str(st.get('name', ''))[:80]
+            score = (10 if sig in wanted else 0) + len(q & terms(f'{p["goal"]} {title} {name} {sig}'))   # goal matched, not shown
+            if sig in wanted or score >= 2:
+                cards.append((score, v['created'], {
+                    'kind': 'runtime_experience', 'status': PROVISIONAL, 'project': p['id'], 'title': title,
+                    'observation': f"a runtime check failed: {_category(st)} (evidence class {sig.split(':', 1)[0]})",
+                    'cause': cause, 'outcome': outcome, 'evidence': f"verification {v['id']} (v{v['iteration']})",
+                    'matched_terms': score}))
+    cards.sort(key=lambda c: (-c[0], -c[1]))
+    out, seen = [], {}
+    for _, _, c in cards:
+        if seen.get(c['project'], 0) < per_project:          # one project's many failures do not crowd out others
+            seen[c['project']] = seen.get(c['project'], 0) + 1
+            out.append(c)
+    return out[:limit]
+
+
 def _slug(text, n=50):
     return re.sub(r'[\\/:*?"<>|#^\[\]\s]+', ' ', text).strip()[:n].strip() or 'project'
 

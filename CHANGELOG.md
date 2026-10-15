@@ -3,6 +3,49 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.35] - 2026-10-16
+
+Usable-v1 critical path, steps 1-5: minimum EVIDENCE_GAP closure, runtime experience available without an Owner
+archive, recorded call authority. Designed with an independent Codex architecture challenge
+(workspace/handoff/CODEX_ARCHITECTURE_RESULT.v1.md).
+
+### Added
+- Direct HTTP probes: PUT / PATCH / DELETE and exact request headers (`http_headers`, "Name: value"), e.g. a hostile
+  Origin that must be refused. Invalid, non-Latin-1 or framing headers are a harness defect, never sent.
+- Browser actions in a BROWSER probe's http_body: `fill:SEL=>TEXT`, `select:SEL=>VALUE`, `wait:SEL`, `expect:TEXT`
+  (intermediate visible-text assertion), `dialog:accept|dismiss`; a plain item is still a click. A disabled or read-only
+  field (incl. a disabled fieldset) cannot be filled.
+- `knowledge.experience`: PROVISIONAL runtime experience of other projects for the CEO at planning and re-planning
+  (fixed-template cards: failure category, evidence class, attribution cause + status, honest outcome; never check names,
+  problem text, findings, feedback or goals). Derived at query time; projects closed without saving are excluded.
+  Traced like any retrieval (`runtime_experience`). The vault, K0 and the KI challenger gate are unchanged.
+- `providers.authority`: every call records the authority it had on the provider that actually ran it.
+
+### Changed
+- "Any status" (expect_status 0) never accepts a server error (5xx); a probe that expects one says so.
+- Planner prompt documents headers, verbs and browser actions.
+
+### Fixed
+- Runtime checks replayed the first HTTP probe after the flow even when it was a POST (mutating twice), and judged its
+  content after the flow had changed the data; the exact Owner launch did the same. Only a GET is replayed, judged only
+  on "answers without a server error".
+- A BROWSER http_path like '@127.0.0.1:9999/' could leave the app under test; paths must start with '/'.
+- A missing expected text that happened to contain words like "connection lost" was read as product evidence.
+- A server error only in the exact Owner launch's flow was not product evidence.
+
+### Verification
+- Full suite sequential, coverage-checked (see the commit message for the count); new tests for every fix above,
+  including a real headless-browser CRUD flow (type, select, confirm/dismiss, intermediate assert).
+- Codex targeted reviews (inspection; its sandbox cannot run Python): E1 NOT_READY (5) -> E2 NOT_READY (5) ->
+  E3 NOT_READY (1) -> E4 NOT_READY (2: use structured 5xx evidence, not message text) -> E5 READY; every confirmed
+  defect fixed with a regression test.
+
+### Known issues
+- Not yet exercised on a real project (next: integration run).
+- Browser evidence is read from the page's own DOM: page code could forge it (not independent security proof).
+- Runtime experience ranking is plain term overlap + failure signature; quality is measured from real use.
+- Generated code still runs under the Owner's OS account (D-SEC-1, Owner-governed).
+
 ## [0.1.34] - 2026-10-16
 
 Test #3 harness fix (validated on a real project), Decision/Experience Trace, Knowledge Intelligence foundation (KI-0,
