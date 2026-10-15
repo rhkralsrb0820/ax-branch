@@ -43,6 +43,8 @@ class MetricsTests(unittest.TestCase):
             'total': 2, 'by_channel': {'cli': 1, 'developer_cli': 1},
             'by_action': {'replan': 2}, 'in_app_actions': 1, 'excluded_development': 1,
         })
+        # the last re-plan comes after the supervisor gave up (needs_owner_decision) and has no Supervisor label:
+        # outside an automatic episode, so it is the Owner's
         self.assertEqual(m['manual_recovery_replans'], 5)
         self.assertEqual(m['automatic_recoveries'], 3)
 

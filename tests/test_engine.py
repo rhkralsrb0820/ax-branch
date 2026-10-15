@@ -548,7 +548,7 @@ class EngineTests(unittest.TestCase):
         self.assertIn('please add an explanation line', notes[-1])
 
     def test_empty_build_fails_without_verification_and_never_becomes_the_baseline(self):
-        script = Script([LAUNCHABLE, '', LAUNCHABLE], ['PASS', 'PASS'])     # v2 build comes back empty
+        script = Script([LAUNCHABLE, '', LAUNCHABLE + '\n# explanation added\n'], ['PASS', 'PASS'])     # v2 build comes back empty
         eng = self.engine(script)
         pid = self.store.new_project('make an add tool')
         eng.run(pid)
@@ -804,7 +804,7 @@ class ExecutiveAcceptanceTests(unittest.TestCase):
     setUp, tearDown, engine = EngineTests.setUp, EngineTests.tearDown, EngineTests.engine
 
     rework = {'goal_satisfied': 'partly', 'missing_evidence': ['real output'],
-              'next_action': 'rework', 'directive': 'show real output'}
+              'next_action': 'rework', 'directive': 'show real output', 'gap_class': 'PRODUCT_CHANGE'}
     deliver = {'goal_satisfied': 'yes', 'missing_evidence': [], 'next_action': 'deliver', 'directive': ''}
 
     def test_executive_rework_once_then_deliver(self):
@@ -849,10 +849,11 @@ class ExecutiveAcceptanceTests(unittest.TestCase):
                 self.assertIn(f'자동 재작업 한도 {E.MAX_EXECUTIVE_REWORKS}회', p['report']['judgment'])
                 self.assertNotIn('ceo_directive', p['plan'])
                 arts = self.store.artifacts(pid)
-                self.assertEqual([a['iteration'] for a in arts], list(range(1, rounds + 1)))
-                self.assertEqual(len({Path(a['path']).parent for a in arts}), rounds)
+                expected = builds[:1] if identical else builds
+                self.assertEqual([a['iteration'] for a in arts], list(range(1, len(expected) + 1)))
+                self.assertEqual(len({Path(a['path']).parent for a in arts}), len(expected))
                 self.assertEqual([Path(a['path']).read_bytes() for a in arts],
-                                 [content.encode('utf-8') for content in builds])
+                                 [content.encode('utf-8') for content in expected])
                 self.assertEqual(self.store.events(pid, {'build_rejected'}), [])
                 self.assertEqual([v['verdict'] for v in self.store.verifications(pid)], ['PASS'] * rounds)
                 self.assertEqual((script.builds, script.verdicts, script.reports), ([], [], []))
@@ -1300,6 +1301,130 @@ class FailureRoutingTests(unittest.TestCase):
         eng._strategy = spy
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
         self.assertEqual(seen[0], ('REWORK', 1))          # REWORK and its pending review were already committed
+
+    # ---- Test #3 retry defect: the CEO's diagnosis must control Owner-feedback routing
+    def _owner_routed(self, evidence_class, crash_during_reproduction=False):
+        class Diagnosing(Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.DIAGNOSIS:
+                    result['evidence_class'] = evidence_class
+                return result, used, notes
+        script = Diagnosing([LAUNCHABLE, LAUNCHABLE + '\n'], ['PASS', 'PASS'])
+        eng = self.engine(script)
+        if crash_during_reproduction:
+            real, calls = eng.runtime_evidence, []
+            def evidence(*args):
+                calls.append(1)
+                if len(calls) in (2, 3):     # before / reproduction inside the Owner-feedback diagnosis
+                    return {'ok': False, 'mode': 'cli', 'notes': [], 'steps': [
+                        {'name': 'launch', 'ok': False, 'exit': 1, 'problems': ['crashed (exit 1)'],
+                         'output_tail': 'Traceback (most recent call last):\n  boom'}]}
+                return real(*args)
+            eng.runtime_evidence = evidence
+        pid = self.store.new_project('make an add tool')
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        eng.owner_review(pid, works=False, text='the result screen looks wrong to me')
+        return eng.run(pid), pid, script
+
+    def test_owner_feedback_harness_defect_reverifies_the_same_artifact(self):
+        p, pid, script = self._owner_routed('HARNESS_DEFECT')
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual(len(self.store.artifacts(pid)), 1)                       # no new version
+        vs = self.store.verifications(pid)
+        self.assertEqual([v['artifact_id'] for v in vs], [self.store.artifacts(pid)[0]['id']] * 2)
+        self.assertEqual(self.store.events(pid, {'owner_rework_route'})[-1]['detail']['route'], 'reverify')
+        self.assertEqual(sum(s is E.BUILD for s, _, _ in script.prompts), 1)
+        # Verification -> CEO Final Goal Judgment stays intact after the same-artifact re-verification
+        self.assertEqual(sum(s is E.REPORT for s, _, _ in script.prompts), 2)
+        self.assertEqual(sum(e['detail'].get('what') == 'executive acceptance'
+                             for e in self.store.events(pid, {'decision'})), 2)
+
+    def test_owner_feedback_without_product_evidence_reverifies(self):
+        for cls in ('NO_PRODUCT_EVIDENCE', 'AMBIGUOUS'):
+            with self.subTest(cls=cls):
+                p, pid, script = self._owner_routed(cls)
+                self.assertEqual((p['state'], len(self.store.artifacts(pid))), ('OWNER_REVIEW', 1))
+                self.assertEqual(sum(s is E.BUILD for s, _, _ in script.prompts), 1)
+
+    def test_owner_feedback_product_change_rebuilds(self):
+        p, pid, script = self._owner_routed('PRODUCT_CHANGE')
+        self.assertEqual(p['state'], 'OWNER_REVIEW')
+        self.assertEqual(len(self.store.artifacts(pid)), 2)                       # a genuine change: new version
+        self.assertEqual(self.store.events(pid, {'owner_rework_route'})[-1]['detail']['route'], 'rebuild')
+
+    def test_deterministic_product_evidence_overrides_a_harness_diagnosis(self):
+        p, pid, script = self._owner_routed('HARNESS_DEFECT', crash_during_reproduction=True)
+        route = self.store.events(pid, {'owner_rework_route'})[-1]['detail']
+        self.assertEqual((route['route'], route['product_evidence']), ('rebuild', True))
+        self.assertEqual(len(self.store.artifacts(pid)), 2)
+
+    # ---- legacy synthetic kind='product' FAILs: counted from stored evidence, the records never change
+    SYNTHETIC = {'severity': 'major', 'kind': 'product', 'criterion': -1, 'deterministic': True,
+                 'issue': 'Gate failed: deterministic checks failed.', 'evidence': ''}
+    HARNESS_STEP = {'name': 'add log', 'ok': False, 'status': 201, 'exit': None, 'probe_misconfigured': True,
+                    'problems': ['status 201, expected -1']}
+    CRASH_STEP = {'name': 'add log', 'ok': False, 'exit': 1, 'problems': ['crashed (exit 1)'],
+                  'output_tail': 'Traceback (most recent call last):\n  boom'}
+
+    def _legacy(self, step=None, exit_code=0, output='ok', times=1):
+        """A delivered v1, plus legacy FAILs on it shaped like Test #3's (synthetic gate finding kind='product')."""
+        eng = self.engine(Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        art = self.store.artifacts(pid)[0]
+        checks = {'ok': False, 'ran': ['compile', 'self-test'], 'output': output}
+        if exit_code is not None:
+            checks['exit_code'] = exit_code
+        if step:
+            checks['output'] += '\nRUNTIME ACCEPTANCE FAILED: add log: ' + step['problems'][0]
+            checks['runtime'] = {'ok': False, 'mode': 'cli', 'notes': [], 'steps': [step]}
+        for _ in range(times):
+            self.store.add_verification(pid, art['id'], 1, 'FAIL', {'verdict': 'FAIL', 'criteria': [{'index': 0, 'met': True}],
+                                                                   'findings': [dict(self.SYNTHETIC)]}, checks, 'claude')
+        return eng, pid, art
+
+    def test_legacy_product_label_with_harness_evidence_is_not_a_product_failure(self):
+        eng, pid, _ = self._legacy(self.HARNESS_STEP, times=4)
+        self.assertEqual(eng._product_failures(pid), [])
+        self.assertIsNone(eng._repeated_failure(pid))
+        self.assertTrue(E.failure_code(self.store.verifications(pid)[-1]).startswith('non-product:'))
+
+    def test_legacy_product_label_with_genuine_product_evidence_counts(self):
+        for name, kw in (('runtime crash', {'step': self.CRASH_STEP}),
+                         ('self-test failed', {'exit_code': 1, 'output': 'AssertionError'})):
+            with self.subTest(name):
+                eng, pid, art = self._legacy(times=2, **kw)
+                self.assertEqual([v['artifact_id'] for v in eng._product_failures(pid)], [art['id']])  # once per build
+                self.assertTrue(eng._repeated_failure(pid) is None or eng._repeated_failure(pid).startswith('product:'))
+                self.assertTrue(E.failure_code(self.store.verifications(pid)[-1]).startswith('product:'))
+
+    def test_legacy_record_without_evidence_is_not_a_product_failure(self):
+        eng, pid, _ = self._legacy(exit_code=None, output='')
+        self.assertEqual(eng._product_failures(pid), [])
+
+    def test_legacy_accounting_routes_consistently_and_never_changes_history(self):
+        # [계속] after legacy harness-only FAILs: no rework, no budget spent, no identical-build rejection.
+        eng, pid, art = self._legacy(self.HARNESS_STEP, times=4)
+        rows = lambda: self.store.db.execute('SELECT * FROM verifications WHERE project_id=? ORDER BY rowid',
+                                             (pid,)).fetchall()
+        before = [tuple(r) for r in rows()]
+        self.store.update(pid, state='VERIFYING')
+        eng._after_fail(pid, self.store.project(pid))
+        p = self.store.project(pid)
+        self.assertEqual((p['state'], p['resume_state'], p['iteration']), ('PAUSED', 'VERIFYING', 1))
+        self.assertIn('HARNESS_BLOCKED', p['pause_reason'])
+        self.assertEqual(self.store.events(pid, {'strategy_pending'}), [])
+        # the same bytes again are not condemned by a harness-only FAIL ...
+        self.store.update(pid, state='STAFFING', iteration=2)
+        self.engine(Script([GOOD], ['PASS'])).run(pid)
+        self.assertEqual(len(self.store.artifacts(pid)), 2)
+        self.assertEqual([tuple(r) for r in rows()][:len(before)], before)      # history unchanged, byte for byte
+        # ... but are by a genuine product FAIL (the same rule decides the guard)
+        eng, pid, art = self._legacy(self.CRASH_STEP)
+        self.store.update(pid, state='STAFFING', iteration=2)
+        self.engine(Script([GOOD, GOOD + '\n'], ['PASS'])).run(pid)
+        self.assertTrue(any('identical to v1' in e['detail']['reason'] for e in self.store.events(pid, {'build_rejected'})))
 
     def test_failure_code_ignores_verifier_wording(self):
         def v(issue, steps=('Rendered home',), provider='codex', output=''):

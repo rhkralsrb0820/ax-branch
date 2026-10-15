@@ -241,10 +241,11 @@ def _supervise(engine, pid, launch, stop):
             if store.project(pid)['state'] not in ('PAUSED', 'REWORK'):
                 store.pause(pid, f'recovery checkpoint before re-plan ({sig})')
             engine.replan(pid, f'Automatic recovery: the failure "{sig}" happened again after a resume. '
-                               'Change the approach so it does not recur; keep all completed, still-valid work.')
+                               'Change the approach so it does not recur; keep all completed, still-valid work.',
+                          by='Supervisor')
         p = store.project(pid)
         if p['state'] == 'PAUSED':
-            store.resume(pid)
+            store.resume(pid, by='Supervisor')
         launch(pid)
         launched = True
         return action
@@ -274,7 +275,7 @@ def _provider_retry(engine, pid, launch, now=None):
     except FileExistsError:
         return None
     store.event(pid, 'provider_retry', reset_at=reset, resume_state=p['resume_state'])
-    store.resume(pid)
+    store.resume(pid, by='Supervisor')
     launch(pid)
     return 'provider_retry'
 

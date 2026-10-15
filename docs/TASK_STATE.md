@@ -11,6 +11,24 @@
 | P10 | Real end-to-end run | done (`P-20261003-906ead`, v1 FAIL → v2 PASS) |
 | P11 | Windows exe | live goal run inside the packaged app; crash recovery by newer exe |
 
+## Strategy since 2026-10-16 (Owner): USABLE V1 FIRST
+- Build the complete usable autonomous loop first (Goal -> CEO -> retrieval -> strategy -> capabilities -> temporary
+  agents -> engine/provider/tool -> minimum authority -> execute -> harness/verification -> outcome -> attribution ->
+  goal judgment -> replan/recover -> stop -> report -> experience), then improve it from REAL Owner-goal evidence.
+- Loop: safe capability v1 -> integrate -> real use -> evidence -> Claude + Codex analyze -> smallest justified fix.
+- Verification: affected + invariant tests per change; full suite / broad Codex review / real validation at
+  integration, safety/governance or release boundaries. Claude/Codex agreement alone is not evidence.
+- Closed, do not reopen without regression evidence: Decision/Experience Trace (0.1.34), Outcome Attribution v1 (0.1.34).
+- Knowledge Intelligence challenger HOLD; gate stays 50 labeled situations / 20 independent projects; no new
+  retrieval technology without evidence that retrieval is the bottleneck. Open: experience availability without
+  Owner knowledge-management (vault gets notes only on an Owner "save" close).
+- EVIDENCE_GAP: implement only A (safety/integrity blockers) + minimum B (common real projects); C grows from real use.
+- Principle: maximum useful autonomy within minimum necessary authority; Agent = role + goal + context + permissions;
+  Claude/Codex are providers, not roles.
+- Escalate to the Owner only for cost, credentials, new/sensitive permissions, destructive acts, governance changes,
+  external contact, genuine business decisions, security decisions outside delegation, or no provider left.
+- Live development state (resume point): ../workspace/handoff/TASK_STATE.md.
+
 ## Open, in priority order (see GAP_ANALYSIS.md)
 
 ### D-ART-1: built artifact versions are immutable (recorded 2026-10-08, Owner; implemented 0.1.17)

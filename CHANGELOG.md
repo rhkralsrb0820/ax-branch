@@ -3,10 +3,11 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
-## Unreleased - 2026-10-12
+## [0.1.34] - 2026-10-16
 
-Test #3 harness fix only (the Decision/Experience Trace work is kept out of main, preserved in
-workspace/checkpoints/2026-10-12-full-tree-with-decision-trace-B). Test #3 has not been re-run.
+Test #3 harness fix (validated on a real project), Decision/Experience Trace, Knowledge Intelligence foundation (KI-0,
+offline only) and Outcome Attribution v1 (observational). Phase records: docs/evidence/2026-10-15-decision-trace-phase-closure.md,
+2026-10-16-outcome-attribution-phase-closure.md, 2026-10-16-knowledge-intelligence-baseline.md.
 
 ### Added
 - Canonical probe semantics shared by planner, runtime and T5: expect_status <= 0 (incl. -1) = any status;
@@ -18,6 +19,14 @@ workspace/checkpoints/2026-10-12-full-tree-with-decision-trace-B). Test #3 has n
 - Owner-grounded contract changes: on Owner-feedback rework, an existing acceptance criterion may be removed or
   replaced only with the Owner's verbatim words as provenance; otherwise it is restored, and the runtime contract
   is preserved.
+- Decision/Experience Trace: retrieval (exact query, presented item, source/prompt hashes) -> CEO ADOPTED/REJECTED
+  -> applied decision that declares the one action it causes -> action -> outcome; verification retrievals have their
+  own chain; `Store.experience_chain`; Owner Effort counts only Owner-initiated resumes/re-plans.
+- `axbranch/kindex.py` (KI-0): derived, rebuildable FTS5 index over vault sections and DB experience cards, offline
+  evaluation against K0 with deterministic labels and a project-clustered promotion gate. The CEO still uses K0.
+- `axbranch/attribution.py`: Outcome Attribution v1 (observational). Each FAIL, unnecessary rebuild and pause gets an
+  append-only `attribution_trace` (PRIMARY VERIFIED cause or explicit UNKNOWN; model judgment only ESTIMATED; the CEO's
+  self-assessment never a source); a validated harness repair supersedes the FAIL it was opened for.
 
 ### Changed
 - T5 preserves exact positive statuses, explicit exit codes, assertions, probe inputs and runtime mode unless a
@@ -29,14 +38,24 @@ workspace/checkpoints/2026-10-12-full-tree-with-decision-trace-B). Test #3 has n
   recorded.
 
 ### Fixed
+- Outcome attribution: a missing deliverable is never VERIFIED agent blame; rule errors are recorded, not raised;
+  replay uses only evidence that existed then; responsibility names the provider that actually ran (Codex A1).
 - Test #3 (P-20261010-c88366): a correct product failed 4 times on "status 201, expected -1", was treated as a product
   defect, rebuilt, EXHAUSTED; T5 undid the CEO's correct probe repair.
 
 ### Verification
-- See the test results recorded with this change (targeted, related, full suite).
+- Full suite 284/284 (sequential, coverage-checked against collected ids); git diff --check clean.
+- Codex independent review (inspection; its sandbox cannot run Python): trace round 4 READY, attribution A2 READY.
+- Real runs: P-20261015-3a4f60 (trace chain), P-20261016-3e5ca9 (attribution live == replay, no rule errors).
+- Historical attribution replay over a DB copy (live DB hash unchanged); evidence in
+  workspace/checkpoints/2026-10-16-outcome-attribution-closed/evidence.
 
 ### Known issues
-- Not yet validated on a real project (P-20261010-c88366 re-verification awaits Owner approval).
+- HIGH EVIDENCE_GAP: the probe schema cannot type into a browser, run multi-step UI flows, send headers (Origin)
+  or PUT/DELETE; affected claims are judged from code.
+- Knowledge Intelligence challenger HOLD (4 labeled situations / 2 projects; gate 50 / 20). Experience reaches the
+  vault only on an Owner "save" close.
+- Attribution v1: no CEO_DECISION / EVIDENCE / EXTERNAL_DEPENDENCY rules; runtime observations are not VERIFIED causes.
 
 ## [0.1.33] - 2026-10-10
 

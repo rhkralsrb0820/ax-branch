@@ -13,13 +13,16 @@ from pathlib import Path
 
 from . import __version__, governance as gov
 
+TRACE_KINDS = ('decision_trace', 'decision_applied', 'knowledge_trace', 'feedback_trace', 'action_trace',
+               'outcome_trace', 'retrieval_use', 'attribution_trace')
+
 TRANSITIONS = {
     'CREATED': {'PLANNING'},
     'PLANNING': {'STAFFING'},
     'STAFFING': {'EXECUTING'},
     'EXECUTING': {'VERIFYING', 'REWORK'},     # REWORK: the producer delivered nothing (no verification needed)
     'VERIFYING': {'REWORK', 'OWNER_REVIEW'},
-    'REWORK': {'STAFFING'},
+    'REWORK': {'STAFFING', 'VERIFYING'},      # VERIFYING: the diagnosis found nothing to rebuild (same artifact)
     # The Owner tries the verified artifact: works -> PENDING_CLOSE; problem / change -> REWORK (same project).
     'OWNER_REVIEW': {'PENDING_CLOSE', 'REWORK', 'ARCHIVE_PENDING_APPROVAL'},
     'PENDING_CLOSE': {'ARCHIVE_PENDING_APPROVAL', 'REWORK'},
@@ -246,16 +249,20 @@ class Store:
             return
         with self.tx():
             self.update(pid, state='PAUSED', resume_state=resume_state or p['state'], pause_reason=reason)
-            self.event(pid, 'state', frm=p['state'], to='PAUSED', reason=reason)
+            sid = self.event(pid, 'state', frm=p['state'], to='PAUSED', reason=reason)
+            from . import attribution
+            self._attribute(pid, f'pause:{sid}', lambda: attribution.pause_causes(self, pid, reason))
 
-    def resume(self, pid, extra_rounds=0):
+    def resume(self, pid, extra_rounds=0, by='Owner'):
+        """by = who resumed: 'Owner' (CLI/GUI/review), or 'Supervisor' for automatic recovery and provider retry
+        (2026-10-14: an automatic quota retry was recorded as 'Owner resumed' and counted as Owner Effort)."""
         p = self.project(pid)
         if p['state'] != 'PAUSED':
             raise Rejected(f'Project is {p["state"]}, not PAUSED.')
         with self.tx():
             if extra_rounds:
                 self.update(pid, budget=p['budget'] + extra_rounds)
-            self.set_state(pid, p['resume_state'], reason=f'Owner resumed (+{extra_rounds} rounds)')
+            self.set_state(pid, p['resume_state'], reason=f'{by} resumed (+{extra_rounds} rounds)')
 
     # ---- agents (temporary specialists; CEO and Verification are permanent and not rows)
     def add_agent(self, pid, role, provider):
@@ -299,6 +306,11 @@ class Store:
         self.db.execute('INSERT INTO artifacts(id,project_id,iteration,path,sha256,kind,agent_id,created,manifest) '
                         'VALUES(?,?,?,?,?,?,?,?,?)', (aid, pid, iteration, str(path), sha, kind, agent_id, time.time(),
                                                       manifest and json.dumps(manifest, ensure_ascii=False)))
+        builds = [e['id'] for e in self.events(pid, {'action_trace'}) if e['detail']['action'] == 'build'][-1:]
+        outcomes = self.trace_outcome(pid, builds, 'artifact_built', artifact=aid, iteration=iteration)
+        from . import attribution
+        art = next(a for a in self.artifacts(pid) if a['id'] == aid)
+        self._attribute(pid, aid, lambda: attribution.rebuild_attribution(self, pid, art), outcomes)
         return aid
 
     def artifacts(self, pid):
@@ -311,6 +323,35 @@ class Store:
                         (vid, pid, artifact_id, iteration, verdict, json.dumps(result, ensure_ascii=False),
                          json.dumps(checks, ensure_ascii=False), provider, time.time()))
         self.event(pid, 'verification', verdict=verdict, iteration=iteration, provider=provider)
+        actions = self.events(pid, {'action_trace'})
+        if artifact_id:     # the outcome of THIS check only (a verdict is not the build's outcome)
+            linked = [a['id'] for a in actions if a['detail']['action'] == 'verify'
+                      and a['detail'].get('artifact') == artifact_id][-1:]
+            # Owner feedback that led to the build of this artifact sees the verdict, explicitly by lineage
+            builds = [o['detail']['action'] for o in self.events(pid, {'outcome_trace'})
+                      if o['detail']['outcome'] == 'artifact_built' and o['detail'].get('artifact') == artifact_id][:1]
+            for a in actions:
+                if a['id'] in builds:
+                    for f in a['detail']['feedback_ids']:
+                        self.event(pid, 'feedback_trace', phase='VERIFICATION_OUTCOME', feedback_id=f,
+                                   action=a['id'], verification=vid, verdict=verdict, via='artifact_lineage')
+        else:               # the engine rejected the build itself (no deliverable): the build's own outcome
+            linked = [a['id'] for a in actions if a['detail']['action'] == 'build'][-1:]
+        outcomes = self.trace_outcome(pid, linked, 'verification', verification=vid, artifact=artifact_id,
+                                      verdict=verdict, iteration=iteration)
+        from . import attribution
+        v = next(x for x in self.verifications(pid) if x['id'] == vid)
+        if verdict == 'FAIL':
+            self._attribute(pid, vid, lambda: attribution.verification_causes(self, pid, v), outcomes)
+        else:
+            latest = {a['detail']['subject']: a for a in self.attributions(pid)}
+            repaired = []           # filled inside the guard: a rules error is recorded on this PASS, never raised
+            self._attribute(pid, vid, lambda: repaired.extend(attribution.repaired_fails(self, pid, v)))
+            for fid in repaired:
+                prev = latest.get(fid)
+                if prev is None or prev['detail'].get('rule_basis') != 'validated-harness-repair':
+                    self._attribute(pid, fid, lambda f=fid: attribution.harness_validated(f, v), (),
+                                    supersedes=prev and prev['id'], rule_basis='validated-harness-repair')
         return vid
 
     def verifications(self, pid):
@@ -327,14 +368,190 @@ class Store:
                 for r in self.db.execute('SELECT * FROM events WHERE project_id=? ORDER BY id', (pid,))]
         return [r for r in rows if kinds is None or r['kind'] in kinds]
 
+    # ---- Decision / experience trace: observable links only; improvement is never claimed here.
+    def trace_action(self, pid, action, key, **detail):
+        """The action, linked ONLY to the applied decision that declared it causes exactly this action (same kind,
+        and for a check the same artifact) and that no earlier action consumed. Never by proximity: a terminal
+        decision (Owner review, pause) causes nothing, so a later build is never credited to it. When several
+        pending decisions expect this action, the newest is its cause; the older ones are recorded as replaced.
+        Idempotent per key, so a resumed build/check reuses its action instead of duplicating it."""
+        key = f"{key}@{max((e['id'] for e in self.events(pid, {'decision_applied'})), default=0)}"
+        existing = [e for e in self.events(pid, {'action_trace'}) if e['detail']['key'] == key]
+        if existing:
+            return existing[-1]['id']
+        with self.tx():
+            actions = self.events(pid, {'action_trace'})
+            consumed = {d for a in actions for d in a['detail']['decisions'] + a['detail'].get('replaced', [])}
+            pending = [e['detail'] for e in self.events(pid, {'decision_applied'})
+                       if e['detail']['decision'] not in consumed and e['detail'].get('expects') == action
+                       and (action != 'verify' or e['detail'].get('expected_artifact') == detail.get('artifact'))]
+            applied, replaced = pending[-1:], [d['decision'] for d in pending[:-1]]
+            knowledge = sorted({k for d in applied for k in d['adopted']})
+            feedback = sorted({f for d in applied for f in d['feedback_ids']})
+            p = self.project(pid)
+            aid = self.event(pid, 'action_trace', phase='ACTION', action=action, key=key, iteration=p['iteration'],
+                             plan_version=p['plan_version'], decisions=[d['decision'] for d in applied],
+                             replaced=replaced, knowledge=knowledge, feedback_ids=feedback, **detail)
+            for k in knowledge:
+                self.event(pid, 'knowledge_trace', phase='ACTION', retrieval=k, action=aid)
+            for f in feedback:
+                self.event(pid, 'feedback_trace', phase='ACTION', feedback_id=f, action=aid)
+        return aid
+
+    def trace_outcome(self, pid, action_ids, outcome, **detail):
+        """Observable outcome of actions, written in the same transaction as the record it describes. Returns the
+        outcome ids."""
+        oids = []
+        for a in [e for e in self.events(pid, {'action_trace'}) if e['id'] in action_ids]:
+            oid = self.event(pid, 'outcome_trace', phase='OUTCOME', outcome=outcome, action=a['id'],
+                             decisions=a['detail']['decisions'], improvement='UNKNOWN', **detail)
+            oids.append(oid)
+            for k in a['detail']['knowledge']:
+                self.event(pid, 'knowledge_trace', phase='OUTCOME', retrieval=k, action=a['id'], outcome=oid,
+                           result=outcome, verdict=detail.get('verdict'), improvement='UNKNOWN')
+            if outcome == 'verification':
+                for f in a['detail']['feedback_ids']:
+                    self.event(pid, 'feedback_trace', phase='VERIFICATION_OUTCOME', feedback_id=f, action=a['id'],
+                               outcome=oid, verification=detail['verification'], verdict=detail['verdict'],
+                               via='action')
+        return oids
+
+    # ---- Outcome Attribution (observational: nothing in routing, verdicts, budget or criteria reads it)
+    def _attribute(self, pid, subject, compute, outcomes=(), supersedes=None, **extra):
+        """Append the causes of one outcome subject (a verification, a rebuilt artifact, a pause). A rules error is
+        recorded as an UNKNOWN attribution and never reaches the control loop. History is append-only: a later fact
+        adds a new attribution that names the one it supersedes."""
+        from . import attribution
+        try:
+            result = compute()
+        except Exception as e:                      # observational: never break the run that is being observed
+            result = {'primary': 'UNKNOWN', 'primary_status': 'UNKNOWN', 'causes': [],
+                      'error': f'{type(e).__name__}: {e}'[:300]}
+        if result is None:
+            return None
+        return self.event(pid, 'attribution_trace', subject=subject, outcomes=list(outcomes), supersedes=supersedes,
+                          rules_version=attribution.RULES_VERSION, **extra, **result)
+
+    def attributions(self, pid):
+        """Current attribution per subject (superseded ones stay in history, excluded here)."""
+        events = self.events(pid, {'attribution_trace'})
+        superseded = {e['detail'].get('supersedes') for e in events}
+        return [e for e in events if e['id'] not in superseded]
+
+    def experience_chain(self, pid):
+        """One entry per USE of a retrieved item, with explicit ids at every link and an explicit state.
+
+        CEO use (causal chain, nothing inferred from iteration, artifact, verification, project or timing):
+          retrieval -> ADOPTED/REJECTED -> applied decision -> the action that decision declared and caused
+          (action.decisions names it) -> that action's own outcome.
+          COMPLETE   - all of those links exist;
+          SUPERSEDED - the decision was never applied and a later decision for the same situation replaced it
+                       (interrupted, decided again), or it was applied but a newer decision expecting the same
+                       action was the one that action carried out (replaced); both stay, linked by superseded_by;
+          INCOMPLETE - anything else, `missing` names what is absent (a terminal decision - Owner review, a pause -
+                       causes no action, so its chain stays INCOMPLETE by design).
+          used_in_action: ADOPTED with a stated change AND COMPLETE AND the causal action carried this retrieval
+          AND that action has an outcome. improvement stays UNKNOWN (attribution decides that, later).
+        Verification use (no adoption by design; disposition NOT_APPLICABLE):
+          retrieval -> retrieval_use -> verification id -> verdict. COMPLETE when the verdict exists.
+          No build or check actions are attached to it."""
+        kinds = {'knowledge_trace', 'decision_trace', 'decision_applied', 'action_trace', 'outcome_trace',
+                 'retrieval_use', 'attribution_trace'}
+        events = self.events(pid, kinds)
+        of = lambda kind: [e for e in events if e['kind'] == kind]
+        knowledge = of('knowledge_trace')
+        retrieved = {e['detail']['retrieval']: e for e in knowledge if e['detail']['phase'] == 'RETRIEVED'}
+        applied = {e['detail']['decision']: e for e in of('decision_applied')}
+        actions, outcomes, attributions = of('action_trace'), of('outcome_trace'), of('attribution_trace')
+        traces = of('decision_trace')
+        verdicts = {v['id']: v['verdict'] for v in self.verifications(pid)}
+        replaced_by = {d: a['detail']['decisions'][0] for a in actions for d in a['detail'].get('replaced', [])
+                       if a['detail']['decisions']}
+
+        def outcome_view(o):
+            d = o['detail']
+            return {'outcome': o['id'], 'action': d['action'], 'result': d['outcome'], 'verdict': d.get('verdict'),
+                    'verification': d.get('verification'), 'artifact': d.get('artifact'),
+                    'attributions': [{'attribution': a['id'], 'primary': a['detail'].get('primary'),
+                                      'status': a['detail'].get('primary_status'),
+                                      'supersedes': a['detail'].get('supersedes')} for a in attributions
+                                     if o['id'] in (a['detail'].get('outcomes') or [])
+                                     or (d.get('verification') and a['detail'].get('subject') == d.get('verification'))]}
+
+        def base(rid, role, stage):
+            r = retrieved.get(rid)
+            return {'retrieval': rid, 'retrieved_event': r and r['id'], 'role': role, 'stage': stage,
+                    'source': r and r['detail'].get('source'), 'presented_sha256': r and r['detail'].get('presented_sha256'),
+                    'source_sha256': r and r['detail'].get('source_sha256'), 'improvement': 'UNKNOWN'}
+
+        chain = []
+        for t in traces:
+            d = t['detail']
+            situation = (d['who'], d['task'], d['state'], d['iteration'], d['plan_version'])
+            app = applied.get(t['id'])
+            later = next((x['id'] for x in traces if x['id'] > t['id'] and (x['detail']['who'], x['detail']['task'],
+                          x['detail']['state'], x['detail']['iteration'], x['detail']['plan_version']) == situation), None)
+            acts = [a for a in actions if t['id'] in a['detail']['decisions']]       # caused by THIS decision only
+            outs = [outcome_view(o) for o in outcomes if o['detail']['action'] in {a['id'] for a in acts}]
+            superseded_by = None
+            if app is None:
+                state, missing = ('SUPERSEDED', ['decision_applied']) if later else (
+                    'INCOMPLETE', ['decision_applied', 'action', 'outcome'])
+                superseded_by = later
+            elif t['id'] in replaced_by:
+                state, missing, superseded_by = 'SUPERSEDED', ['action (replaced by a newer decision)'], replaced_by[t['id']]
+            elif not app['detail'].get('expects'):
+                state, missing = 'INCOMPLETE', ['action (terminal decision: it causes no action)']
+            else:
+                missing = ['action'] if not acts else ['outcome'] if not outs else []
+                state = 'INCOMPLETE' if missing else 'COMPLETE'
+            for rid in d['retrievals']:
+                mine = [e['detail'] for e in knowledge if e['detail'].get('decision') == t['id']
+                        and e['detail'].get('retrieval') == rid]
+                disposition = next((m['phase'] for m in mine if m['phase'] in ('ADOPTED', 'REJECTED', 'UNASSESSED')), None)
+                change = next((m['claimed_change'] for m in mine if m['phase'] == 'DECISION_CHANGE'), None)
+                carried = [a['id'] for a in acts if rid in a['detail']['knowledge']]
+                carried_outs = [o for o in outs if o['action'] in carried]
+                chain.append({**base(rid, d['who'], d['state']), 'decision': t['id'], 'call': d.get('call'),
+                              'applied': app and app['id'], 'disposition': disposition, 'decision_change': change,
+                              'actions': carried, 'outcomes': carried_outs,
+                              'decision_actions': [a['id'] for a in acts], 'decision_outcomes': outs,
+                              'state': state, 'missing': missing, 'superseded_by': superseded_by,
+                              'used_in_action': bool(disposition == 'ADOPTED' and change and state == 'COMPLETE'
+                                                     and carried and carried_outs)})
+        for u in of('retrieval_use'):            # another role's own retrieval (Verification): no adoption by design
+            vid = u['detail']['verification']
+            verdict = verdicts.get(vid)
+            for rid in u['detail']['retrievals']:
+                chain.append({**base(rid, u['detail']['role'], 'verification'), 'decision': None, 'call': None,
+                              'applied': None, 'use': u['id'], 'verification': vid, 'verdict': verdict,
+                              'disposition': 'NOT_APPLICABLE', 'decision_change': None, 'actions': [], 'outcomes': [],
+                              'decision_actions': [], 'decision_outcomes': [],
+                              'state': 'COMPLETE' if verdict else 'INCOMPLETE',
+                              'missing': [] if verdict else ['verdict'], 'superseded_by': None,
+                              'used_in_action': None})
+        used = {c['retrieval'] for c in chain}
+        for rid, r in retrieved.items():          # retrieved and recorded, but no decision/check ever used it
+            if rid not in used:
+                chain.append({**base(rid, r['detail'].get('role'), r['detail'].get('stage')), 'decision': None,
+                              'call': r['detail'].get('call'), 'applied': None,
+                              'disposition': 'NOT_APPLICABLE' if r['detail'].get('role') == 'Verification' else None,
+                              'decision_change': None, 'actions': [], 'outcomes': [], 'decision_actions': [],
+                              'decision_outcomes': [], 'state': 'INCOMPLETE',
+                              'missing': ['verification use' if r['detail'].get('role') == 'Verification' else 'use'],
+                              'superseded_by': None, 'used_in_action': None if r['detail'].get('role') == 'Verification'
+                              else False})
+        return chain
+
     # ---- Owner review
     def add_feedback(self, pid, iteration, verdict, text, handled=None):
         """verdict: works (runtime confirmed) | problem (does not work) | request (natural-language change,
         feature or improvement) | finish. Only problem/request are rework input; the others are stored
         handled so they can never trigger a diagnosis later."""
-        self.db.execute('INSERT INTO owner_feedback(project_id,iteration,verdict,text,created,handled_iteration) '
-                        'VALUES(?,?,?,?,?,?)', (pid, iteration, verdict, text, time.time(), handled))
-        self.event(pid, 'owner_feedback', verdict=verdict, iteration=iteration, text=text[:2000])
+        cursor = self.db.execute('INSERT INTO owner_feedback(project_id,iteration,verdict,text,created,handled_iteration) '
+                                 'VALUES(?,?,?,?,?,?)', (pid, iteration, verdict, text, time.time(), handled))
+        self.event(pid, 'owner_feedback', phase='OWNER_FEEDBACK', feedback_id=cursor.lastrowid, verdict=verdict,
+                   iteration=iteration, text=text[:2000])
 
     def feedback(self, pid, pending_only=False):
         sql = 'SELECT * FROM owner_feedback WHERE project_id=?' + (' AND handled_iteration IS NULL' if pending_only else '')
@@ -400,6 +617,10 @@ class Store:
             'last_verification': last and {'iteration': last['iteration'], 'verdict': last['verdict'],
                                            'findings': last['result'].get('findings'), 'checks_ok': last['checks'].get('ok')},
             'decisions': [e['detail'] for e in self.events(pid, {'decision'})],
+            'experience_chain': self.experience_chain(pid),
+            'attributions': [{'subject': a['detail']['subject'], 'primary': a['detail']['primary'],
+                              'status': a['detail']['primary_status'], 'supersedes': a['detail'].get('supersedes')}
+                             for a in self.attributions(pid)][-30:],
             'provider_handoffs': [e['detail'] for e in self.events(pid, {'provider_handoff'})],
             'ceo_report': p['report'],
             'owner_feedback': [{k: f[k] for k in ('iteration', 'verdict', 'text', 'handled_iteration')}

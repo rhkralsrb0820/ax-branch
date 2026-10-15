@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from . import supervisor
+from .state import TRACE_KINDS
 
 
 def _engine(value):
@@ -152,7 +153,9 @@ def view(workspace, store, pid):
         item['mark'] = '✓'
 
     timeline = []
-    for event in events[-30:]:
+    # Decision/experience trace records are audit data (HANDOFF experience_chain), not activity to show.
+    shown = [e for e in events if e['kind'] not in TRACE_KINDS]
+    for event in shown[-30:]:
         kind, d = event['kind'], event['detail']
         actor, text = kind, _brief(d)
         who = str(d.get('who', '-'))

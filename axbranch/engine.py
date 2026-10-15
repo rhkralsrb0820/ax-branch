@@ -45,13 +45,15 @@ DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=
               artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
               network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE),
-              removed_criteria=ARR(S(criterion=STR, owner_quote=STR)))
+              removed_criteria=ARR(S(criterion=STR, owner_quote=STR)),
+              evidence_class=ENUM('PRODUCT_CHANGE', 'HARNESS_DEFECT', 'NO_PRODUCT_EVIDENCE', 'AMBIGUOUS'))
 WORK = S(output=STR, key_points=ARR(STR), evidence=ARR(STR), counterpoints=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), edits=ARR(S(path=STR, find=STR, replace=STR)),
-          summary=STR, changes_from_previous=STR)
+          summary=STR, changes_from_previous=STR, outcome=ENUM('CHANGED', 'NO_CHANGE'), no_change_evidence=STR)
 # Large existing deliverable: edits only. Regenerating 115-164 KB in one call timed out or came back empty
 # (P-bbad3c v10-v21); the output must scale with the change, not with the file.
-BUILD_EDITS = S(edits=BUILD['properties']['edits'], summary=STR, changes_from_previous=STR)
+BUILD_EDITS = S(edits=BUILD['properties']['edits'], summary=STR, changes_from_previous=STR,
+                outcome=ENUM('CHANGED', 'NO_CHANGE'), no_change_evidence=STR)
 # product = the artifact is wrong (rebuild); harness = the verification apparatus could not establish the
 # fact; infra = the environment failed. Only product findings may send a build back (P-bbad3c v27-v31).
 FINDING_KINDS = ('product', 'harness', 'infra')
@@ -65,9 +67,30 @@ STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), ra
 PROBE_REVIEW = S(disposition=ENUM('HARNESS_REPAIR', 'PRODUCT_DEFECT', 'UNRESOLVED'),
                  rationale=STR, evidence=STR, runtime=runtime.SPEC)
 PROBE_EQUIVALENCE = S(equivalent=BOOL, evidence=STR)
+GAP_CLASSES = ('PRODUCT_CHANGE', 'PRODUCT_DEFECT', 'EVIDENCE_GAP', 'HARNESS_DEFECT', 'OUTSIDE_AUTHORITY', 'AMBIGUOUS')
+NON_PRODUCT_GAPS = ('EVIDENCE_GAP', 'HARNESS_DEFECT', 'AMBIGUOUS')
 REPORT = S(summary=STR, judgment=STR, next_steps=ARR(STR), goal_satisfied=ENUM('yes', 'partly', 'no', 'unknown'),
-           missing_evidence=ARR(STR), next_action=ENUM('deliver', 'rework', 'owner_decision'), directive=STR)
+           missing_evidence=ARR(STR), next_action=ENUM('deliver', 'rework', 'owner_decision'), directive=STR,
+           gap_class=ENUM(*GAP_CLASSES), runtime=runtime.SPEC)
 MAX_EXECUTIVE_REWORKS = 2      # CEO-ordered rounds after a PASS, per Owner action (Autonomous != infinite)
+# Decision trace: a concise PUBLIC decision record returned inside the CEO's existing calls - never an extra call,
+# never private reasoning. Retrieved experience carries an id so the decision says what it adopted or rejected.
+DECISION_AUDIT = S(reason=STR, evidence=ARR(STR), alternatives=ARR(STR), unknowns=ARR(STR),
+                   knowledge_use=ARR(S(retrieval_id=STR, disposition=ENUM('ADOPTED', 'REJECTED'), reason=STR,
+                                       decision_change=STR)))
+for _schema in (PLAN, DIAGNOSIS, STRATEGY, PROBE_REVIEW, REPORT):
+    _schema['properties']['audit'] = DECISION_AUDIT
+    _schema['required'].append('audit')
+KNOWLEDGE_KEYS = ('prior_knowledge', 'relevant_knowledge', 'intelligence', 'knowledge', 'verification_knowledge')
+RETRIEVAL_VERSION = 1      # K0 = knowledge.retrieve / knowledge.intel as they are now; bump when retrieval changes
+AUDIT_RULES = """
+
+audit: a concise public decision record, not private reasoning: the reason, the evidence you used, the alternatives
+you considered and the important unknowns. Every retrieved item in the context carries a retrieval_id: for each, say
+ADOPTED or REJECTED, why, and the concrete change it made to THIS decision (empty if none). Retrieval is not adoption,
+and adoption is not proof of improvement. Governance and the approved acceptance criteria outrank retrieved
+experience: experience never authorizes removing or weakening criteria or checks, skipping verification or approval,
+or changing permissions, cost or security. Only the Owner's own words can remove an acceptance criterion."""
 
 EXEC_CONTRACT = ("The engine runs `python <file> --self-test` with empty stdin in an empty temp dir; that "
                  "invocation must run the full self-test and exit 0 only if it passes. Running `python <file>` "
@@ -197,11 +220,20 @@ What would make this wrong, what evidence is missing, what assumption is unteste
   owner_decision — progress needs an Owner approval, resource or business trade-off.
 - directive: for rework, the order to the team: objective, expected outcome, evidence that must show it is done,
   constraints (keep everything that already passed). It guides the team; it does not add acceptance criteria.
+- gap_class: PRODUCT_CHANGE/PRODUCT_DEFECT only when the artifact itself needs modification.
+  EVIDENCE_GAP means stronger observation is needed; HARNESS_DEFECT means the checks need repair.
+  AMBIGUOUS means gather evidence before deciding whether the product is wrong.
+  These three classes reverify the SAME artifact, never send an evidence task to a production worker.
+  OUTSIDE_AUTHORITY uses the Owner decision path. Deterministic product failures override your class.
+- runtime: the full verification spec to obtain the missing evidence (current spec if unchanged).
+  Add probes/assertions as needed; existing acceptance intent, inputs and assertions cannot be weakened.
 Then the Owner report: what was achieved, your judgment of value and limits, next steps."""
 
-CEO_DIRECTIVE = """The CEO reviewed the verified previous version and judged that the Owner's goal is not yet
-satisfied (ceo_directive: the CEO's order, missing evidence). Build a NEW version that closes exactly those gaps and
-makes the result demonstrable, keeping everything that already passed verification."""
+CEO_DIRECTIVE = """The CEO ordered a PRODUCT_CHANGE or PRODUCT_DEFECT repair (ceo_directive).
+Build a new version only for that product change, keeping everything that passed. Evidence collection
+alone is not product work. If inspection establishes no product change is needed, return outcome=NO_CHANGE,
+nonempty no_change_evidence explaining why the existing artifact suffices, and no content/files/edits.
+This requests same-artifact verification and CEO judgment; it is not a claim that the goal is satisfied."""
 
 DIAGNOSE_SYSTEM = """You are 淸月 AI CEO. The Owner tested the delivered, verified artifact and wrote
 feedback in plain language (owner_feedback; 'new' = not yet acted on). It may report something that
@@ -214,7 +246,12 @@ interpretation, the complete acceptance criteria (existing still-valid ones plus
 spec whose probes exercise the new requirements end to end (they should FAIL on the current version
 if it lacks them) while keeping probes for confirmed behaviour, network_access, and the pipeline
 (reuse suitable roles; add the specialists the new requirements need). Never drop or weaken existing
-requirements unless the Owner asked for that change. To remove or replace an existing acceptance criterion, list it in
+requirements unless the Owner asked for that change. evidence_class decides the next action: PRODUCT_CHANGE = the
+product must change (a defect shown by evidence, or a change/feature the Owner asked for) -> rebuild; HARNESS_DEFECT =
+the product is right and the check/runtime spec is wrong (fix the runtime spec) -> the same version is verified again;
+NO_PRODUCT_EVIDENCE = nothing shows the product is wrong -> the same version is verified again; AMBIGUOUS = the evidence
+cannot tell -> the same version is verified again to obtain evidence (never invent a product defect).
+To remove or replace an existing acceptance criterion, list it in
 removed_criteria with owner_quote = the Owner's exact words from owner_feedback that ask for that change; a removal
 without the Owner's words is reverted (your own diagnosis or retrieved knowledge is not the Owner).
 relevant_knowledge holds lessons from other projects that match the current problem; use what applies and say which
@@ -333,6 +370,38 @@ def actionable(findings, n=None):
     return [f for f in findings if gating(f, n)]
 
 
+def product_evidence(selftest_ok, failed_steps, blocking, unmet):
+    """The one authoritative product-failure rule, for a fresh verification and for any stored one: a failed
+    self-test, a runtime step classified product, a verifier product finding on an approved criterion, or unmet
+    criteria with nothing else to blame. Harness / infra / ambiguous / no evidence is never a product failure."""
+    return (not selftest_ok or any(runtime.classify_step(st) == 'product' for st in failed_steps)
+            or any(f.get('kind', 'product') == 'product' for f in blocking)
+            or bool(unmet and not failed_steps and not blocking))
+
+
+def product_failure(v, n=None):
+    """Whether a stored FAIL counts as a product failure TODAY. Re-evaluated from the record's stored evidence with
+    product_evidence(); the engine's own synthetic gate findings are ignored, because older records labelled a
+    harness-only gate failure kind='product' (Test #3). The record itself is never changed."""
+    if v.get('verdict', 'FAIL') != 'FAIL':
+        return False
+    if v['provider'] == 'engine':                      # the build delivered nothing usable: the build itself failed
+        return True
+    checks = v['checks'] or {}
+    rt = checks.get('runtime') or {}
+    failed_steps = [st for st in rt.get('steps', []) if not st.get('ok')]
+    # The self-test's own result: its exit code, else its own output (a runtime failure appends after the marker).
+    # A record with neither is insufficient evidence, never a product failure.
+    head = str(checks.get('output', '')).split('RUNTIME ACCEPTANCE FAILED:')[0].strip()
+    selftest_ok = checks['exit_code'] == 0 if 'exit_code' in checks else bool(checks.get('ok')) or not head
+    result = v['result'] or {}
+    blocking = [f for f in result.get('findings', []) if f.get('severity') in ('critical', 'major')
+                and gating(f, n) and not str(f.get('issue', '')).startswith('Gate failed: ')]
+    unmet = [c for c in result.get('criteria', []) if not c.get('met')
+             and (n is None or 0 <= c.get('index', 0) < n)]
+    return product_evidence(selftest_ok, failed_steps, blocking, unmet)
+
+
 def failure_code(v):
     """A stable code for how a verification FAILED, from structured fields only - never the verifier's
     wording (v26-v30 repeated the same findings in new words and were never matched). None when there is
@@ -345,9 +414,7 @@ def failure_code(v):
         steps.append('deterministic checks')          # compile / self-test failed, runtime did not
     if not steps:
         return None
-    kinds = sorted({f.get('kind', 'product') for f in v['result'].get('findings', [])
-                    if f['severity'] in ('critical', 'major') and gating(f)})
-    return f"{'+'.join(kinds) or 'none'}:{'|'.join(steps)}"[:300]
+    return f"{'product' if product_failure(v) else 'non-product'}:{'|'.join(steps)}"[:300]
 
 
 def attempt_ledger(store, pid, limit=12):
@@ -387,6 +454,7 @@ class Engine:
         self.store, self.workspace, self.vault, self.gai_db = store, Path(workspace), Path(vault), gai_db
         self.llm, self.log = llm, log or (lambda msg: None)
         self.cancel = None
+        self.last_retrievals = []           # retrieval ids of the latest _ask (decision-time evidence)
 
     # ---- driver
     def run(self, pid, cancel=None, stop_at=None):
@@ -441,7 +509,157 @@ class Engine:
         self.write_handoff(pid)
         return self.store.project(pid)
 
+    @staticmethod
+    def _snap(hits, retriever, query, stage, role):
+        """Tag retrieved items with how they were retrieved (query, rank, retriever). The tag is private: _ask
+        strips it before the prompt, so what a model sees is unchanged."""
+        query, now = str(query), time.time()
+        for rank, hit in enumerate(hits, 1):
+            hit['_meta'] = {'retriever': retriever, 'version': RETRIEVAL_VERSION, 'query': query[:8000],
+                            'query_truncated': len(query) > 8000,
+                            'query_sha256': hashlib.sha256(query.encode('utf-8')).hexdigest(),
+                            'source_sha256': hit.pop('_source_sha256', None), 'retrieved_at': now,
+                            'rank': rank, 'stage': stage, 'role': role}
+        return hits
+
+    def _number_retrievals(self, pid, who, task, context, inject=True):
+        """Give each retrieved item a stable id (the same inputs after an interruption give the same id) and strip
+        the private retrieval tags. Nothing is written here, so an interrupted call leaves no orphan retrieval."""
+        def has(value):
+            if isinstance(value, dict):
+                return any(k in KNOWLEDGE_KEYS and isinstance(v, list) and v or has(v) for k, v in value.items())
+            return isinstance(value, list) and any(has(v) for v in value)
+        if not has(context):
+            return context, []
+        p = self.store.project(pid)
+        seed = [pid, who, task, p['state'], p['iteration'], p['plan_version'],
+                len(self.store.events(pid, {'decision_applied'}))]
+        context, found = json.loads(json.dumps(context, ensure_ascii=False, default=str)), []
+
+        def walk(value, path):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in KNOWLEDGE_KEYS and isinstance(item, list):
+                        for i, hit in enumerate(h for h in item if isinstance(h, dict)):
+                            meta = hit.pop('_meta', None) or {}
+                            for private in [k for k in hit if k.startswith('_')]:
+                                meta.setdefault(private.lstrip('_'), hit.pop(private))
+                            # The id covers WHAT was retrieved AND from which source revision by which query, so a
+                            # retry after the note or query changed records its own provenance (Codex review 2).
+                            rid = 'R-' + hashlib.sha256(json.dumps(seed + [path + key, i, hit, meta.get('source_sha256'),
+                                                                           meta.get('query_sha256')], sort_keys=True,
+                                                                   ensure_ascii=False).encode()).hexdigest()[:12]
+                            if inject:
+                                hit['retrieval_id'] = rid
+                            found.append((rid, f'{path}{key}[{i}]', dict(hit), meta))   # exactly as presented
+                    else:
+                        walk(item, path + key + '.')
+            elif isinstance(value, list):
+                for item in value:
+                    walk(item, path)
+        walk(context, '')
+        return context, found
+
+    def _record_retrievals(self, pid, who, retrievals, call):
+        """Decision-time evidence of each retrieved item, written once per retrieval id (inside the caller's
+        transaction): exactly what was presented (bounded: K0 excerpts are capped) with its hash, the hash of the
+        whole source note at that moment, the query, rank, score, retriever version, the role and stage."""
+        recorded = {e['detail']['retrieval'] for e in self.store.events(pid, {'knowledge_trace'})
+                    if e['detail']['phase'] == 'RETRIEVED'}
+        for rid, where, hit, meta in retrievals:
+            if rid in recorded:
+                continue
+            presented = json.dumps(hit, sort_keys=True, ensure_ascii=False)
+            self.store.event(
+                pid, 'knowledge_trace', phase='RETRIEVED', retrieval=rid, context=where, role=meta.get('role', who),
+                stage=meta.get('stage', self.store.project(pid)['state']), call=call,
+                retriever=meta.get('retriever', 'unknown'), retriever_version=meta.get('version'),
+                query=meta.get('query'), query_truncated=meta.get('query_truncated'),
+                query_sha256=meta.get('query_sha256'), retrieved_at=meta.get('retrieved_at'),
+                rank=meta.get('rank'), score=hit.get('matched_terms'),
+                source={k: hit[k] for k in ('note', 'project', 'evidence', 'title', 'url', 'matched_terms')
+                        if hit.get(k) is not None},
+                source_sha256=meta.get('source_sha256'),      # hash of the bytes the retriever itself read
+                presented=hit, presented_sha256=hashlib.sha256(presented.encode()).hexdigest())
+
+    def _record_decision(self, pid, who, task, p, used, result, retrievals, call=None):
+        audit = result.get('audit') if isinstance(result.get('audit'), dict) else {}
+        known = {rid for rid, *_ in retrievals}
+        uses = [{k: str(u.get(k, ''))[:1000] for k in ('retrieval_id', 'disposition', 'reason', 'decision_change')}
+                for u in audit.get('knowledge_use', []) if u.get('retrieval_id') in known]
+        plan = p['plan'] or {}
+        with self.store.tx():
+            self._record_retrievals(pid, who, retrievals, call)
+            return self.store.event(
+                pid, 'decision_trace', who=who, task=task, provider=used, call=call, goal=p['goal'], state=p['state'],
+                iteration=p['iteration'], plan_version=p['plan_version'],
+                proposed=next((str(result[k]) for k in ('next_action', 'decision', 'disposition', 'evidence_class')
+                               if result.get(k)), 'plan'),
+                reason=str(audit.get('reason') or result.get('rationale') or result.get('diagnosis')
+                           or result.get('interpretation') or result.get('judgment') or '')[:1500],
+                evidence=[str(x)[:500] for x in audit.get('evidence', [])][:10],
+                alternatives=[str(x)[:300] for x in audit.get('alternatives', [])][:6],
+                unknowns=[str(x)[:300] for x in audit.get('unknowns', [])][:6] if audit else ['decision audit not supplied'],
+                audit_supplied=bool(audit), retrievals=sorted(known), knowledge_use=uses,
+                constraints={'acceptance_criteria': plan.get('acceptance_criteria', []), 'budget': p['budget'],
+                             'product_failures': len(self._product_failures(pid)),
+                             'approved_connections': sorted(a['subject'] for a in self.store.approvals(pid)
+                                                            if a['status'] == 'approved'),
+                             'governance': 'fixed; outranks retrieved experience'})
+
+    @staticmethod
+    def _take_trace(response):
+        """Detach the trace id and audit from a CEO response before it is stored as a plan/report."""
+        response.pop('audit', None)
+        return response.pop('_trace_id', None)
+
+    def _trace_applied(self, pid, decision, action, before=None, after=None, feedback_ids=(), interpretation='',
+                       owner_changes=(), blocked=(), expects=None, artifact=None):
+        """The decision as actually applied (after any engine override), inside the caller's transaction: a
+        stale or interrupted decision is never applied, and an applied one commits with its state change."""
+        rec = next((e['detail'] for e in self.store.events(pid, {'decision_trace'}) if e['id'] == decision), None)
+        if rec is None:
+            return
+        before, after = before or {}, after or {}
+        changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+        old_c, new_c = before.get('acceptance_criteria') or [], after.get('acceptance_criteria') or []
+        uses = {u['retrieval_id']: u for u in rec['knowledge_use']}
+        adopted = []
+        for rid in rec['retrievals']:
+            use = uses.get(rid, {})
+            phase = use.get('disposition') if use.get('disposition') in ('ADOPTED', 'REJECTED') else 'UNASSESSED'
+            self.store.event(pid, 'knowledge_trace', phase=phase, retrieval=rid, decision=decision,
+                             reason=use.get('reason', ''))
+            if phase == 'ADOPTED' and use.get('decision_change', '').strip():
+                adopted.append(rid)       # only an adoption that changed the decision can reach an action
+                self.store.event(pid, 'knowledge_trace', phase='DECISION_CHANGE', retrieval=rid, decision=decision,
+                                 claimed_change=use['decision_change'], applied_action=action, plan_changes=changed,
+                                 attribution='CLAIMED_BY_DECISION', improvement='UNKNOWN')
+        selected = after or before
+        self.store.event(pid, 'decision_applied', decision=decision, who=rec['who'], proposed=rec['proposed'],
+                         action=action, plan_changes=changed, criteria_added=[c for c in new_c if c not in old_c],
+                         criteria_removed=[c for c in old_c if c not in new_c], blocked=list(blocked),
+                         adopted=adopted, feedback_ids=list(feedback_ids),
+                         # the ONE action this decision causes (None: terminal, e.g. Owner review or a pause); an
+                         # action links only decisions that expect it - never by proximity (Codex review 2026-10-14)
+                         expects=expects, expected_artifact=artifact,
+                         selected={'pipeline': [[st.get('agent_role'), st.get('provider')]
+                                                for st in selected.get('pipeline') or []],
+                                   'required_tools': selected.get('required_tools') or []})
+        for f in feedback_ids:
+            self.store.event(pid, 'feedback_trace', phase='INTERPRETATION', feedback_id=f, decision=decision,
+                             interpretation=interpretation[:1500])
+            self.store.event(pid, 'feedback_trace', phase='PLAN_CHANGE', feedback_id=f, decision=decision,
+                             plan_changes=changed, owner_explicit_changes=list(owner_changes),
+                             criteria_added=[c for c in new_c if c not in old_c],
+                             unchanged_requirements=[c for c in old_c if c in new_c], blocked=list(blocked))
+
     def _ask(self, pid, who, system, task, context, schema, prefer, web=False):
+        audited = 'audit' in schema.get('properties', {})
+        context, retrievals = self._number_retrievals(pid, who, task, context, inject=audited)
+        self.last_retrievals = []
+        if audited:
+            system += AUDIT_RULES
         self.log(f'{who} -> {prefer}')
         p = self.store.project(pid)
         self.store.event(pid, 'call_start', who=who, preferred=prefer, state=p['state'], iteration=p['iteration'])
@@ -456,8 +674,9 @@ class Engine:
             _status_write(activity, data)
         activity.parent.mkdir(parents=True, exist_ok=True)
         tick({'provider': prefer, 'elapsed': 0, 'output_bytes': 0, 'idle': 0})
+        prompt = _prompt(system, task, context)
         try:
-            result, used, notes = self.llm(_prompt(system, task, context), schema, prefer=prefer, web=web,
+            result, used, notes = self.llm(prompt, schema, prefer=prefer, web=web,
                                            cancel=self.cancel, on_tick=tick)
         except Exception as e:
             self.store.event(pid, 'call_failed', who=who, preferred=prefer,
@@ -468,8 +687,15 @@ class Engine:
             _status_remove(activity)
         if notes:
             self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, notes=notes)
-        self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started))
+        call = self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started),
+                                prompt_sha256=hashlib.sha256(prompt.encode('utf-8')).hexdigest())
         self.beat(pid, f'call done {who} ({used})')
+        if audited:
+            result['_trace_id'] = self._record_decision(pid, who, task, p, used, result, retrievals, call)
+        elif retrievals:                 # e.g. the Verification agent: its own retrieval, never a CEO decision
+            with self.store.tx():
+                self._record_retrievals(pid, who, retrievals, call)
+        self.last_retrievals = [rid for rid, *_ in retrievals]
         return result, used
 
     # ---- states
@@ -481,12 +707,14 @@ class Engine:
         tools = [t for t in TOOL_CANDIDATES if shutil.which(t)]
         context = {'goal': goal, 'available_providers': providers.available() or list(gov.PROVIDERS),
                    'available_tools': tools,
-                   'prior_knowledge': knowledge.retrieve(self.vault, goal),
-                   'intelligence': knowledge.intel(self.gai_db, goal),
+                   'prior_knowledge': self._snap(knowledge.retrieve(self.vault, goal), 'K0:knowledge.retrieve',
+                                                 goal, 'planning', 'CEO'),
+                   'intelligence': self._snap(knowledge.intel(self.gai_db, goal), 'K0:knowledge.intel', goal,
+                                              'planning', 'CEO'),
                    'provider_track_record': metrics.provider_record(self.store)}
         base = library.develops(self.store, pid)
         if base:
-            context['develop_from'] = library.develop_context(self.store, base, lambda q: knowledge.retrieve(self.vault, q),
+            context['develop_from'] = library.develop_context(self.store, base, lambda q: self._snap(knowledge.retrieve(self.vault, q), 'K0:knowledge.retrieve', q, 'develop', 'CEO'),
                                                               artifact=library.base_artifact(self.store, pid))
         # Provenance: exactly which prior knowledge and intelligence the CEO was shown.
         self.store.event(pid, 'context_used', vault_notes=[n['note'] for n in context['prior_knowledge']],
@@ -495,11 +723,14 @@ class Engine:
                             if base else {}))
         plan, used = self._ask(pid, 'CEO', CEO_SYSTEM, 'Interpret the Owner goal and design the pipeline.',
                                context, PLAN, prefer='claude')
+        trace = self._take_trace(plan)
         plan = self._sanitize(plan)
         missing = [t for t in plan['required_tools'] if not shutil.which(t)]
         with self.store.tx():
             self.store.update(pid, plan=plan, plan_version=1)
             self.store.event(pid, 'decision', what='plan v1', why=plan['interpretation'][:500], by=used)
+            self._trace_applied(pid, trace, 'pause: install tools' if missing else 'staff and build', {}, plan,
+                                expects=None if missing else 'build')
         if missing:
             self.store.pause(pid, f"Owner action needed (install_tool): {', '.join(missing)} not found on this PC.",
                              resume_state='PLANNING')
@@ -569,6 +800,7 @@ class Engine:
             self.store.update(pid, iteration=p['iteration'] + 1)
             p = self.store.project(pid)
         plan, it, pv = p['plan'], p['iteration'], p['plan_version']
+        self.store.trace_action(pid, 'build', f'build:{it}:{pv}')
         *notes_stages, final = plan['pipeline']
         upstream = []
         # Every stage of a rework sees the real baseline: the latest NON-EMPTY version and the version the
@@ -608,6 +840,7 @@ class Engine:
                                  'order. The engine applies them to the previous version byte-exactly and rejects '
                                  'the build if any find is missing or ambiguous. Return the complete deliverable only '
                                  'when most of it changes. Otherwise edits=[].'),
+                   'no_change_rule': 'Use outcome=NO_CHANGE only with explicit no_change_evidence and empty content/files/edits when the existing artifact needs no change. Otherwise outcome=CHANGED and deliver the product.',
                    'execution_check': (EXEC_CONTRACT.replace('<file>', plan['artifact_filename'])
                                        if plan['artifact_kind'] != 'markdown' else 'document must be substantive'),
                    'runtime_acceptance': runtime.normalize(plan.get('runtime'))[0]}
@@ -695,6 +928,11 @@ class Engine:
             # Exact bytes: write_text translates newlines on Windows and would break the recorded hash.
             path.write_bytes(content.encode('utf-8'))
             sha = artifacts.sha(content.encode('utf-8'))
+        passed = self._passed_artifact(pid)
+        if passed and passed['kind'] == plan['artifact_kind'] and passed['sha256'] == sha \
+                and not (manifest or {}).get('rejected') and not artifacts.problems(passed):
+            shutil.rmtree(folder, ignore_errors=True)  # only the uncommitted folder claimed above
+            return self._reverify_same(pid, passed, 'byte-identical to latest passed artifact')
         # Only a FAIL that showed a product defect condemns these bytes (a harness/infra-only FAIL does not).
         failed = {v['artifact_id'] for v in self._product_failures(pid)}
         # Same bytes AND the same refused files: a rebuild that drops a refused (unsafe) file is not a repeat.
@@ -775,12 +1013,18 @@ class Engine:
     def _verifying(self, pid):
         p = self.store.project(pid)
         plan = p['plan']
-        artifact = self.store.artifacts(pid)[-1]
+        all_artifacts = self.store.artifacts(pid)
+        artifact = next((a for a in all_artifacts if a['iteration'] == p['iteration']), all_artifacts[-1])
         changed = artifacts.problems(artifact)
         if changed:
             raise Rejected(f"Artifact changed on disk after it was built: {'; '.join(changed)}")
         done = [v for v in self.store.verifications(pid) if v['artifact_id'] == artifact['id']]
-        if done and done[-1]['verdict'] == 'PASS':
+        rerouted = any(e['detail'].get('route') == 'reverify' and e['detail'].get('artifact') == artifact['id']
+                       and done and e['at'] > done[-1]['created'] for e in self.store.events(pid, {'owner_rework_route'}))
+        rerouted = rerouted or any(e['detail']['artifact'] == artifact['id']
+            and e['detail']['after_verification'] == (done[-1]['id'] if done else None)
+            for e in self.store.events(pid, {'same_artifact_route'}))
+        if done and done[-1]['verdict'] == 'PASS' and not rerouted:
             # Verified already; the CEO acceptance call was interrupted (quota/crash): continue there.
             return self._deliver(pid, artifact, artifacts.text_of(artifact), done[-1]['result'])
         pending = [e for e in self.store.events(pid, {'probe_review_pending'})
@@ -788,6 +1032,7 @@ class Engine:
         applied = {e['detail']['pending'] for e in self.store.events(pid, {'probe_review_applied'})}
         if pending and pending[-1]['id'] not in applied:
             return self._probe_review(pid, p, artifact, pending[-1])
+        self.store.trace_action(pid, 'verify', f"verify:{artifact['id']}:{len(done)}", artifact=artifact['id'])
         text = artifacts.text_of(artifact)
         rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
         checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
@@ -813,7 +1058,9 @@ class Engine:
                    'deterministic_checks': checks,
                    'earlier_rounds': [{'round': v['iteration'], 'findings': v['result']['findings']}
                                       for v in self.store.verifications(pid)],
-                   'verification_knowledge': knowledge.retrieve(self.vault, p['goal'] + ' verification failed lesson'),
+                   'verification_knowledge': self._snap(knowledge.retrieve(self.vault, p['goal'] + ' verification failed lesson'),
+                                                        'K0:knowledge.retrieve', p['goal'] + ' verification failed lesson',
+                                                        'verification', 'Verification'),
                    'runtime_spec': plan.get('runtime'), 'owner_rework': plan.get('owner_rework'),
                    # A ruling applies to the criterion it was made for: matched by text, so a later Owner change
                    # that reorders or rewrites the criteria never moves it onto another requirement.
@@ -824,6 +1071,7 @@ class Engine:
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
+        verifier_retrievals = self.last_retrievals
         if used == producer:
             self.store.event(pid, 'decision', what="verification ran on the producer's engine",
                              actual_producer=producer,
@@ -851,14 +1099,12 @@ class Engine:
                              items=[f"[{f['severity']}/{f.get('kind')}] {f['issue']}"[:400] for f in recommendations])
         failed_steps = [st for st in checks['runtime'].get('steps', []) if not st.get('ok')]
         step_kinds = {runtime.classify_step(st) for st in failed_steps}
-        product_evidence = (not selftest_ok or 'product' in step_kinds
-                            or any(f.get('kind', 'product') == 'product' for f in blocking)
-                            or bool(unmet and not failed_steps and not blocking))
-        if not passed and (not blocking or (product_evidence and not any(
+        is_product = product_evidence(selftest_ok, failed_steps, blocking, unmet)
+        if not passed and (not blocking or (is_product and not any(
                 f.get('kind', 'product') == 'product' for f in blocking))):
             # Failed only on deterministic checks or unmet approved criteria. The kind comes from the evidence:
             # a verifier PASS alone never makes it a harness failure.
-            gate = ('product' if product_evidence else 'infra' if step_kinds == {'infra'} else 'harness')
+            gate = ('product' if is_product else 'infra' if step_kinds == {'infra'} else 'harness')
             if unmet:
                 result['findings'].append({'severity': 'major', 'kind': gate, 'criterion': unmet[0].get('index', 0),
                                            'issue': 'Gate failed: approved criteria not met: '
@@ -868,12 +1114,15 @@ class Engine:
                 result['findings'].append({'severity': 'major', 'kind': gate, 'criterion': -1, 'deterministic': True,
                                            'issue': 'Gate failed: deterministic checks failed.',
                                            'evidence': checks['output'][:500]})
-        review_needed = (failed_steps and not product_evidence and step_kinds <= {'harness', 'ambiguous'}
+        review_needed = (failed_steps and not is_product and step_kinds <= {'harness', 'ambiguous'}
                          and not any(e['detail'].get('artifact') == artifact['id']
                                      for e in self.store.events(pid, {'probe_review_pending'})))
         with self.store.tx():
             vid = self.store.add_verification(pid, artifact['id'], p['iteration'], 'PASS' if passed else 'FAIL',
                                               result, checks, used)
+            if verifier_retrievals:      # what the Verification agent itself was shown, linked to its verdict
+                self.store.event(pid, 'retrieval_use', role='Verification', verification=vid,
+                                 retrievals=verifier_retrievals)
             if review_needed:
                 self.store.event(pid, 'probe_review_pending', artifact=artifact['id'], verification=vid,
                                  before=runtime.normalize(plan.get('runtime'))[0], steps=failed_steps)
@@ -908,6 +1157,7 @@ class Engine:
                 'assertions. Explain the evidence. Do not change pipeline or network access.',
                 'Classify the failure and propose an equivalent execution repair if justified.', context,
                 PROBE_REVIEW, prefer='claude')
+            trace = self._take_trace(decision)
             disposition = decision['disposition']
             before = detail['before']
             after, notes = preserve_runtime(before, decision['runtime'])
@@ -951,6 +1201,12 @@ class Engine:
                                  disposition=disposition, rationale=decision['rationale'], evidence=decision['evidence'],
                                  before=before, after=after, equivalence=equivalence, preservation=notes,
                                  repaired=disposition == 'HARNESS_REPAIR')
+                self._trace_applied(pid, trace, {'HARNESS_REPAIR': 'reverify same artifact (harness repair)',
+                                                 'PRODUCT_DEFECT': 'product rework',
+                                                 'UNRESOLVED': 'pause: harness blocked'}[disposition],
+                                    {'runtime': before}, {'runtime': after}, blocked=notes,
+                                    expects={'HARNESS_REPAIR': 'verify', 'PRODUCT_DEFECT': 'build'}.get(disposition),
+                                    artifact=artifact['id'] if disposition == 'HARNESS_REPAIR' else None)
             completed = self.store.events(pid, {'probe_review'})[-1]['detail']
         if completed['disposition'] == 'PRODUCT_DEFECT':
             return self._after_fail(pid, p, review=pending['id'])
@@ -985,13 +1241,57 @@ class Engine:
             return art, None                      # the pinned, integrity-checked base version
         works = {f['iteration'] for f in self.store.feedback(pid) if f['verdict'] == 'works'}
         latest = real[-1] if real else None
+        routes = self.store.events(pid, {'same_artifact_route'})
+        if latest and routes and routes[-1]['at'] > latest['created']:
+            # A reused passed version stays the baseline until a newer artifact is committed.
+            latest = next((a for a in real if a['id'] == routes[-1]['detail']['artifact']), latest)
         confirmed = next((a for a in reversed(real) if a['iteration'] in works), None)
         return latest, confirmed
+
+    def _passed_artifact(self, pid):
+        latest = {}
+        for v in self.store.verifications(pid):
+            if v['artifact_id']:
+                latest[v['artifact_id']] = v
+        passed = [v for v in latest.values() if v['verdict'] == 'PASS'
+                  and not self._deterministic_product(v)]
+        if not passed:
+            return None
+        aid = max(passed, key=lambda v: v['created'])['artifact_id']
+        return next((a for a in self.store.artifacts(pid) if a['id'] == aid), None)
+
+    @staticmethod
+    def _deterministic_product(verification):
+        # Reuse historical evidence classification, excluding model opinions and synthetic findings.
+        return bool(verification and product_failure({**verification, 'verdict': 'FAIL',
+                    'provider': 'deterministic', 'result': {'findings': [], 'criteria': []}}))
+
+    def _reverify_same(self, pid, artifact, reason):
+        if artifacts.problems(artifact):
+            raise Rejected('Cannot reverify a modified artifact.')
+        done = [v for v in self.store.verifications(pid) if v['artifact_id'] == artifact['id']]
+        with self.store.tx():
+            self.store.event(pid, 'same_artifact_route', artifact=artifact['id'], reason=reason,
+                             after_verification=done[-1]['id'] if done else None, route='reverify')
+            self.store.update(pid, iteration=artifact['iteration'])
+            if self.store.project(pid)['state'] != 'VERIFYING':
+                self.store.set_state(pid, 'VERIFYING', reason=reason)
 
     def _no_deliverable(self, pid, final, used, build, reason='empty deliverable'):
         """No usable deliverable (empty, or edits that do not apply): a deterministic FAIL, no artifact and
         no verification call. The reason goes back to the producer as a finding."""
         p = self.store.project(pid)
+        current, _ = self._baselines(pid)
+        done = [v for v in self.store.verifications(pid) if current and v['artifact_id'] == current['id']]
+        if reason == 'empty deliverable' and build.get('outcome') == 'NO_CHANGE' \
+                and str(build.get('no_change_evidence') or '').strip() \
+                and not any(build.get(k) for k in ('content', 'files', 'edits')) \
+                and current and current['project_id'] == pid and not (done and product_failure(done[-1])):
+            with self.store.tx():
+                self.store.event(pid, 'intentional_no_change', artifact=current['id'], provider=used,
+                                 evidence=build['no_change_evidence'])
+                self._reverify_same(pid, current, 'intentional NO_CHANGE; obtain evidence and CEO judgment')
+            return
         finding = {'severity': 'critical', 'kind': 'product', 'issue': f"The final production stage ({final['agent_role']}, {used}) "
                    f'delivered no usable deliverable: {reason}.', 'evidence': (build.get('summary') or '')[:600]}
         with self.store.tx():
@@ -1007,11 +1307,10 @@ class Engine:
     def _product_failures(self, pid):
         # A product build is counted once; harness checks and rechecks never spend its budget.
         n = len(((self.store.project(pid)['plan'] or {}).get('acceptance_criteria')) or []) or None
+        # Budget, repeat detection, the identical-build guard and rework routing all read this one list.
         failed = {}
         for v in self.store.verifications(pid):
-            if v['verdict'] == 'FAIL' and any(f.get('kind', 'product') == 'product'
-                    and f.get('severity') in ('critical', 'major') and gating(f, n)
-                    for f in v['result'].get('findings', [])):
+            if product_failure(v, n):
                 failed[v['artifact_id'] or ('build', v['iteration'])] = v
         return list(failed.values())
 
@@ -1109,7 +1408,9 @@ class Engine:
             schema['properties']['decision']['enum'] = ['switch_provider', 'change_pipeline']
         decision, used = self._ask(pid, 'CEO', STRATEGY_SYSTEM, 'Review strategy after repeated failure.',
                                    context, schema, prefer='claude')
+        trace = self._take_trace(decision)
         plan = p['plan']
+        before = json.loads(json.dumps(plan))
         with self.store.tx():
             if decision['decision'] == 'switch_provider':
                 final = plan['pipeline'][-1]
@@ -1154,8 +1455,14 @@ class Engine:
                 if notes:
                     self.store.event(pid, 'decision', what='runtime probes preserved', why='; '.join(notes), by='engine')
             self.store.event(pid, 'decision', what=f"strategy: {decision['decision']}", why=decision['rationale'], by=used)
+            # From VERIFYING (a re-plan of the same version) the next action is that version's check, else a build.
+            now = self.store.project(pid)
+            same = now['state'] == 'VERIFYING' and next((a for a in reversed(self.store.artifacts(pid))
+                                                          if a['iteration'] == now['iteration']), None)
+            self._trace_applied(pid, trace, f"strategy: {decision['decision']}", before, now['plan'],
+                                expects='verify' if same else 'build', artifact=same['id'] if same else None)
 
-    def replan(self, pid, reason):
+    def replan(self, pid, reason, by='Owner/operator'):
         """Recovery: send a stuck/misdirected project back to the CEO for a strategy review (counted as a
         manual recovery action in Owner Effort). Completed versions and history are kept."""
         with self.lock(pid):
@@ -1163,16 +1470,37 @@ class Engine:
             if p['state'] not in ('PAUSED', 'REWORK'):
                 raise Rejected(f"Project is {p['state']}; replan is for a PAUSED or REWORK project.")
             with self.store.tx():
-                self.store.event(pid, 'recovery_replan', reason=reason, by='Owner/operator')
+                self.store.event(pid, 'recovery_replan', reason=reason, by=by)
                 if p['state'] == 'PAUSED':
                     if p['resume_state'] != 'VERIFYING':
                         self.store.update(pid, resume_state='REWORK')
-                    self.store.resume(pid)
+                    self.store.resume(pid, by='Owner' if by.startswith('Owner') else by)
             self._strategy(pid, recovery_note=reason)
             self.write_handoff(pid)
             return self.store.project(pid)
 
     def _rework(self, pid):
+        p = self.store.project(pid)
+        directive = (p['plan'] or {}).get('ceo_directive') or {}
+        gap = directive.get('gap_class', 'AMBIGUOUS')
+        if gap not in GAP_CLASSES:
+            gap = 'AMBIGUOUS'
+        if directive and not self.store.feedback(pid, pending_only=True) and gap == 'OUTSIDE_AUTHORITY':
+            return self.store.pause(pid, 'NEEDS_DECISION: executive work is outside authority.', resume_state='VERIFYING')
+        if directive and not self.store.feedback(pid, pending_only=True) and gap in NON_PRODUCT_GAPS:
+            artifact = next((a for a in self.store.artifacts(pid) if a['iteration'] == directive.get('after_version')), None)
+            done = [v for v in self.store.verifications(pid) if artifact and v['artifact_id'] == artifact['id']]
+            if artifact and not (done and any(v['id'] == done[-1]['id'] for v in self._product_failures(pid))):
+                return self._reverify_same(pid, artifact, 'executive ' + gap)
+            if artifact is None:
+                return self.store.pause(pid, 'NEEDS_DECISION: no artifact for executive evidence collection.', resume_state='VERIFYING')
+            with self.store.tx():
+                p['plan']['ceo_directive'] = {**directive, 'gap_class': 'PRODUCT_DEFECT',
+                    'prior_directive': directive.get('directive'),
+                    'directive': 'Repair the product failures observed during verification; preserve passing behavior.'}
+                self.store.update(pid, plan=p['plan'])
+                self.store.event(pid, 'decision', what='executive gap overridden by product evidence',
+                                 why=done[-1]['id'], by='engine')
         # A strategy review decided after the last FAIL but interrupted (quota, crash) runs before any rebuild.
         # Only the newest decision counts: an older unfinished one was superseded by later verification.
         events = self.store.events(pid, {'strategy_pending', 'strategy_done'})
@@ -1318,9 +1646,10 @@ class Engine:
     def _replan_knowledge(self, pid, stage, focus):
         """Knowledge for a re-plan: the vault searched for THIS problem now (goal + current failure or feedback),
         other projects only. Provenance is recorded even when nothing matched, so absence is visible."""
+        query = f"{self.store.project(pid)['goal']} {focus}"[:1500]
         try:
-            hits = [h for h in knowledge.retrieve(self.vault, f"{self.store.project(pid)['goal']} {focus}"[:1500],
-                                                  limit=3, chars=3000) if h.get('project') != pid]
+            hits = self._snap([h for h in knowledge.retrieve(self.vault, query, limit=3, chars=3000)
+                               if h.get('project') != pid], 'K0:knowledge.retrieve', query, stage, 'CEO')
         except OSError:
             hits = []
         self.store.event(pid, 'context_used', stage=stage, vault_notes=[h['note'] for h in hits],
@@ -1351,6 +1680,7 @@ class Engine:
                    'provider_track_record': metrics.provider_record(self.store)}
         d, used = self._ask(pid, 'CEO', DIAGNOSE_SYSTEM, 'Diagnose the Owner feedback and revise this project.',
                             context, DIAGNOSIS, prefer='claude')
+        trace = self._take_trace(d)
         plan = {k: v for k, v in plan.items() if k != 'ceo_directive'}      # the Owner's word replaces the CEO's order
         new = self._sanitize({**plan, **{k: d[k] for k in ('interpretation', 'artifact_kind', 'artifact_filename',
                                                           'acceptance_criteria', 'verification_lenses', 'runtime',
@@ -1361,8 +1691,9 @@ class Engine:
         owner_texts = [f['text'] for f in feedback if f['handled_iteration'] is None and f['verdict'] in ('problem', 'request')]
         new['acceptance_criteria'], granted, restored = grounded_criteria(
             plan['acceptance_criteria'], new['acceptance_criteria'], d.get('removed_criteria'), owner_texts)
+        kept = []
         if not granted:
-            new['runtime'], _ = preserve_runtime(plan.get('runtime'), new['runtime'])
+            new['runtime'], kept = preserve_runtime(plan.get('runtime'), new['runtime'])
         new.pop('removed_criteria', None)
         # Reproduce: the revised acceptance run against the version the Owner has. If the problem is
         # real, this should fail now — and the rebuilt version must pass it.
@@ -1390,7 +1721,29 @@ class Engine:
                 self.store.event(pid, 'decision', what='runtime probes dropped by revised plan',
                                  why=', '.join(dropped), by=used)
             self.store.mark_feedback_handled(pid, p['iteration'])
-            self.store.set_state(pid, 'STAFFING', reason='rebuild for Owner feedback')
+            # The diagnosis decides the next action (Test #3: a correct "the product works, the check is wrong"
+            # was followed by an unconditional rebuild). Deterministic product evidence in the reproduction
+            # always wins over the model's class; without a valid existing version there is nothing to re-verify.
+            evidence_class = d.get('evidence_class', 'PRODUCT_CHANGE')
+            product_seen = any(runtime.classify_step(st) == 'product' for st in repro['steps'] if not st.get('ok'))
+            current = next((a for a in self.store.artifacts(pid) if last and a['id'] == last['id']), None)
+            reverify = (evidence_class in ('HARNESS_DEFECT', 'NO_PRODUCT_EVIDENCE', 'AMBIGUOUS') and not product_seen
+                        and last is not None and current is not None and current['id'] == last['id']
+                        and not artifacts.problems(last))
+            self.store.event(pid, 'owner_rework_route', evidence_class=evidence_class, product_evidence=product_seen,
+                             route='reverify' if reverify else 'rebuild', artifact=last and last['id'])
+            if reverify:
+                self.store.update(pid, iteration=last['iteration'])        # no new version: the same artifact
+                self.store.set_state(pid, 'VERIFYING', reason=f"Owner feedback: {evidence_class}; v{last['iteration']} verified again")
+            else:
+                self.store.set_state(pid, 'STAFFING', reason='rebuild for Owner feedback')
+            self._trace_applied(pid, trace, 'reverify same artifact' if reverify else 'rebuild', plan, new,
+                                feedback_ids=[f['id'] for f in feedback if f['handled_iteration'] is None
+                                              and f['verdict'] in ('problem', 'request')],
+                                interpretation=f"{d['diagnosis']} | evidence: {evidence_class}",
+                                owner_changes=[{'removed': c, 'owner_quote': q} for c, q in granted],
+                                blocked=[f'criterion kept (no Owner words): {c}' for c in restored] + list(kept),
+                                expects='verify' if reverify else 'build', artifact=last['id'] if reverify else None)
 
     # ---- Owner review
     def owner_review(self, pid, works=None, text='', finish=False):
@@ -1487,7 +1840,7 @@ class Engine:
         context = {'owner_goal': p['goal'], 'interpretation': p['plan']['interpretation'],
                    'artifact': {'path': artifact['path'], 'excerpt': text[:6000]},
                    'verification': {'criteria': verdict['criteria'], 'minor_findings': verdict['findings']},
-                   'rounds': p['iteration']}
+                   'rounds': p['iteration'], 'runtime_spec': p['plan'].get('runtime')}
         last = self.store.verifications(pid)[-1] if self.store.verifications(pid) else None
         if last:
             runtime_ev = last['checks'].get('runtime') or {}
@@ -1501,22 +1854,46 @@ class Engine:
         report, used = self._ask(pid, 'CEO', REPORT_SYSTEM,
                                  'Decide whether the Owner goal is satisfied, then report the verified result.',
                                  context, REPORT, prefer='claude')
+        trace = self._take_trace(report)
+        before = json.loads(json.dumps(p['plan']))
         decision = report.get('next_action', 'deliver')
+        gap = report.get('gap_class', 'AMBIGUOUS')
+        if gap not in GAP_CLASSES:
+            gap = 'AMBIGUOUS'
+        if self._deterministic_product(last):
+            gap, decision = 'PRODUCT_DEFECT', 'rework'
+            report['directive'] = report.get('directive') or 'Fix the deterministic product failure.'
+        elif gap == 'OUTSIDE_AUTHORITY':
+            decision = 'owner_decision'
+        report['gap_class'], report['next_action'] = gap, decision
         owner_act = max((e['id'] for e in self.store.events(pid, {'owner_action'})), default=0)
         ordered = [e for e in self.store.events(pid, {'decision'})
                    if e['detail'].get('what') == 'executive rework' and e['id'] > owner_act]
         fails = len(self._product_failures(pid))
         plan = p['plan']
         if decision == 'rework' and report.get('directive') and len(ordered) < MAX_EXECUTIVE_REWORKS \
-                and fails < p['budget']:
+                and (gap in NON_PRODUCT_GAPS or fails < p['budget']):
             # The CEO orders the next round itself: verified is not yet the Owner's goal.
             with self.store.tx():
                 plan['ceo_directive'] = {'directive': report['directive'], 'missing_evidence': report.get('missing_evidence', []),
-                                         'goal_satisfied': report.get('goal_satisfied'), 'after_version': p['iteration']}
-                self.store.update(pid, plan=plan, iteration=p['iteration'] + 1)
+                                         'goal_satisfied': report.get('goal_satisfied'), 'after_version': artifact['iteration'],
+                                         'gap_class': gap}
+                if gap in NON_PRODUCT_GAPS:
+                    plan['runtime'], notes = preserve_runtime(plan.get('runtime'), report.get('runtime') or plan.get('runtime'))
+                    self.store.event(pid, 'executive_verification_spec', gap_class=gap, preserved=notes,
+                                     runtime=plan['runtime'], artifact=artifact['id'])
+                self.store.update(pid, plan=plan, iteration=artifact['iteration'] if gap in NON_PRODUCT_GAPS else p['iteration'] + 1)
                 self.store.event(pid, 'decision', what='executive rework', by=used,
                                  why=f"goal {report.get('goal_satisfied')}; {report['directive'][:600]}")
-                self.store.set_state(pid, 'REWORK', reason='CEO executive review: the Owner goal is not yet satisfied')
+                if gap in NON_PRODUCT_GAPS:
+                    self._reverify_same(pid, artifact, 'executive ' + gap)
+                else:
+                    self.store.set_state(pid, 'REWORK', reason='CEO executive review: product work is required')
+                self._trace_applied(pid, trace, (f'reverify same artifact ({gap})' if gap in NON_PRODUCT_GAPS
+                                                 else f'product rework ({gap})'), before, plan,
+                                    blocked=notes if gap in NON_PRODUCT_GAPS else (),
+                                    expects='verify' if gap in NON_PRODUCT_GAPS else 'build',
+                                    artifact=artifact['id'] if gap in NON_PRODUCT_GAPS else None)
             return
         if decision == 'rework' and report.get('directive'):     # wanted more, but a bound stopped it: say so
             report['judgment'] = (report.get('judgment', '') + f"\n\n(CEO가 추가 작업을 원했지만 자동 재작업 한도"
@@ -1530,6 +1907,8 @@ class Engine:
                              why=f"goal {report.get('goal_satisfied', 'unknown')}; next {decision}; "
                                  f"missing: {'; '.join(report.get('missing_evidence', []))[:500]}")
             self.store.set_state(pid, 'OWNER_REVIEW', reason='verified artifact delivered; Owner to test it')
+            self._trace_applied(pid, trace, 'owner review' + (' (Owner decision needed)' if decision == 'owner_decision'
+                                                              else ''), before, plan)
 
     # ---- Owner lifecycle
     def note_satisfaction(self, pid, reason):

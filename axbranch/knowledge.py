@@ -39,7 +39,8 @@ def retrieve(vault, query, limit=3, chars=6000):
     for path in Path(vault).rglob('*.md') if Path(vault).is_dir() else ():
         if '.obsidian' in path.parts or '.trash' in path.parts:
             continue
-        text = path.read_text(encoding='utf-8', errors='replace')
+        raw = path.read_bytes()      # hashed as read: provenance of exactly what this retrieval saw
+        text = raw.decode('utf-8', errors='replace').replace('\r\n', '\n').replace('\r', '\n')   # = text mode
         reusable = _section(text, REUSABLE)
         if reusable:
             title = text.split('\n', 1)[0]
@@ -49,11 +50,13 @@ def retrieve(vault, query, limit=3, chars=6000):
         score = len(q & terms(path.stem + ' ' + body))
         if score >= 2:
             project = re.search(r'project: `(P-[\w-]+)`', text)
-            scored.append((score, path, body, project and project.group(1), bool(reusable)))
+            scored.append((score, path, body, project and project.group(1), bool(reusable),
+                           hashlib.sha256(raw).hexdigest()))
     scored.sort(key=lambda s: -s[0])
+    # '_source_sha256' is private provenance: the engine moves it out of the item before any prompt.
     return [{'note': str(p.relative_to(vault)), 'project': pid, 'matched_terms': score,
              'evidence': f"{p.relative_to(vault)} § {EVIDENCE}" if structured else str(p.relative_to(vault)),
-             'excerpt': b[:chars]} for score, p, b, pid, structured in scored[:limit]]
+             'excerpt': b[:chars], '_source_sha256': sha} for score, p, b, pid, structured, sha in scored[:limit]]
 
 
 def intel(db_path, query, limit=5):

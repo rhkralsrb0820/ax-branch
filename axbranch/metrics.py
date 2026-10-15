@@ -47,7 +47,31 @@ def effort(store, pid=None):
     feedback = {v: n for v, n in db.execute(f'SELECT verdict, COUNT(*) FROM owner_feedback WHERE 1=1 {where} '
                                             'GROUP BY verdict', args)}
     events = lambda kind: count(f"SELECT COUNT(*) FROM events WHERE kind='{kind}'")
-    resumes = count("SELECT COUNT(*) FROM events WHERE kind='state' AND detail LIKE '%Owner resumed%'")
+    # Owner resumes only. Before 2026-10-14 the supervisor's automatic resumes were also labelled 'Owner resumed';
+    # those are recognised (history is not rewritten) by the provider_retry/recovery event right before them.
+    # A supervisor recovery/provider_retry starts an automatic episode that lasts until its resume (or an Owner
+    # action): the re-plan and resume inside it are the supervisor's, whatever the old label said, e.g.
+    # recovery -> state(PAUSED, checkpoint) -> recovery_replan(Owner/operator) -> state(Owner resumed).
+    rows = db.execute(f"SELECT project_id, id, kind, detail FROM events WHERE kind IN ('state', 'provider_retry', "
+                      f"'recovery', 'recovery_replan', 'owner_action') {where} ORDER BY project_id, id", args).fetchall()
+    resumes = replans = 0
+    project, automatic = None, False
+    for pid_, _, kind, detail in rows:
+        if pid_ != project:
+            project, automatic = pid_, False
+        action = json.loads(detail).get('action') if kind == 'recovery' else None
+        if kind == 'provider_retry' or action in ('resume', 'replan+resume'):
+            automatic = True          # only these supervisor steps resume the project themselves
+        elif action == 'needs_owner_decision':
+            automatic = False         # the supervisor gave up: whatever resumes next is the Owner
+        # (waiting_for_stop resumes nothing and leaves the episode as it was)
+        elif kind == 'owner_action':
+            automatic = False
+        elif kind == 'recovery_replan':
+            replans += not automatic and '"by": "Supervisor"' not in detail
+        elif kind == 'state' and ('Owner resumed' in detail or 'Supervisor resumed' in detail):
+            resumes += 'Owner resumed' in detail and not automatic
+            automatic = False                                  # the episode ends with its resume
     projects = 1 if pid else db.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
     owner_instructions = projects + feedback.get('problem', 0) + feedback.get('request', 0)
     calls = events('call')
@@ -67,7 +91,7 @@ def effort(store, pid=None):
             'owner_confirmations (works / finish)': feedback.get('works', 0) + feedback.get('finish', 0),
             'owner_approval_decisions': events('approval_decided'),
             'owner_resumes': resumes,
-            'manual_recovery_replans': events('recovery_replan'),
+            'manual_recovery_replans': replans,
             'owner_escapes': _owner_escapes(db, where, args),
             'automatic_recoveries': events('recovery'),
             'engine_sessions_started_by': _sessions(db, where, args),
