@@ -484,6 +484,88 @@ srv.serve_forever()
         owner = next(s for s in ev['steps'] if s['name'] == 'exact Owner launch (no arguments)')
         self.assertEqual(runtime.classify_step(owner), 'product')                    # explicit expected status too (E4)
 
+    STORE = '''import sys, json, os
+from pathlib import Path
+from http.server import BaseHTTPRequestHandler, HTTPServer
+port = int(sys.argv[sys.argv.index('--port') + 1]) if '--port' in sys.argv else 0
+WHERE
+def load(): return json.loads(DATA.read_text()) if DATA and DATA.exists() else MEM
+MEM = []
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        body = json.dumps(load(), ensure_ascii=False).encode(); self.send_response(200); self.end_headers(); self.wfile.write(body)
+    def do_POST(self):
+        items = load(); items.append(json.loads(self.rfile.read(int(self.headers['Content-Length'])))['t'])
+        if DATA: DATA.parent.mkdir(parents=True, exist_ok=True); DATA.write_text(json.dumps(items))
+        else: MEM[:] = items
+        self.send_response(201); self.end_headers()
+srv = HTTPServer(('127.0.0.1', port), H)
+print(f'Serving at http://127.0.0.1:{srv.server_port}/', flush=True)
+srv.serve_forever()
+'''
+
+    def test_restart_proves_saved_data_survives_reopening(self):
+        flow = [self.req('fresh', 'GET', '/api', contains=['[]']),                  # a fresh-state first probe
+                self.req('save', 'POST', '/api', '{"t": "milk"}', status=201),
+                {**self.req('reopen', 'RESTART', ''), 'http_path': ''},
+                self.req('still saved', 'GET', '/api', contains=['milk'])]
+        for where, survives in (("DATA = Path('items.json')", True),                       # program folder
+                                ("DATA = Path(os.environ['USERPROFILE']) / '.app' / 'items.json'", True),   # profile
+                                ('DATA = None', False)):                                   # memory only
+            with self.subTest(where=where):
+                shutil.rmtree(self.tmp, ignore_errors=True); self.tmp.mkdir()
+                ev = self.check(self.STORE.replace('WHERE', where), {**WEB, 'probes': flow})
+                steps = {s['name']: s for s in ev['steps']}
+                self.assertTrue(steps['reopen']['ok'], steps['reopen'])
+                self.assertNotEqual(steps['reopen']['pid'], steps['server start']['pid'])   # a new process
+                self.assertTrue(steps['exact Owner launch (no arguments)']['ok'])           # fresh copy: '[]' holds
+                self.assertEqual(steps['still saved']['ok'], survives, steps['still saved'])
+
+    def test_exact_owner_launch_judges_the_page_on_a_fresh_copy(self):
+        # Codex R2: the no-argument launch serving an empty page must fail, even after a flow that saved data.
+        empty = SERVER.replace('MODE', "if '--port' not in sys.argv: self.send_response(200); self.end_headers(); return")
+        for code, ok in ((SERVER.replace('MODE', OK_MODE), True), (empty, False)):
+            with self.subTest(ok=ok):
+                ev = self.check(code, WEB)
+                self.assertEqual(next(s for s in ev['steps'] if s['name'] == 'exact Owner launch (no arguments)')['ok'], ok)
+        data = self.STORE.replace('WHERE', "DATA = Path('items.json')")
+        flow = [self.req('fresh', 'GET', '/api', contains=['[]']), self.req('save', 'POST', '/api', '{"t": "milk"}', status=201)]
+        ev = self.check(data, {**WEB, 'probes': flow})
+        self.assertTrue(ev['ok'], [s for s in ev['steps'] if not s['ok']])     # the Owner launch did not see 'milk'
+        # a GET that follows a step preparing its state (here a subprocess seeding the data) is not "first" (R3)
+        seeded = data.replace('MEM = []', "MEM = []\nif 'seed' in sys.argv: DATA.write_text(json.dumps(['milk'])); sys.exit(0)")
+        seed = {'name': 'seed', 'args': ['seed'], 'stdin': '', 'http_method': '', 'http_path': '', 'http_body': '',
+                'http_headers': [], 'expect_exit': 0, 'expect_status': 0, 'expect_contains': [], 'expect_absent': []}
+        (self.tmp / 'items.json').unlink()                                     # the previous flow's data (R4)
+        ev = self.check(seeded, {**WEB, 'probes': [seed, self.req('seeded', 'GET', '/api', contains=['milk'])]})
+        self.assertTrue(ev['ok'], [s for s in ev['steps'] if not s['ok']])
+
+    def test_browser_time_limit_grows_with_a_long_action_flow(self):
+        # A 6-action flow has a ~95 s virtual-time budget; a fixed 90 s real limit killed it under load (2026-10-16).
+        waited = []
+
+        class Fake:
+            def wait(self, seconds): waited.append(seconds); return 0
+            def streams(self): return '', ''
+            def stop(self): pass
+            def cleanup(self): pass
+        from unittest import mock
+        with mock.patch.object(runtime.sandbox, 'start', lambda *a, **k: Fake()):
+            record = {}
+            runtime._dump_dom('edge.exe', 1, '/', ['#a'] * 6, record=record)
+            runtime._dump_dom('edge.exe', 1, '/', [], record={})
+        budget = 6 * (5000 + runtime.SETTLE_MS + runtime.CLICK_WAIT_MS + 100) + 2000
+        self.assertEqual(waited, [budget // 1000 + 30, runtime.BROWSER_TIMEOUT])
+        self.assertEqual(record['timeout_s'], budget // 1000 + 30)
+
+    def test_restart_only_exists_for_a_web_server(self):
+        spec, notes = runtime.normalize({'mode': 'cli', 'owner_launch': 'x', 'launch_args': [],
+                                         'probes': [{**self.req('reopen', 'RESTART', ''), 'http_path': ''}]})
+        self.assertEqual((spec['probes'], 'RESTART' in notes[0]), ([], True))
+        spec, _ = runtime.normalize({**WEB, 'probes': [{**self.req('reopen', 'RESTART', ''), 'http_path': ''}]})
+        self.assertEqual(spec['probes'][0]['http_method'], 'RESTART')        # not demoted to a subprocess probe
+
     def test_probe_paths_cannot_leave_the_fresh_instance(self):
         # '@127.0.0.1:9999/' after 'http://127.0.0.1:<proxy>' would be userinfo + another server (Codex E1)
         for method in ('BROWSER', 'GET'):

@@ -23,6 +23,7 @@ import socket
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 from . import sandbox
 
@@ -37,7 +38,7 @@ def _obj(**props):
 
 HTTP_METHODS = ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
 PROBE = _obj(name=STR, args=_ARR(STR), stdin=STR,
-             http_method={'type': 'string', 'enum': ['', *HTTP_METHODS, 'BROWSER']},
+             http_method={'type': 'string', 'enum': ['', *HTTP_METHODS, 'BROWSER', 'RESTART']},
              http_path=STR, http_body=STR, http_headers=_ARR(STR), expect_exit=INT, expect_status=INT,
              expect_contains=_ARR(STR), expect_absent=_ARR(STR))
 # Exact request headers ("Name: value") for direct HTTP probes, e.g. a hostile Origin that the app must refuse.
@@ -235,6 +236,9 @@ def normalize(spec):
         probes = []
         for p in spec.get('probes', []):
             method = p.get('http_method') or ''
+            if method == 'RESTART':          # a step of the flow, not a request: no path
+                probes.append({**p, 'http_path': ''})
+                continue
             if method != 'BROWSER' and not p.get('http_path'):
                 if method:     # no path: it runs as a subprocess of the program, so its method is meaningless
                     notes.append(f"probe {p.get('name')!r}: http_method {method} dropped (no http_path: subprocess probe)")
@@ -245,6 +249,11 @@ def normalize(spec):
                 notes.append(f"probe {p.get('name')!r}: http_headers apply only to direct HTTP probes (ignored)")
             probes.append({**p, 'http_method': method})
         spec['probes'] = probes
+    else:
+        dropped = [p.get('name') for p in spec.get('probes', []) if p.get('http_method') == 'RESTART']
+        if dropped:
+            notes.append(f'RESTART probes {dropped} dropped: only a web server is restarted within one check')
+        spec['probes'] = [p for p in spec.get('probes', []) if p.get('http_method') != 'RESTART']
     spec['probes'] = [canonical_probe(p) for p in spec.get('probes', [])]
     return spec, notes
 
@@ -363,6 +372,30 @@ def _check(spec, mode, base, cwd, ev, on_step):
                 on_step(f"runtime: {probe['name']}")
         ev['ok'] = all(s['ok'] for s in ev['steps'])
         return
+    # The exact Owner launch gets the folder AS BUILT (copied before any launch writes data) and its own fresh
+    # profile: what the Owner's first double-click sees, so its first page can be judged on content (Codex R2).
+    pristine, home = Path(tempfile.mkdtemp(prefix='axb-owner-')), None
+    try:
+        shutil.copytree(base.cwd, pristine / 'app')
+        owner = Launch(base.argv, base.env, str(pristine / 'app'))
+        if any(p.get('http_method') == 'RESTART' for p in spec.get('probes', [])):
+            # The clean environment gives each process its own temp HOME/USERPROFILE; data a program keeps in the
+            # user's profile would vanish on relaunch here but not on the Owner's PC: one profile for the flow.
+            home = Path(tempfile.mkdtemp(prefix='axb-home-'))
+            for sub in ('AppData/Roaming', 'AppData/Local'):
+                (home / sub).mkdir(parents=True, exist_ok=True)
+            base = Launch(base.argv, {**base.env, 'HOME': str(home), 'USERPROFILE': str(home),
+                                      'APPDATA': str(home / 'AppData' / 'Roaming'),
+                                      'LOCALAPPDATA': str(home / 'AppData' / 'Local')}, base.cwd)
+        _launches(spec, mode, base, owner, ev, on_step)
+    finally:
+        shutil.rmtree(pristine, ignore_errors=True)
+        if home is not None:
+            shutil.rmtree(home, ignore_errors=True)
+
+
+def _launches(spec, mode, base, owner, ev, on_step):
+    """The verification launch (probes in order, RESTARTs included), then the exact Owner launch (`owner`)."""
     port = free_port()
     args = [a.replace('{port}', str(port)) for a in spec.get('launch_args', [])]
     proc = base.start(args)
@@ -379,12 +412,31 @@ def _check(spec, mode, base, cwd, ev, on_step):
             return
         ev['port'] = port
         up, waited = _wait_port(proc, port)
-        ev['steps'].append({'name': 'server start', 'args': args, 'ok': up, 'seconds': waited,
+        ev['steps'].append({'name': 'server start', 'args': args, 'ok': up, 'seconds': waited, 'pid': proc.proc.pid,
                             'problems': [] if up else [('process exited with code %s before listening' % proc.proc.poll())
                                                        if not proc.alive() else f'port {port} not listening after {START_TIMEOUT}s']})
         if up:
             probes = spec.get('probes', [])
             for probe in probes:
+                if probe.get('http_method') == 'RESTART':
+                    # Like the Owner closing the window and opening the program again: the whole tree is killed (no
+                    # graceful shutdown), then the same program starts in the same folder and profile.
+                    proc.stop()
+                    proc.cleanup()
+                    port = free_port()
+                    args = [a.replace('{port}', str(port)) for a in spec.get('launch_args', [])]
+                    proc = base.start(args)
+                    up, waited = _wait_port(proc, port)
+                    ev['port'] = port
+                    ev['steps'].append({'name': probe['name'], 'request': 'RESTART', 'dispatch': 'restart', 'ok': up,
+                                        'seconds': waited, 'port': port, 'pid': proc.proc.pid, 'problems': [] if up else [
+                                            ('process exited with code %s before listening' % proc.proc.poll())
+                                            if not proc.alive() else f'port {port} not listening after {START_TIMEOUT}s']})
+                    if on_step:
+                        on_step(f"runtime: {probe['name']}")
+                    if not up:
+                        break
+                    continue
                 if probe.get('http_method') == 'BROWSER':
                     ev['steps'].append({**_rendered(port, probe), 'dispatch': 'browser'})
                 elif _is_http(probe):
@@ -410,7 +462,7 @@ def _check(spec, mode, base, cwd, ev, on_step):
     if ev['steps'][0]['ok']:
         # The verification launch above uses --port/--no-browser. The Owner double-clicks: no arguments,
         # fixed port, browser. Check exactly that too (browser neutralized by the clean environment).
-        ev['steps'].append(_exact_owner_launch(base, spec))
+        ev['steps'].append(_exact_owner_launch(owner, spec))      # the folder as built, a fresh profile
     ev['ok'] = all(s['ok'] for s in ev['steps'])
 
 
@@ -493,9 +545,12 @@ def _exact_owner_launch(base, spec):
         page = next((pr for pr in http_probes if (pr.get('http_method') or 'GET') == 'GET'), None) or {
             'name': 'page', 'http_method': 'GET', 'http_path': '/', 'expect_status': 0 if http_probes else 200,
             'expect_contains': []}
-        # Its content is judged only if it really is the first request; a later GET may depend on earlier mutations.
-        lenient = {} if not http_probes or page is http_probes[0] else {'expect_status': 0, 'expect_contains': [],
-                                                                         'expect_absent': []}
+        # Fresh state (the folder as built): the first page is judged on content when it IS the first probe; a later
+        # GET may depend on the flow's earlier mutations, so it must only answer without a server error.
+        # "First" in the WHOLE ordered flow: a subprocess or BROWSER step before it may have prepared its state (R3).
+        everything = spec.get('probes', [])
+        lenient = {} if not http_probes or (everything and page is everything[0]) else {
+            'expect_status': 0, 'expect_contains': [], 'expect_absent': []}
         first = _http(port, {**page, 'name': 'first page', **lenient})
         problems = list(first['problems'])
         # Same process: the whole HTTP flow (e.g. its self-test endpoint), then still serving.
@@ -802,7 +857,10 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
                               f'--user-data-dir={profile}', f'--virtual-time-budget={budget}', '--dump-dom',
                               f'http://127.0.0.1:{proxy.server_port}{path}'], profile, env=dict(os.environ), caps=False,
                              split=True)
-        finished = proc.wait(BROWSER_TIMEOUT) is not None
+        # The page script runs to the end of its virtual-time budget; when the browser does not fast-forward (load),
+        # that takes real time. A fixed limit killed correct long action flows (6 actions = 95 s budget > 90 s).
+        record['timeout_s'] = max(BROWSER_TIMEOUT, budget // 1000 + 30)
+        finished = proc.wait(record['timeout_s']) is not None
         dom, err = proc.streams()
         record.update(browser_requests=list(proxy.requests), browser_stderr_tail=err[-600:])
         return dom if finished else None
@@ -840,7 +898,7 @@ def _rendered(port, probe):
             break
     step.update(attempts=attempt, **record)
     if dom is None:
-        step.update(ok=False, problems=[f'browser did not finish within {BROWSER_TIMEOUT}s (2 attempts)'])
+        step.update(ok=False, problems=[f"browser did not finish within {record.get('timeout_s', BROWSER_TIMEOUT)}s (2 attempts)"])
         return step
     found = re.findall(r'<script type="application/json" id="axb-report">(.*?)</script>', dom, flags=re.S)
     try:

@@ -3,6 +3,39 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.36] - 2026-10-16
+
+Restart-persistence evidence: the first capability added from real-use evidence (P-20261016-554d44's goal judgment:
+"no test stopped and restarted the app"; P-3a4f60 and P-3e5ca9 showed persistence only indirectly).
+
+### Added
+- Runtime probe `http_method: "RESTART"` (web only): the program's whole process tree is killed, as when the Owner
+  closes the window, and started again in the same folder; later probes check the saved data on the new instance
+  (new process id recorded). With a restart, the flow's launches share one temporary user profile, so data kept in
+  the profile is not lost artificially.
+
+### Changed
+- The exact Owner launch runs on a copy of the program folder AS BUILT with a fresh profile (what the first
+  double-click sees). Its first page is judged on content when it is the first probe of the whole flow; a later GET
+  only has to answer without a server error.
+
+### Fixed
+- The exact Owner launch re-checked fresh-state expectations against data the verification flow had already saved
+  (false FAIL; folder and profile storage alike).
+- Long browser action flows were killed by a fixed 90 s real-time limit when the browser did not fast-forward its
+  virtual time (seen under load in this release's own test run); the limit now grows with the flow's budget.
+
+### Verification
+- New runtime tests: data in the folder and in the profile survives a restart, memory-only data does not; the
+  no-argument launch serving an empty page fails; saved verification data never reaches the Owner launch; a GET after
+  a seeding step is not "first" (executed mutation: this test fails on the previous code).
+- Codex targeted reviews (inspection): R1 NOT_READY (2) -> R2 NOT_READY (1) -> R3 NOT_READY (1) -> R4 NOT_READY (1,
+  a test that passed with the old bug; fixed and proven by mutation). Full suite: see the commit message.
+
+### Known issues
+- Restart is a kill, not a graceful shutdown (the realistic case for closing a console window).
+- GUI (desktop window) programs still get startup/survival checks only.
+
 ## [0.1.35] - 2026-10-16
 
 Usable-v1 critical path, steps 1-5: minimum EVIDENCE_GAP closure, runtime experience available without an Owner

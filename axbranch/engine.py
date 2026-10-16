@@ -117,6 +117,9 @@ RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the
   list when none), e.g. ["Origin: http://evil.example"] with expect_status 403 to prove a cross-origin change is
   refused. Framing headers (Content-Length, Transfer-Encoding, Connection) are not allowed. Probes run in order
   against one fresh instance with its own data: create before you update or delete what you created.
+  http_method "RESTART" (web only, no path) closes the program (whole process killed, as when the Owner closes
+  the window) and starts it again in the same folder; later probes run against the new instance. Use it to
+  prove saved data survives reopening: create -> RESTART -> read it back.
   For any page, also add http_method "BROWSER" probes: the engine loads the page in a real headless
   browser (its JavaScript runs and makes its own requests) and checks expect_contains against the
   RENDERED text. To act on the page, put actions in http_body separated by '||', run in order after the page
