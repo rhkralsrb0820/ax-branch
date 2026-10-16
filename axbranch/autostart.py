@@ -6,7 +6,9 @@ deterministic pass `axbranch supervise` and exits. That pass applies the same re
 tells the Owner once, with a Windows notification, when a project starts waiting for them (OWNER_REVIEW or
 a decision). Registered and removed only by the Owner (`axbranch autostart on|off`).
 """
+import csv
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -124,6 +126,28 @@ def notify_waiting(engine, show=notify):
         if shown:                                         # a failed toast is tried again on the next pass
             sent.append(p['id'])
     return sent
+
+
+def memory_line(top=3):
+    """Free physical memory and the largest process groups by working set, e.g. 'free=7181MB top=chrome:991,...'.
+    Forensics for memory-pressure interruptions (2026-10-16: a run was reaped and nothing showed what used the memory).
+    Never raises: a pass must not fail over its own diagnostics."""
+    from . import providers
+    try:
+        free = providers.free_memory_mb()
+        groups = {}
+        if os.name == 'nt':
+            out = subprocess.run(['tasklist', '/fo', 'csv', '/nh'], capture_output=True, text=True, timeout=20,
+                                 creationflags=0x08000000).stdout
+            for row in csv.reader(out.splitlines()):
+                if len(row) >= 5:
+                    kb = int(re.sub(r'\D', '', row[4]) or 0)
+                    name = row[0].rsplit('.', 1)[0].replace(' ', '_')       # one token per name in the log line
+                    groups[name] = groups.get(name, 0) + kb // 1024
+        biggest = ','.join(f'{n}:{mb}' for n, mb in sorted(groups.items(), key=lambda g: -g[1])[:top])
+        return f'free={free}MB' + (f' top={biggest}' if biggest else '')
+    except Exception as e:                  # noqa: BLE001 - diagnostics only
+        return f'memory=unknown ({type(e).__name__})'
 
 
 def log_pass(workspace, line):

@@ -166,7 +166,7 @@ def _dispatch(a):
                 print(f"{pid} [{rec['status']}] {rec['reason'][:120]}" + (f' -> {action}' if action else ''))
                 done.append(f"{pid}:{rec['status']}" + (f'->{action}' if action else ''))
             sent = autostart.notify_waiting(engine)
-            autostart.log_pass(engine.workspace, f"supervised [{', '.join(done)}] notified {sent}")
+            autostart.log_pass(engine.workspace, f"supervised [{', '.join(done)}] notified {sent} {autostart.memory_line()}")
             if not a.watch or not any(supervisor.status(engine.workspace, store, p)['status'] in
                                       ('ACTIVE', 'RECOVERING', 'STALLED', 'FAILED', 'WAITING_FOR_PROVIDER')
                                       for p in supervisor.candidates(store)):
