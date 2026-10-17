@@ -98,26 +98,44 @@ class Contained:
         self.tmp = Path(tempfile.mkdtemp(prefix='axb-tmp-'))   # outside cwd: the program's folder stays as built
         self.log = self.tmp / 'output.txt'
         self.err_log = self.tmp / 'stderr.txt' if split else None
-        stdin_path = self.tmp / 'stdin.txt'
-        stdin_path.write_bytes((stdin_text or '').encode('utf-8'))
-        self._out, self._in = self.log.open('wb'), stdin_path.open('rb')
-        self._err = self.err_log.open('wb') if split else None
-        if env is None:
-            env = {**clean_env(str(self.tmp)), **(extra_env or {})}
-        common = dict(cwd=cwd, env=env, stdin=self._in,
-                      stdout=self._out, stderr=self._err or subprocess.STDOUT)
-        self.job = None
-        if os.name != 'nt':
-            self.proc = subprocess.Popen(args, start_new_session=True, **common)
-            return
-        self.job = _job(caps)
-        # Suspended until it is inside the job, so nothing it starts can escape the limits.
-        self.proc = subprocess.Popen(args, creationflags=CREATE_SUSPENDED | CREATE_NO_WINDOW, **common)
-        if not _k32.AssignProcessToJobObject(self.job, int(self.proc._handle)):
-            self.proc.kill()
-            self.stop()
-            raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject failed')
-        _ntdll.NtResumeProcess(int(self.proc._handle))
+        self.proc = self.job = self._out = self._in = self._err = None
+        try:
+            stdin_path = self.tmp / 'stdin.txt'
+            stdin_path.write_bytes((stdin_text or '').encode('utf-8'))
+            self._out = self.log.open('wb')
+            self._in = stdin_path.open('rb')
+            self._err = self.err_log.open('wb') if split else None
+            if env is None:
+                env = {**clean_env(str(self.tmp)), **(extra_env or {})}
+            common = dict(cwd=cwd, env=env, stdin=self._in,
+                          stdout=self._out, stderr=self._err or subprocess.STDOUT)
+            if os.name != 'nt':
+                self.proc = subprocess.Popen(args, start_new_session=True, **common)
+                return
+            self.job = _job(caps)
+            # Suspended until it is inside the job, so nothing it starts can escape the limits.
+            self.proc = subprocess.Popen(args, creationflags=CREATE_SUSPENDED | CREATE_NO_WINDOW, **common)
+            if not _k32.AssignProcessToJobObject(self.job, int(self.proc._handle)):
+                self.proc.kill()
+                self.stop()
+                raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject failed')
+            status = _ntdll.NtResumeProcess(int(self.proc._handle))
+            if status != 0:
+                raise OSError(f'NtResumeProcess failed: {status}')
+        except BaseException:
+            # Construction can fail before the caller receives a process to stop.
+            try:
+                if self.proc is not None:
+                    self.stop()
+            finally:
+                if self.job is not None:
+                    _k32.CloseHandle(self.job)
+                    self.job = None
+                for handle in (self._out, self._in, self._err):
+                    if handle is not None and not handle.closed:
+                        handle.close()
+                self.cleanup()
+            raise
 
     def alive(self):
         return self.proc.poll() is None

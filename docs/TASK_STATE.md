@@ -1,5 +1,20 @@
 # AX Branch — TASK_STATE
 
+## Development integration 2026-10-17 — 0.1.37
+
+- Baseline: clean main `50138e56aadda45ba1c98d86806a1cc0e3352e0e`, equal to private origin/main
+  by ls-remote. Source and recent SQLite project states inspected; production DB read with mode=ro.
+- Production P-20261016-5fb8d6 was EXECUTING v22. Its v21 evidence mixes actual product defects with
+  unavailable native/upload/download observations, invalid probes and controllers exceeding 60 s.
+  No production project was run/resumed, no artifact/HANDOFF/DB was edited by this development session.
+- Work: capability inventory/needs -> fail-closed availability gate -> one-operation adapter/harness lease
+  -> existing verification/failure analysis/true pipeline replan -> revocation. Governance constants unchanged.
+- Reliability fixes: failed process construction cleanup; cancellation before provider launch.
+- Isolated reproduction: `python -m axbranch.demo --root <new-path>`; add `--live` for subscription smoke.
+  Keep scripted and live evidence distinct. Both produce evidence.json, SQLite, artifacts and HANDOFFs.
+- See `docs/CAPABILITY_LIFECYCLE.md` for boundaries and reproducible checks. Final counts and live outcome
+  belong to the integration evidence, not earlier historical claims below.
+
 | # | Task | Status |
 |---|---|---|
 | P0 | Audit repos, git state, reuse map | done (`AUDIT.md`) |

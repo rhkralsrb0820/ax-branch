@@ -3,6 +3,39 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.37] - 2026-10-17
+
+### Added
+- Bounded capability inventory for CEO decisions, including execution limits and unsupported evidence.
+  Stages declare only the capabilities they need. Unknown capabilities and unavailable browser harnesses
+  stop before production, including resumed execution; no silent tool installation or authority expansion.
+- Per-operation capability attachment/revocation for model calls and verification harnesses, linked to the
+  existing actual-provider call authority. Interrupted audit scopes are closed under the project lock.
+- `python -m axbranch.demo --root PATH` reproduces deterministic FAIL -> changed pipeline -> PASS,
+  capability-gap refusal and quota-interruption recovery with real generated-program execution and evidence.
+  `--live` exercises subscription providers in an isolated workspace.
+
+### Changed
+- New plans declare stage capabilities; legacy plans infer their existing reasoning/code/web grants.
+  Existing lifecycle, acceptance contracts, attempt ledger and durable strategy reviews are preserved.
+
+### Fixed
+- Failed contained-process construction leaked temporary files, open streams and a Windows Job Object.
+  Failed Windows process resumption now fails closed and cleans up the suspended process.
+- A provider could start after cancellation if a slot and memory were immediately available.
+- Capability audit traffic displaced hiring and engine-assignment entries from the bounded Owner timeline;
+  keep the full audit in SQLite and filter scope traffic before selecting the visible activity window.
+
+### Verification
+- Capability, sandbox and provider-resource regressions; original-code comparison demonstrates both
+  cleanup and pre-launch cancellation defects. Full-suite and E2E results recorded in the integration report.
+
+### Known issues
+- Capability needs are declared by the planner; completeness is not proven for arbitrary natural-language goals.
+- Leases select existing adapters and harnesses, not OS permissions. Generated code still uses the current OS
+  account; D-SEC-1 remains open. No GPU training, clean Windows machine or desktop interaction is acquired.
+- Scripted failure/replan evidence proves engine routing, not the quality of autonomous model decisions.
+
 ## [0.1.36] - 2026-10-16
 
 Restart-persistence evidence: the first capability added from real-use evidence (P-20261016-554d44's goal judgment:

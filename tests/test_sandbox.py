@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from axbranch import sandbox
 
@@ -36,6 +37,49 @@ class SandboxTests(unittest.TestCase):
         finally:
             del os.environ['AXB_TEST_SECRET']
         self.assertEqual(code, 0, out)
+
+    def test_failed_process_creation_releases_files_job_and_scratch(self):
+        for split in (False, True):
+            proc = sandbox.Contained.__new__(sandbox.Contained)
+            with mock.patch.object(sandbox.subprocess, 'Popen', side_effect=FileNotFoundError('missing CLI')):
+                with self.assertRaisesRegex(FileNotFoundError, 'missing CLI'):
+                    proc.__init__(['missing-cli'], str(self.tmp), '', split=split)
+            try:
+                self.assertFalse(proc.tmp.exists(), 'failed construction leaked its temporary folder')
+                self.assertIsNone(proc.job, 'failed construction leaked a Job Object')
+                for handle in (proc._out, proc._in, proc._err):
+                    self.assertTrue(handle is None or handle.closed)
+            finally:  # also clean the old implementation when this regression is mutation-tested
+                if proc.job is not None:
+                    sandbox._k32.CloseHandle(proc.job)
+                for handle in (proc._out, proc._in, proc._err):
+                    if handle is not None:
+                        handle.close()
+                proc.cleanup()
+
+    def test_failed_stdin_setup_releases_scratch_before_launch(self):
+        proc = sandbox.Contained.__new__(sandbox.Contained)
+        with mock.patch.object(Path, 'write_bytes', side_effect=OSError('disk full')), \
+                mock.patch.object(sandbox.subprocess, 'Popen') as launch:
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                proc.__init__(['unused'], str(self.tmp), '')
+        launch.assert_not_called()
+        self.assertFalse(proc.tmp.exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows suspended process startup')
+    def test_failed_resume_kills_suspended_process_and_releases_job(self):
+        proc = sandbox.Contained.__new__(sandbox.Contained)
+        try:
+            with mock.patch.object(sandbox._ntdll, 'NtResumeProcess', return_value=-1):
+                with self.assertRaisesRegex(OSError, 'NtResumeProcess failed'):
+                    proc.__init__([sys.executable, '-c', 'import time; time.sleep(30)'], str(self.tmp), '')
+            self.assertIsNotNone(proc.proc.poll())
+            self.assertIsNone(proc.job)
+            self.assertFalse(proc.tmp.exists())
+        finally:
+            if proc.proc is not None:
+                proc.stop()
+            proc.cleanup()
 
     def test_grandchild_is_killed_when_the_check_ends(self):
         marker = self.tmp / 'escaped.txt'

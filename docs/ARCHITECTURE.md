@@ -18,6 +18,8 @@ Owner ── GUI / CLI ──► Engine (淸月 AI CEO driver) ──► provide
 | `governance.py` | Fixed Owner rules: round budget, strategy cadence, approval-only actions, paid lock, satisfaction gate. |
 | `state.py` | SQLite tables (projects, agents, stage_outputs, artifacts, verifications, events), state machine, structured `handoff()`. |
 | `providers.py` | Claude Code / Codex CLI as interchangeable engines; quota failover. |
+| `capabilities.py` | Supported capability/evidence inventory, pre-production gap gate, one-operation leases and interrupted-audit cleanup. |
+| `demo.py` | Isolated scripted failure/replan and real-subscription E2E smoke; writes reproducible evidence. |
 | `engine.py` | CEO planning, staffing, build, deterministic checks, independent verification, rebuild, strategy review, CEO report, close/archive. |
 | `knowledge.py` | Vault retrieval, GAI read-only search (relevance-gated, provenance recorded), verified archive notes. |
 | `runtime.py` | Runtime Acceptance: launch the artifact the way the Owner will (cli / web / gui), run probes, record evidence. |
@@ -57,6 +59,12 @@ round budget) remembers `resume_state`.
 Agent = role + goal + context + permissions + tools. The provider is just the engine for a turn.
 Production agents get no shell and no file writes (CLI flags); they return content as JSON and the
 engine writes the artifact. Web access only for stages the CEO marks `web`.
+
+Since 0.1.37, the CEO sees supported capabilities and evidence limits on audited decisions. Stages declare
+their required capabilities; existing plans infer the existing reasoning/code/web grants. Unsupported needs
+and unavailable browser harnesses stop before production. Each model/harness operation records attach/revoke,
+and successful model calls link the grant to actual-provider authority. These are existing adapter selections,
+not new OS privileges. Details and limits: [Capability lifecycle](CAPABILITY_LIFECYCLE.md).
 
 ## Safety rails
 

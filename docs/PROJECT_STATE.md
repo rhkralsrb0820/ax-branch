@@ -1,8 +1,18 @@
 # AX Branch — PROJECT_STATE (development)
 
-Updated 2026-10-10 · version **0.1.33** · repo `AX-Branch/ax-branch` (private GitHub `rhkralsrb0820/ax-branch`).
+Updated 2026-10-17 · source version **0.1.37** · repo `AX-Branch/ax-branch` (private GitHub `rhkralsrb0820/ax-branch`).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.
+
+## Current development boundary (2026-10-17)
+
+- Baseline main/origin 50138e5, clean; capability lifecycle, supported-evidence inventory and process-start
+  cleanup/cancellation fixes implemented on a separate development branch. Live main execution is preserved.
+- Source validation, scripted failure/replan and real-provider smoke results:
+  [integration evidence](evidence/2026-10-17-capability-lifecycle.md).
+- [Capability lifecycle](CAPABILITY_LIFECYCLE.md) defines what is enforced and what remains unsupported.
+- The historical snapshot below is from 2026-10-10; its listed live-project states are not current status.
+  Read SQLite/HANDOFF for current runtime state. The packaged EXE was not rebuilt in this development pass.
 
 ## Working now (verified)
 - 0.1.32–0.1.33 (checkpoint before Test #3).

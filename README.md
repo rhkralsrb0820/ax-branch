@@ -39,5 +39,11 @@ Where things live (all under the AX-Branch folder):
 
 Tests: `python -X utf8 -m unittest discover -s tests -t .` · Build exe: `python -X utf8 build_exe.py`
 
+Isolated orchestration demo (source 0.1.37): `python -X utf8 -m axbranch.demo --root <new-folder>`.
+Default: scripted model decisions with real engine/program execution (failure → changed pipeline → pass,
+capability gap, interruption recovery), no subscription calls. Add `--live` in a different folder for a real
+subscription smoke. Evidence, SQLite and artifacts stay in that folder. The existing packaged EXE was not rebuilt.
+See [Capability lifecycle and limits](docs/CAPABILITY_LIFECYCLE.md).
+
 Docs: [Architecture](docs/ARCHITECTURE.md) · [Phase 0 audit & reuse map](docs/AUDIT.md) ·
 [Decisions](docs/DECISIONS.md) · [Changelog](CHANGELOG.md) · agent rules [AGENTS.md](AGENTS.md)

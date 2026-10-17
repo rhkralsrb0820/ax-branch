@@ -114,6 +114,8 @@ def _contained(name, args, prompt, cwd, cancel, on_tick):
     slot = _acquire_slot(name, cancel, on_tick)
     try:
         free = _ensure_memory(name, cancel, on_tick)
+        if cancel is not None and cancel.is_set():
+            raise Rejected(f'{LABEL[name]}: 오너가 중단했습니다.')
         proc = sandbox.start(args, cwd, prompt, env=_subscription_env(), caps=False)
         started = last_change = prev = time.monotonic()
         size, slept = 0, 0.0

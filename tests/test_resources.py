@@ -66,6 +66,17 @@ class ResourceTests(unittest.TestCase):
         self.assertIn('메모리', str(ctx.exception))
         start.assert_not_called()                                       # nothing was launched
 
+    def test_cancelled_before_launch_never_starts_a_provider(self):
+        stop = threading.Event()
+        stop.set()
+        with mock.patch.object(providers, 'free_memory_mb', return_value=10**6), \
+                mock.patch.object(providers.sandbox, 'start') as start:
+            with self.assertRaises(providers.Rejected):
+                providers._contained('claude', ['x'], 'p', str(self.tmp), stop, None)
+        start.assert_not_called()
+        slot = providers._acquire_slot('claude', None, None)
+        slot.__exit__(None, None, None)
+
     def test_time_asleep_does_not_count_as_a_timeout(self):
         clock = iter([0, 1, 2, 5000, 5001, 5002, 5003])                   # a 13-hour-like jump mid-call
         ticks = []

@@ -17,7 +17,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import (GAI_DB, VAULT, WORKSPACE, artifacts, governance as gov, kindex, knowledge, library, metrics, permissions,
+from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, kindex, knowledge, library, metrics, permissions,
                providers, runtime, sandbox, supervisor)
 from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
 
@@ -37,7 +37,8 @@ def ENUM(*values):
     return {'type': 'string', 'enum': list(values)}
 
 
-STAGE = S(name=STR, agent_role=STR, why=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL)
+STAGE = S(name=STR, agent_role=STR, why=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL,
+          capabilities=ARR(STR))
 PLAN = S(title=STR, interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
          runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE))
@@ -172,6 +173,12 @@ Rules:
 - Production agents cannot execute code, use a shell or write files; never instruct them to run
   anything. Execution evidence comes only from the engine's deterministic checks at verification.
 - required_tools: only external programs the work truly needs (e.g. blender); [] otherwise.
+- Each stage declares capabilities from capability_inventory: reasoning, code_generation, web_research.
+  Analyze the task's capability gaps before choosing specialists. Use only necessary capabilities. Declaring
+  web_research enables the existing public research adapter; it never authorizes delivered-program connections.
+  Do not pretend an unsupported capability (e.g. ml_training or GUI interaction) is available: declare its
+  name so the engine records the gap and stops before production. Installed tools are not execution adapters.
+  Harness capabilities belong to runtime, never to production agents. Limits in the inventory are binding.
 - Use prior_knowledge and intelligence only when relevant; never invent evidence."""
 
 WORKER_SYSTEM = """You are a temporary specialist agent ({role}) hired by 淸月 AI CEO for one stage of a
@@ -484,6 +491,7 @@ class Engine:
 
     def _run(self, pid, cancel, stop_at):
         self.cancel = cancel
+        capabilities.recover(self.store, pid)
         # This session is the worker a recovery launched: its RECOVERING marker has done its job.
         (self.workspace / 'projects' / pid / 'RECOVERING').unlink(missing_ok=True)
         self.store.event(pid, 'session', os_pid=os.getpid(), state=self.store.project(pid)['state'],
@@ -668,7 +676,15 @@ class Engine:
                              criteria_added=[c for c in new_c if c not in old_c],
                              unchanged_requirements=[c for c in old_c if c in new_c], blocked=list(blocked))
 
-    def _ask(self, pid, who, system, task, context, schema, prefer, web=False):
+    def _ask(self, pid, who, system, task, context, schema, prefer, web=False, required=()):
+        requested = capabilities.agent_requests(required, web, coding=schema in (BUILD, BUILD_EDITS))
+        with capabilities.lease(self.store, pid, who, requested, web=web) as grant:
+            context = {**context, 'capability_grant': grant}
+            if 'audit' in schema.get('properties', {}):
+                context['capability_inventory'] = capabilities.inventory(bool(runtime.browser()))
+            return self._ask_granted(pid, who, system, task, context, schema, prefer, web)
+
+    def _ask_granted(self, pid, who, system, task, context, schema, prefer, web=False):
         audited = 'audit' in schema.get('properties', {})
         context, retrievals = self._number_retrievals(pid, who, task, context, inject=audited)
         self.last_retrievals = []
@@ -703,6 +719,7 @@ class Engine:
             self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, notes=notes)
         # Least privilege, auditable: the authority this turn had on the provider that ACTUALLY ran it (failover).
         call = self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started),
+                                capability_grant=context['capability_grant'],
                                 prompt_sha256=hashlib.sha256(prompt.encode('utf-8')).hexdigest(),
                                 authority=providers.authority(used, web) or 'UNKNOWN')
         self.beat(pid, f'call done {who} ({used})')
@@ -771,13 +788,27 @@ class Engine:
             stem = re.sub(r'[^\w.-]+', '_', Path(plan['artifact_filename']).stem).strip('._') or 'artifact'
             plan['artifact_filename'] = stem + ext
         plan['required_tools'] = [t for t in plan.get('required_tools', []) if re.fullmatch(r'[\w.-]+', t)]
+        for stage in plan['pipeline']:
+            requested = capabilities.agent_requests(stage.get('capabilities', []), stage.get('web', False))
+            stage['capabilities'] = requested
+            stage['web'] = 'web_research' in requested
         spec = plan.get('runtime') or dict(runtime.DEFAULT)
         if plan['artifact_kind'] == 'markdown':
             spec = {**spec, 'mode': 'none'}
         plan['runtime'] = runtime.normalize(spec)[0]
         return plan
 
+    def _capability_gate(self, pid):
+        missing = capabilities.gaps(self.store.project(pid)['plan'], bool(runtime.browser()))
+        if missing:
+            self.store.event(pid, 'capability_gap', who='CEO plan', missing=missing)
+            self.store.pause(pid, 'HARNESS_BLOCKED: CAPABILITY_GAP: ' + ', '.join(missing))
+            return False
+        return True
+
     def _staffing(self, pid):
+        if not self._capability_gate(pid):
+            return
         plan = self.store.project(pid)['plan']
         waiting = []
         # Permission reuse: public read-only domains the Owner already approved need no new approval;
@@ -812,6 +843,8 @@ class Engine:
                     if a['role'] == stage['agent_role'] and a['provider'] == stage['provider'])
 
     def _executing(self, pid):
+        if not self._capability_gate(pid):
+            return
         p = self.store.project(pid)
         if any(a['iteration'] == p['iteration'] for a in self.store.artifacts(pid)):
             # This version is already built: building again is a new version. Only a rebuild moves the
@@ -841,7 +874,7 @@ class Engine:
                     stage_context['owner_rework'] = plan['owner_rework']
                 out, used = self._ask(pid, stage['agent_role'], WORKER_SYSTEM.format(role=stage['agent_role']),
                                       stage['instructions'], stage_context,
-                                      WORK, prefer=stage['provider'], web=stage['web'])
+                                      WORK, prefer=stage['provider'], web=stage['web'], required=stage.get('capabilities', []))
                 self.store.save_output(pid, it, pv, idx, self._agent(pid, stage), used, out)
                 done = {'output': out}
             upstream.append({'stage': stage['name'], 'agent': stage['agent_role'], **done['output']})
@@ -892,7 +925,8 @@ class Engine:
                                     + context['edit_rule'].split('. Return the complete')[0] + '. Add new code by '
                                     'replacing an existing anchor snippet with that snippet plus the new code.')
         build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context,
-                                BUILD_EDITS if edits_only else BUILD, prefer=final['provider'], web=final['web'])
+                                BUILD_EDITS if edits_only else BUILD, prefer=final['provider'], web=final['web'],
+                                required=final.get('capabilities', []))
         build = {'content': '', 'files': [], **build}
         edits = build.get('edits') or []
         if edits and not (build['content'] or build['files']):
@@ -1054,7 +1088,9 @@ class Engine:
         self.store.trace_action(pid, 'verify', f"verify:{artifact['id']}:{len(done)}", artifact=artifact['id'])
         text = artifacts.text_of(artifact)
         rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
-        checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
+        with capabilities.lease(self.store, pid, 'deterministic checks', ['python_checks']
+                                if artifact['kind'] != 'markdown' else [], kind='harness'):
+            checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
         selftest_ok = checks['ok']
         checks['runtime'] = self.runtime_evidence(artifact, plan.get('runtime'), plan['artifact_filename'])
         failing = [s for s in checks['runtime']['steps'] if not s['ok']]
@@ -1659,8 +1695,13 @@ class Engine:
             artifacts.materialize(artifact, cwd)
             rel = entry if artifact['kind'] == 'bundle' else Path(artifact['path']).name
             pid = artifact.get('project_id')
-            return runtime.check(spec or runtime.DEFAULT, rel, python, cwd,
-                                 on_step=(lambda detail: self.beat(pid, detail)) if pid else None)
+            if pid:
+                with capabilities.lease(self.store, pid, 'Runtime Acceptance',
+                                        capabilities.harness_requests(spec or runtime.DEFAULT), kind='harness',
+                                        browser_available=bool(runtime.browser())):
+                    return runtime.check(spec or runtime.DEFAULT, rel, python, cwd,
+                                         on_step=lambda detail: self.beat(pid, detail))
+            return runtime.check(spec or runtime.DEFAULT, rel, python, cwd)
 
     def _replan_knowledge(self, pid, stage, focus):
         """Knowledge for a re-plan: the vault searched for THIS problem now (goal + current failure or feedback),

@@ -41,6 +41,20 @@ class LiveTests(unittest.TestCase):
     def view(self):
         return live.view(self.ws, self.store, self.pid)
 
+    def test_capability_audit_does_not_evict_owner_activity(self):
+        self.store.event(self.pid, 'agent_hired', role='Builder', provider='codex')
+        for _ in range(40):
+            grant = self.store.event(self.pid, 'capability_attached', who='Builder', capabilities=['reasoning'])
+            self.store.event(self.pid, 'capability_revoked', grant=grant, outcome='completed')
+        self.store.event(self.pid, 'capability_gap', who='Builder', missing=['ml_training'])
+        text = '\n'.join(t['actor'] + ' ' + t['text'] for t in self.view()['timeline'])
+        self.assertIn('hired Builder', text)
+        self.assertIn('Assigned engine: Codex', text)
+        self.assertIn('capability_gap', text)
+        self.assertNotIn('capability_attached', text)
+        self.assertNotIn('capability_revoked', text)
+        self.assertEqual(len(self.store.events(self.pid, {'capability_attached', 'capability_revoked'})), 80)
+
     def row(self, view, title):
         return next(row for row in view['pipeline'] if row['title'] == title)
 

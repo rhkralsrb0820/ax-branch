@@ -153,8 +153,9 @@ def view(workspace, store, pid):
         item['mark'] = '✓'
 
     timeline = []
-    # Decision/experience trace records are audit data (HANDOFF experience_chain), not activity to show.
-    shown = [e for e in events if e['kind'] not in TRACE_KINDS]
+    # Audit scope traffic must not displace hiring, approvals and outcomes from the 30-event activity view.
+    shown = [e for e in events if e['kind'] not in TRACE_KINDS
+             and e['kind'] not in ('capability_attached', 'capability_revoked')]
     for event in shown[-30:]:
         kind, d = event['kind'], event['detail']
         actor, text = kind, _brief(d)
