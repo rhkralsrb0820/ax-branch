@@ -429,13 +429,23 @@ def failure_code(v):
     no deterministic evidence to compare."""
     if v['provider'] == 'engine':                      # the engine rejected the build (no deliverable)
         return 'engine:' + supervisor.signature(v['checks'].get('output', ''))[:80]
-    runtime = v['checks'].get('runtime') or {}
-    steps = sorted(s['name'] for s in runtime.get('steps', []) if not s.get('ok'))
-    if not v['checks'].get('ok') and runtime.get('ok', True):
-        steps.append('deterministic checks')          # compile / self-test failed, runtime did not
+    rt = v['checks'].get('runtime') or {}
+    # A check proven unexecutable (harness) is not product evidence and is repaired by probe review, not by a
+    # rebuild: counting it made every rebuild "the same failure" (P-20261016-5fb8d6, v19-v22).
+    checks = v['checks']
+    failed = [s for s in rt.get('steps', []) if not s.get('ok')]
+    steps = sorted(s['name'] for s in failed if runtime.classify_step(s) != 'harness')
+    # The self-test's own result (as product_failure reads it), independent of runtime steps: the same failing
+    # self-test keeps one signature whether or not an invalid probe failed beside it (Codex review 0.1.38).
+    selftest_failed = checks['exit_code'] != 0 if 'exit_code' in checks else (not checks.get('ok') and rt.get('ok', True))
+    if selftest_failed:
+        steps.append('deterministic checks')
+    product = product_failure(v)
+    if not steps and not product:                     # harness-only: still comparable, never a product signature
+        steps = sorted(s['name'] for s in failed)
     if not steps:
         return None
-    return f"{'product' if product_failure(v) else 'non-product'}:{'|'.join(steps)}"[:300]
+    return f"{'product' if product else 'non-product'}:{'|'.join(steps)}"[:300]
 
 
 def attempt_ledger(store, pid, limit=12):
@@ -888,7 +898,8 @@ class Engine:
                    'edit_rule': ('When previous_artifact exists and the change is localized, return edits instead '
                                  'of the whole deliverable (content="" and files=[]): each edit is {path, find, '
                                  'replace}; find = an EXACT snippet copied from previous_artifact that occurs exactly '
-                                 'once (include enough surrounding lines), replace = its new text; edits apply in '
+                                 'once (include enough surrounding lines), replace = its new text; a bundle file is '
+                                 'deleted by an edit with its path and empty find and replace; edits apply in '
                                  'order. The engine applies them to the previous version byte-exactly and rejects '
                                  'the build if any find is missing or ambiguous. Return the complete deliverable only '
                                  'when most of it changes. Otherwise edits=[].'),
@@ -916,8 +927,10 @@ class Engine:
                                                 for v in history[-2:]]
             if history[-1]['verdict'] == 'FAIL':     # an executive rework follows a PASS, not a failure
                 system += '\n\n' + REWORK
-        # ponytail: bundles keep full rebuilds (edits cannot delete a file); add file deletion if large bundles appear
-        edits_only = (latest is not None and plan['artifact_kind'] != 'bundle'
+        # A large deliverable is edited, never regenerated in one reply: regenerating a 176 KB bundle dropped its
+        # entry file (5fb8d6 v9, v16, v17) and earlier self-test sections. Untouched bundle files carry forward.
+        # ponytail: edits cannot delete a bundle file; add deletion if a real project needs it
+        edits_only = (latest is not None and latest['kind'] == plan['artifact_kind']
                       and len(baseline['current_version']['content']) > EDITS_ONLY_ABOVE)
         if edits_only:
             context['edit_rule'] = (f"previous_artifact is large ({len(baseline['current_version']['content'])} "
@@ -1169,9 +1182,13 @@ class Engine:
                 result['findings'].append({'severity': 'major', 'kind': gate, 'criterion': -1, 'deterministic': True,
                                            'issue': 'Gate failed: deterministic checks failed.',
                                            'evidence': checks['output'][:500]})
-        review_needed = (failed_steps and not is_product and step_kinds <= {'harness', 'ambiguous'}
-                         and not any(e['detail'].get('artifact') == artifact['id']
-                                     for e in self.store.events(pid, {'probe_review_pending'})))
+        # Checks proven unexecutable (harness) are reviewed even when the product also failed: a rebuild cannot
+        # repair a check, and the contract (T5) preserves it, so without review it failed every round forever
+        # (P-20261016-5fb8d6: 'is not a CSS selector' prose actions and a forged Content-Length, v7-v22).
+        unexecutable = [st for st in failed_steps if runtime.classify_step(st) == 'harness']
+        review_steps = failed_steps if not is_product and step_kinds <= {'harness', 'ambiguous'} else unexecutable
+        review_needed = (bool(review_steps) and not any(e['detail'].get('artifact') == artifact['id']
+                                                        for e in self.store.events(pid, {'probe_review_pending'})))
         with self.store.tx():
             vid = self.store.add_verification(pid, artifact['id'], p['iteration'], 'PASS' if passed else 'FAIL',
                                               result, checks, used)
@@ -1180,7 +1197,8 @@ class Engine:
                                  retrievals=verifier_retrievals)
             if review_needed:
                 self.store.event(pid, 'probe_review_pending', artifact=artifact['id'], verification=vid,
-                                 before=runtime.normalize(plan.get('runtime'))[0], steps=failed_steps)
+                                 before=runtime.normalize(plan.get('runtime'))[0], steps=review_steps,
+                                 product_failed=is_product)
         if passed:
             return self._deliver(pid, artifact, text, result)
         if review_needed:
@@ -1206,7 +1224,8 @@ class Engine:
                        'runtime': detail['before'], 'failed_steps': detail['steps'],
                        'artifact': artifacts.text_of(artifact)}
             decision, used = self._ask(pid, 'CEO',
-                'Review failed Runtime Acceptance with NO product evidence established. Return HARNESS_REPAIR only '
+                'Review the listed failed Runtime Acceptance checks; they establish NO product evidence (any other '
+                'product failure of this version goes to product rework separately). Return HARNESS_REPAIR only '
                 'for an execution-spec error, PRODUCT_DEFECT only with concrete artifact evidence, otherwise UNRESOLVED. '
                 'Unchanged probes do not imply a product defect. Preserve the approved behavior, inputs, actions and '
                 'assertions. Explain the evidence. Do not change pipeline or network access.',
@@ -1268,7 +1287,10 @@ class Engine:
         with self.store.tx():
             self.store.event(pid, 'probe_review_applied', pending=pending['id'])
             if completed['disposition'] == 'UNRESOLVED':
-                self.store.pause(pid, 'HARNESS_BLOCKED: probe review unresolved; no product rebuild. '
+                names = ', '.join(sorted({st.get('name', '') for st in pending['detail'].get('steps', [])}))[:300]
+                self.store.pause(pid, f'HARNESS_BLOCKED: these checks cannot be executed here and no equivalent '
+                                 f'check was validated: {names}. Owner: provide the evidence/capability, rule what '
+                                 'evidence satisfies those criteria, or change them. No product rebuild. '
                                  'Resume re-verifies this version.', resume_state='VERIFYING')
         # HARNESS_REPAIR stays VERIFYING and checks the same immutable artifact.
 
@@ -1771,13 +1793,18 @@ class Engine:
         # real, this should fail now — and the rebuilt version must pass it.
         repro = self.runtime_evidence(last, new['runtime'], old_entry) if last else nothing
         failed = [f"{s['name']}: {', '.join(s['problems'])}" for s in repro['steps'] if not s['ok']]
+        # Only an executable check that failed reproduces the problem; one that could not run proves nothing
+        # (v7: the Owner's 'service unreachable' was never reproduced, yet two unexecutable checks read as reproduction).
+        reproduced = any(runtime.classify_step(s) != 'harness' for s in repro['steps'] if not s['ok'])
+        unexecutable_repro = [s['name'] for s in repro['steps'] if not s['ok'] and runtime.classify_step(s) == 'harness']
         dropped = sorted({pr['name'] for pr in (plan.get('runtime') or {}).get('probes', [])}
                          - {pr['name'] for pr in new['runtime'].get('probes', [])})
         new['owner_rework'] = {'feedback': [f['text'] for f in feedback if f['handled_iteration'] is None
                                             and f['verdict'] in ('problem', 'request')],
                                'diagnosis': d['diagnosis'], 'root_cause': d['root_cause'],
                                'change_summary': d['change_summary'],
-                               'reproduced_on_previous_version': not repro['ok'], 'reproduction_failures': failed[:10]}
+                               'reproduced_on_previous_version': reproduced, 'reproduction_failures': failed[:10],
+                               'reproduction_unexecutable_checks': unexecutable_repro[:10]}
         fails = len(self._product_failures(pid))
         with self.store.tx():
             self.store.event(pid, 'requirements_changed_by_owner', before=plan['acceptance_criteria'],
@@ -1788,7 +1815,8 @@ class Engine:
             self.store.event(pid, 'decision', what='owner feedback diagnosis',
                              why=f"{d['diagnosis']} | root cause: {d['root_cause']}", by=used)
             self.store.event(pid, 'reproduction', version=last and last['iteration'], current_spec_ok=before['ok'],
-                             revised_spec_ok=repro['ok'], failures=failed[:10])
+                             revised_spec_ok=repro['ok'], reproduced=reproduced, failures=failed[:10],
+                             unexecutable=unexecutable_repro[:10])
             if dropped:     # transparency: probes for earlier behaviour that the revised plan no longer checks
                 self.store.event(pid, 'decision', what='runtime probes dropped by revised plan',
                                  why=', '.join(dropped), by=used)

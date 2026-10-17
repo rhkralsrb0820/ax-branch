@@ -112,6 +112,9 @@ def apply_edits(artifact, edits):
             files[rel] = edit.get('replace') or ''       # empty find on a new path = create the file
             continue
         find, text = edit.get('find') or '', files[rel]
+        if not find and not edit.get('replace') and len(files) > 1:
+            del files[rel]                               # empty find + empty replace on an existing file = delete it
+            continue
         hits = text.count(find) if find else 0
         if hits != 1:
             return None, (f'edit {i} ({rel}): the text to replace occurs {hits} times in the current version; '

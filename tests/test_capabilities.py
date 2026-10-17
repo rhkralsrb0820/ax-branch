@@ -34,6 +34,33 @@ class CapabilityTests(unittest.TestCase):
         self.assertFalse(self.store.artifacts(pid))
         self.assert_revoked(pid)
 
+    def test_native_launch_detection_ignores_python_itself_and_urls(self):
+        native = lambda s: 'native_executable_launch' in C.harness_requests({'mode': 'web', 'owner_launch': s})
+        self.assertEqual([native(s) for s in ('double-click DiligenceReviewDesk.exe', 'install Setup.msi',
+                                              'run python.exe app.py', 'pythonw.exe tool.pyw',
+                                              'double-click app.py; opens http://todo.app/',
+                                              'Run python app.py then open https://demo.exe.com/',
+                                              'double-click app.py; it reads report.exe.config',
+                                              r'run C:\Tools\Desk.exe')],
+                         [True, True, False, False, False, False, False, True])
+
+    def test_a_native_executable_owner_launch_is_a_gap_before_any_build(self):
+        # P-20261016-5fb8d6: owner_launch '... double-click DiligenceReviewDesk.exe' while the harness ran
+        # `python <entry>` and reported the "exact Owner launch" as passed.
+        script = F.Script([F.GOOD], ['PASS'])
+
+        def llm(prompt, schema, **kw):
+            result, used, notes = script(prompt, schema, **kw)
+            if schema is E.PLAN:
+                result['runtime'] = {**result['runtime'], 'owner_launch': 'Extract App.zip and double-click App.exe'}
+            return result, used, notes
+
+        pid = self.store.new_project('Make a Windows program')
+        result = self.engine(llm).run(pid)
+        self.assertEqual(result['state'], 'PAUSED')
+        self.assertIn('native_executable_launch', result['pause_reason'])
+        self.assertFalse(self.store.artifacts(pid))
+
     def test_research_grant_is_scoped_and_actual_failover_is_recorded(self):
         script = F.Script([F.GOOD], ['PASS'])
 

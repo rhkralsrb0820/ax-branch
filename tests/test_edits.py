@@ -66,6 +66,33 @@ class EditTests(unittest.TestCase):
         self.assertIn('return ONLY edits', builds[1][1])
         self.assertIn("print('explained: 2 + 3')", Path(self.store.artifacts(pid)[-1]['path']).read_text(encoding='utf-8'))
 
+    def test_a_large_bundle_is_edited_and_keeps_every_other_file(self):
+        # P-20261016-5fb8d6: a 176 KB bundle was regenerated whole each round and lost its entry file (v9, v16, v17).
+        class BundleScript(EditScript):
+            def __call__(self, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
+                result, used, notes = super().__call__(prompt, schema, prefer, web, cancel, **kw)
+                if isinstance(result, dict) and 'artifact_kind' in result:      # first plan and any revised plan
+                    result.update(artifact_kind='bundle', artifact_filename='add_tool.py')
+                if schema is E.BUILD and result.get('content'):
+                    result = {**result, 'content': '', 'files': [{'path': 'add_tool.py', 'content': result['content']},
+                                                                 {'path': 'data/notes.txt', 'content': 'keep me'}]}
+                return result, used, notes
+        edit = {'path': 'add_tool.py', 'find': "        print('result:', add(2, 3))\n",
+                'replace': "        print('result:', add(2, 3))\n        print('explained: 2 + 3')\n"}
+        script = BundleScript([[edit]])
+        eng = E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x', llm=script)
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        eng.owner_review(pid, works=True, text='print an explanation after the result')
+        with mock.patch.object(E, 'EDITS_ONLY_ABOVE', 10):
+            p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p.get('pause_reason'))
+        builds = [s for s, _, _ in script.prompts if s in (E.BUILD, E.BUILD_EDITS)]
+        self.assertEqual(builds, [E.BUILD, E.BUILD_EDITS])
+        files = {rel: path.read_text(encoding='utf-8') for rel, path, _ in artifacts.files_of(self.store.artifacts(pid)[-1])}
+        self.assertEqual(files['data/notes.txt'], 'keep me')                   # carried forward untouched
+        self.assertIn('explained: 2 + 3', files['add_tool.py'])
+
     def test_ambiguous_or_missing_find_is_rejected_then_retried(self):
         bad = {'path': 'add_tool.py', 'find': 'add(2, 3)', 'replace': 'add(3, 3)'}       # occurs twice
         good = {'path': 'add_tool.py', 'find': "print('result:', add(2, 3))", 'replace': "print('result:', add(2, 3), 'ok')"}
@@ -83,6 +110,18 @@ class EditTests(unittest.TestCase):
         files, err = artifacts.apply_edits(art, [{'path': 'a.py', 'find': 'y = 2', 'replace': 'y = 3'}])
         self.assertEqual((files['a.py'], err), ('x = 1\ny = 3\n', None))
         self.assertIn('0 times', artifacts.apply_edits(art, [{'path': 'a.py', 'find': 'z', 'replace': ''}])[1])
+        single, _ = artifacts.apply_edits(art, [{'path': 'a.py', 'find': '', 'replace': ''}])
+        self.assertIsNone(single)                                      # the only file is never deleted
+
+    def test_a_bundle_file_can_be_deleted_or_renamed_by_edits(self):
+        # Codex review 0.1.38: forced bundle edits could not remove or rename a file.
+        with mock.patch.object(artifacts, 'files_of', lambda a: [(rel, self.tmp / rel, None) for rel in ('main.py', 'legacy.py')]):
+            (self.tmp / 'main.py').write_text('import legacy\n', encoding='utf-8')
+            (self.tmp / 'legacy.py').write_text('X = 1\n', encoding='utf-8')
+            files, err = artifacts.apply_edits({}, [{'path': 'legacy.py', 'find': '', 'replace': ''},
+                                                    {'path': 'core.py', 'find': '', 'replace': 'X = 1\n'},
+                                                    {'path': 'main.py', 'find': 'import legacy', 'replace': 'import core'}])
+        self.assertEqual((err, sorted(files)), (None, ['core.py', 'main.py']))
 
 
 if __name__ == '__main__':

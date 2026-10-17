@@ -4,6 +4,7 @@ A lease selects existing adapters/harnesses. It cannot install software, change
 governance, or grant OS isolation. Provider flags and contained processes enforce
 the authority; events alone are never claimed as enforcement.
 """
+import re
 from contextlib import contextmanager
 
 from .state import Rejected
@@ -24,7 +25,8 @@ AGENT = frozenset(('reasoning', 'code_generation', 'web_research'))
 LIMITS = [
     'ML/LLM research and code generation are available; model training/GPU execution is not.',
     'No desktop GUI interaction, uploads, downloads, drag/drop or multi-tab harness.',
-    'No clean-Windows/no-Python test machine or native installer verification adapter.',
+    'No clean-Windows/no-Python test machine or native installer verification adapter: an owner_launch that runs '
+    'a native .exe/.msi is a capability gap (the deliverable is Python source the Owner runs with Python).',
     'Generated code runs under the current OS account; no OS file/network isolation.',
     'An installed external program is not an executable specialist capability.',
 ]
@@ -49,10 +51,20 @@ def agent_requests(required=(), web=False, coding=False):
                       + (['code_generation'] if coding else [])))
 
 
+# The Owner launches a native program the harness cannot build or run: its "exact Owner launch" would test
+# `python <entry>` instead and pass a path the Owner never takes (P-20261016-5fb8d6: '.exe' declared, Owner saw
+# 'service unreachable' three times while the Python launch passed).
+# A whole file-name token (not part of a URL, a longer name like report.exe.config, or Python's own interpreter).
+_NATIVE_LAUNCH = re.compile(r'(?<![\w.-])(?!(?:python|pythonw|py)\.exe(?![\w.-]))[\w-]+\.(?:exe|msi|msix|appx)(?![\w.-])', re.I)
+_URL = re.compile(r'\w+://\S+')
+
+
 def harness_requests(spec):
     mode = (spec or {}).get('mode', 'cli')
     names = [] if mode == 'none' else [{'cli': 'runtime_cli', 'web': 'runtime_web',
                                        'gui': 'runtime_gui_startup'}.get(mode, 'unsupported_runtime:' + str(mode))]
+    if mode != 'none' and _NATIVE_LAUNCH.search(_URL.sub(' ', str((spec or {}).get('owner_launch', '')))):
+        names.append('native_executable_launch')
     for probe in (spec or {}).get('probes', []):
         method = probe.get('http_method')
         if method == 'BROWSER':

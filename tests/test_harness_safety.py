@@ -145,6 +145,50 @@ class HarnessSafetyTests(unittest.TestCase):
                 self.assertEqual(self.store.events(pid, {'probe_review_pending'}), [])
                 self.assertTrue(any(f.get('kind') == 'product' for f in self.store.verifications(pid)[-1]['result']['findings']))
 
+    PRODUCT_500 = {'name': 'save', 'ok': False, 'status': 500, 'problems': ['server error']}
+    PROSE_ACTION = {'name': 'clean windows scenario', 'ok': False, 'probe_misconfigured': True,
+                    'problems': ["browser action 'Independent clean-copy scenario: copy the release' is not a CSS selector"]}
+
+    def test_unexecutable_check_is_reviewed_even_when_the_product_also_failed(self):
+        # P-20261016-5fb8d6 v7-v22: a product failure skipped probe review, the contract preserved the prose
+        # browser action, and it failed every round until "the same failure" stopped the project.
+        eng, pid, _ = self.prepared(ReviewScript('UNRESOLVED'))
+        eng.runtime_evidence.return_value = {**BAD, 'steps': [self.PRODUCT_500, self.PROSE_ACTION]}
+        p = eng.run(pid)
+        pending = self.store.events(pid, {'probe_review_pending'})[0]['detail']
+        self.assertEqual(([s['name'] for s in pending['steps']], pending['product_failed']), (['clean windows scenario'], True))
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertIn('cannot be executed here', p['pause_reason'])
+        self.assertIn('clean windows scenario', p['pause_reason'])            # the decision names the check
+        v = self.store.verifications(pid)[-1]
+        self.assertEqual(E.failure_code(v), 'product:save')                     # the repeat signature ignores it
+
+    def test_a_failing_self_test_keeps_one_signature_with_or_without_an_invalid_probe(self):
+        base = {'provider': 'claude', 'verdict': 'FAIL', 'result': {'findings': [], 'criteria': []}}
+        bad = {'name': 'bad-selector', 'ok': False, 'probe_misconfigured': True, 'problems': ["'a[[' is not a CSS selector"]}
+        with_probe = {**base, 'checks': {'ok': False, 'exit_code': 1, 'output': 'AssertionError',
+                                         'runtime': {'ok': False, 'steps': [bad]}}}
+        without = {**base, 'checks': {'ok': False, 'exit_code': 1, 'output': 'AssertionError',
+                                      'runtime': {'ok': True, 'steps': []}}}
+        self.assertEqual((E.failure_code(with_probe), E.failure_code(without)),
+                         ('product:deterministic checks', 'product:deterministic checks'))
+        harness_only = {**base, 'checks': {'ok': True, 'exit_code': 0, 'output': 'PASS', 'runtime': {'ok': False, 'steps': [bad]}}}
+        self.assertEqual(E.failure_code(harness_only), 'non-product:bad-selector')
+
+    def test_reproduction_by_unexecutable_checks_only_is_not_a_reproduction(self):
+        script = ReviewScript('UNRESOLVED')
+        eng, pid, _ = self.prepared(script)
+        eng.runtime_evidence.side_effect = [OK]
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        eng.owner_review(pid, works=False, text='the local service is unreachable when I launch it')
+        eng.runtime_evidence.side_effect = [OK, {**BAD, 'steps': [self.PROSE_ACTION]}] + [OK] * 10
+        eng.run(pid, stop_at='STAFFING')
+        repro = self.store.events(pid, {'reproduction'})[-1]['detail']
+        self.assertEqual((repro['revised_spec_ok'], repro['reproduced'], repro['unexecutable']),
+                         (False, False, ['clean windows scenario']))
+        rework = self.store.project(pid)['plan']['owner_rework']
+        self.assertFalse(rework['reproduced_on_previous_version'])
+
     def test_launch_only_repair_reverifies_same_artifact_and_persists_decision(self):
         proposed = {**SPEC, 'launch_args': []}
         eng, pid, script = self.prepared(ReviewScript('HARNESS_REPAIR', proposed, equivalent=True))

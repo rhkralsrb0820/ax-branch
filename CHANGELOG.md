@@ -3,6 +3,43 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.38] - 2026-10-18
+
+Failure-loop fixes from a real repeated-failure case (P-20261016-5fb8d6, law-firm diligence reviewer: 22 versions,
+six change_pipeline rounds, stopped on "the same failure"). Analysis: docs/evidence/2026-10-17-diligence-loop-analysis.md.
+Builds on 0.1.37 (Codex: scoped capabilities, integrated by fast-forward).
+
+### Added
+- A plan whose Owner launch runs a native .exe/.msi/.msix/.appx is a declared capability gap
+  (`native_executable_launch`) and stops before production; previously the harness tested `python <entry>` and
+  reported the "exact Owner launch" as passed while the Owner's real launch failed three times.
+- Bundle edits can delete a file (existing path, empty find and replace); a rename is delete + create.
+
+### Changed
+- Checks proven unexecutable (probe_misconfigured) always go to probe review, even when the product also failed:
+  an equivalent repair (independently validated) or an explicit HARNESS_BLOCKED pause that names the checks and the
+  Owner's options. Before, a rebuild could not repair them and the contract preserved them, so they failed every round.
+- Large bundles get edits-only builds like single files; untouched files carry forward.
+- Product failure signatures exclude harness-class steps; a failing self-test keeps one signature.
+
+### Fixed
+- "The same failure recurred" was triggered by checks that could never execute (prose browser actions, a forged
+  Content-Length) rather than by the product.
+- A revised check that could not execute was recorded as reproducing the Owner's problem.
+- Regenerating a 176 KB bundle in one reply dropped its entry file and earlier self-test sections.
+
+### Verification
+- Regression tests for every fix, each failing on the previous code (executed mutation); 0.1.37 verified by Claude
+  (light 84/84, engine 144/144). Full suite: see the commit message.
+- Codex targeted reviews (inspection): round 1 NOT_READY (3) -> round 2 NOT_READY (1: native-launch matched URLs and
+  name fragments) -> round 3 READY. Full suite 322/322 sequential, coverage-checked.
+
+### Known issues
+- P-20261016-5fb8d6 is not resumed: it needs an Owner decision (native standalone .exe requires a packaging tool and a
+  clean no-Python test machine, neither available nor installable without approval).
+- Remaining HTML/CSV/persistence failures of that project are UNKNOWN (product or harness) until its checks run validly.
+- The Owner's "local service unreachable" root cause is UNKNOWN: AX Branch cannot execute the Owner's native launch path.
+
 ## [0.1.37] - 2026-10-17
 
 ### Added
