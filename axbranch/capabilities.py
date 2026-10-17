@@ -20,13 +20,16 @@ REGISTRY = {
     'runtime_browser': 'Headless rendered-text and bounded browser actions',
     'runtime_restart': 'Kill/relaunch web app, then check persisted data',
     'runtime_gui_startup': 'Desktop process startup/survival only; no interaction',
+    'native_build_pyinstaller': 'One-file Windows .exe from the Python source; PyInstaller pinned, acquired into the project',
+    'runtime_native_exe': 'Runtime checks and the exact Owner launch run the built .exe itself',
 }
 AGENT = frozenset(('reasoning', 'code_generation', 'web_research'))
 LIMITS = [
     'ML/LLM research and code generation are available; model training/GPU execution is not.',
     'No desktop GUI interaction, uploads, downloads, drag/drop or multi-tab harness.',
-    'No clean-Windows/no-Python test machine or native installer verification adapter: an owner_launch that runs '
-    'a native .exe/.msi is a capability gap (the deliverable is Python source the Owner runs with Python).',
+    'A native .exe is available only through native_build pyinstaller (Python source -> one .exe); other '
+    'packagers, installers (.msi) and languages are capability gaps. No clean-Windows machine: a built .exe is '
+    'verified on this PC with a clean environment (no Python on PATH), and that limit is stated.',
     'Generated code runs under the current OS account; no OS file/network isolation.',
     'An installed external program is not an executable specialist capability.',
 ]
@@ -59,12 +62,17 @@ _NATIVE_LAUNCH = re.compile(r'(?<![\w.-])(?!(?:python|pythonw|py)\.exe(?![\w.-])
 _URL = re.compile(r'\w+://\S+')
 
 
-def harness_requests(spec):
+def harness_requests(spec, native_build=None):
+    """Harness capabilities a runtime spec needs. A native .exe Owner launch is supported only when native_build
+    packages exactly that .exe."""
     mode = (spec or {}).get('mode', 'cli')
     names = [] if mode == 'none' else [{'cli': 'runtime_cli', 'web': 'runtime_web',
                                        'gui': 'runtime_gui_startup'}.get(mode, 'unsupported_runtime:' + str(mode))]
     if mode != 'none' and _NATIVE_LAUNCH.search(_URL.sub(' ', str((spec or {}).get('owner_launch', '')))):
-        names.append('native_executable_launch')
+        nb = native_build or {}
+        names += (['native_build_pyinstaller', 'runtime_native_exe']
+                  if nb.get('tool') == 'pyinstaller' and _launches_exe(spec, nb.get('exe_name', ''))
+                  else ['native_executable_launch'])
     for probe in (spec or {}).get('probes', []):
         method = probe.get('http_method')
         if method == 'BROWSER':
@@ -74,6 +82,12 @@ def harness_requests(spec):
     return sorted(set(names))
 
 
+def _launches_exe(spec, exe_name):
+    """Every native target the owner_launch names is the .exe this plan builds."""
+    names = {m.group(0).lower() for m in _NATIVE_LAUNCH.finditer(_URL.sub(' ', str((spec or {}).get('owner_launch', ''))))}
+    return bool(exe_name) and names == {f'{exe_name}.exe'.lower()}
+
+
 def gaps(plan, browser_available=True):
     """Validate new and legacy plans before production spends a provider call."""
     missing = []
@@ -81,7 +95,7 @@ def gaps(plan, browser_available=True):
         names = agent_requests(stage.get('capabilities', []), stage.get('web', False))
         missing.extend(k for k in names if k not in AGENT)
     available = inventory(browser_available)['available']
-    missing.extend(k for k in harness_requests(plan.get('runtime')) if k not in available)
+    missing.extend(k for k in harness_requests(plan.get('runtime'), plan.get('native_build')) if k not in available)
     return sorted(set(missing))
 
 

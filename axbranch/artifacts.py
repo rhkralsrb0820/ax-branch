@@ -7,7 +7,9 @@ written; anything else is refused and recorded so verification fails on it.
 """
 import hashlib
 import json
+import os
 import shutil
+import stat
 from pathlib import Path, PurePosixPath
 
 MAX_FILES, MAX_BYTES = 40, 400_000
@@ -129,3 +131,85 @@ def materialize(artifact, folder):
         target = Path(folder) / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
+
+
+# ---- Owner input files: read-only copies in projects/<id>/inputs, given to checks as ./inputs/<name>
+MAX_INPUTS, MAX_INPUT_BYTES = 10, 20 * 2**20
+
+
+def validate_inputs(paths, existing=(), existing_bytes=0):
+    """Raise ValueError naming the first problem; nothing is created. Names compare case-insensitively (Windows)."""
+    paths = [Path(p) for p in paths]
+    if len(paths) + len(existing) > MAX_INPUTS:
+        raise ValueError(f'at most {MAX_INPUTS} input files')
+    names = [p.name.lower() for p in paths] + [n.lower() for n in existing]
+    if len(set(names)) != len(names):
+        raise ValueError('input file names must be unique (case-insensitive)')
+    total = existing_bytes
+    for p in paths:
+        if not p.is_file() or p.is_symlink() or safe_relpath(p.name) != p.name:
+            raise ValueError(f'not a readable regular file: {p}')
+        total += p.stat().st_size
+    if total > MAX_INPUT_BYTES:
+        raise ValueError(f'input files exceed {MAX_INPUT_BYTES // 2**20} MB in total')
+    return paths
+
+
+def attach_inputs(project_dir, paths, known=()):
+    """Copy the Owner's files into project_dir/inputs (read-only; originals are only read). known = the records
+    already attached (from SQLite, the only source of truth). The byte budget is enforced on the bytes actually read.
+    Returns [{name, size, sha256, source}] or raises ValueError (then nothing new is left behind)."""
+    folder = Path(project_dir) / 'inputs'
+    present = [f.name for f in folder.iterdir()] if folder.is_dir() else []
+    names = list({n.lower(): n for n in [r['name'] for r in known] + present}.values())
+    paths = validate_inputs(paths, names, sum(r['size'] for r in known))
+    budget = MAX_INPUT_BYTES - sum(r['size'] for r in known)
+    loaded = []
+    for p in paths:
+        with open(p, 'rb') as f:
+            data = f.read(budget + 1)
+        budget -= len(data)
+        if budget < 0:
+            raise ValueError(f'input files exceed {MAX_INPUT_BYTES // 2**20} MB in total')
+        loaded.append((p, data))
+    folder.mkdir(parents=True, exist_ok=True)
+    records, written = [], []
+    try:
+        for p, data in loaded:
+            target = folder / p.name
+            target.write_bytes(data)
+            written.append(target)
+            os.chmod(target, stat.S_IREAD)
+            records.append({'name': p.name, 'size': len(data), 'sha256': sha(data), 'source': str(p)})
+    except OSError:
+        for f in written:
+            os.chmod(f, stat.S_IWRITE | stat.S_IREAD)
+            f.unlink(missing_ok=True)
+        raise
+    return records
+
+
+def inputs_folder(path):
+    """projects/<id>/inputs for a path inside projects/<id>/artifacts/..., else None."""
+    path = Path(path)
+    for parent in path.parents:
+        if parent.name == 'artifacts':
+            folder = parent.parent / 'inputs'
+            return folder if folder.is_dir() else None
+    return None
+
+
+def copy_inputs(path, dest, records):
+    """Writable copies of the project's RECORDED inputs (records from SQLite) into dest/inputs: the program reads
+    ./inputs/<name>. A file whose bytes no longer match its record is refused; unrecorded files are never copied."""
+    folder = inputs_folder(path)
+    if not records:
+        return
+    if folder is None:
+        raise ValueError('input files are recorded but the inputs folder is missing')
+    (Path(dest) / 'inputs').mkdir(parents=True, exist_ok=True)
+    for r in records:
+        data = (folder / r['name']).read_bytes() if (folder / r['name']).is_file() else b''
+        if sha(data) != r['sha256']:
+            raise ValueError(f"input file {r['name']} changed after it was attached")
+        (Path(dest) / 'inputs' / r['name']).write_bytes(data)

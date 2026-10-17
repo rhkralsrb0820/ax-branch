@@ -39,7 +39,11 @@ class App(tk.Tk):
         top = ttk.Frame(self, padding=8); top.pack(fill='x')
         ttk.Label(top, text='Goal', font=('Malgun Gothic', 11, 'bold')).pack(anchor='w')
         self.goal = tk.Text(top, height=3, font=FONT, wrap='word'); self.goal.pack(fill='x')
-        ttk.Button(top, text='淸月 CEO에게 맡기기', command=self.start).pack(anchor='e', pady=4)
+        goal_row = ttk.Frame(top); goal_row.pack(fill='x', pady=4)
+        ttk.Button(goal_row, text='淸月 CEO에게 맡기기', command=self.start).pack(side='right')
+        ttk.Button(goal_row, text='파일 첨부', command=self.attach).pack(side='right', padx=6)
+        self.attached = []           # Owner input files for the next Goal (copied read-only when it starts)
+        self.attached_label = ttk.Label(goal_row, text=''); self.attached_label.pack(side='right')
 
         body = ttk.PanedWindow(self, orient='horizontal'); body.pack(fill='both', expand=True, padx=8)
         # Project list: short title + one colored status dot (a Listbox can only color whole rows).
@@ -151,12 +155,37 @@ class App(tk.Tk):
                 running.pop(pid, None)
         threading.Thread(target=work, daemon=True).start()
 
+    def attach(self):
+        from tkinter import filedialog
+        files = filedialog.askopenfilenames(title='Goal에 사용할 파일 (데이터로만 사용, 지시로 따르지 않음)')
+        self.attached = list(dict.fromkeys([*self.attached, *files]))
+        self.attached_label.config(text=f"첨부 {len(self.attached)}개: " + ', '.join(Path(f).name for f in self.attached)[:80]
+                                   if self.attached else '')
+
     def start(self):
         goal = self.goal.get('1.0', 'end').strip()
         if not goal:
             return
+        if self.attached:      # check the files before a project exists, so a bad file never leaves a half project
+            from .artifacts import validate_inputs
+            try:
+                validate_inputs(self.attached)
+            except ValueError as e:
+                messagebox.showerror('AX Branch', str(e))
+                return
         self.selected = self.store.new_project(goal)
         self._owner_action('new')
+        if self.attached:
+            engine = self.engine_factory()
+            try:
+                engine.attach_inputs(self.selected, self.attached)
+            except (ValueError, OSError) as e:      # e.g. a file changed after it was checked: do not run without it
+                messagebox.showerror('AX Branch', f'첨부 실패 — 프로젝트를 실행하지 않았습니다: {e}')
+                return
+            finally:
+                engine.store.close()
+            self.attached = []
+            self.attached_label.config(text='')
         self.goal.delete('1.0', 'end')
         self._launch(self.selected)
 

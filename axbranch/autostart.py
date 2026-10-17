@@ -145,7 +145,16 @@ def memory_line(top=3):
                     name = row[0].rsplit('.', 1)[0].replace(' ', '_')       # one token per name in the log line
                     groups[name] = groups.get(name, 0) + kb // 1024
         biggest = ','.join(f'{n}:{mb}' for n, mb in sorted(groups.items(), key=lambda g: -g[1])[:top])
-        return f'free={free}MB' + (f' top={biggest}' if biggest else '')
+        commit = ''
+        if os.name == 'nt':                    # commit charge: the other memory limit (the pagefile-backed total)
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [('dwLength', ctypes.c_ulong), ('dwMemoryLoad', ctypes.c_ulong)] +                            [(n, ctypes.c_ulonglong) for n in ('tp', 'ap', 'tpf', 'apf', 'tv', 'av', 'aev')]
+            ms = MS(); ms.dwLength = ctypes.sizeof(ms)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                commit = f' commit_free={ms.apf // 2**20}MB/{ms.tpf // 2**20}MB'
+        return f'free={free}MB' + commit + (f' top={biggest}' if biggest else '')
     except Exception as e:                  # noqa: BLE001 - diagnostics only
         return f'memory=unknown ({type(e).__name__})'
 

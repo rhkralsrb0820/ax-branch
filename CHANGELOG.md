@@ -3,6 +3,53 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.39] - 2026-10-18
+
+The Main Agent can take Owner files and ship native Windows programs; a repeated failure ends with a real decision.
+
+### Added
+- Owner input files: `axbranch new GOAL --input FILE` and the window's 파일 첨부 button. Copies are read-only in
+  projects/<id>/inputs with sha256/size (<=10 files, <=20 MB, case-insensitive unique names), validated before a project
+  exists. SQLite records are the only truth: every check, Runtime Acceptance and the Owner's own run get ./inputs/<name>
+  only for recorded files whose hash still matches. The CEO, specialists, final producer, verifier, strategy, diagnosis
+  and executive acceptance see an excerpt labelled DATA, not instructions. Develop carries the inputs over.
+- Native .exe: the CEO plans `native_build {tool: pyinstaller, exe_name, windowed}`; the engine acquires PyInstaller
+  6.22.3 into the project (isolated venv, pip --isolated, PyPI, completion marker), builds one .exe per version under a
+  capability lease (clean environment, Job Object, whole-tree kill) and records it with a config fingerprint. Every
+  runtime check, RESTART and the exact Owner launch (pristine copy) run that .exe, never the Python source; the evidence
+  states "NOT on a clean Windows machine" and that frozen-program network auditing is unknown. A native plan without an
+  intact matching .exe is never verified or launched from the source. A tool that cannot be acquired pauses INFRA.
+- Sessions record the AX Branch version, executable and frozen flag.
+- Strategy reviews record what materially changed (pipeline, provider, runtime).
+
+### Changed
+- A recurring failure's NEEDS_DECISION carries a brief: failing checks by evidence class, unmet criteria, whether the
+  last forced change was material (or unknown), and the options; resuming first runs another forced (no "continue")
+  strategy review before any rebuild.
+- A native .exe Owner launch is supported only when the plan builds exactly that .exe (0.1.38 gap otherwise).
+
+### Fixed
+- A strategy review's plan change and its completion marker are committed together (a crash could apply it twice).
+- The identical-build guard no longer blocks a packaging-only repair (same source, other packaging).
+
+### Verification
+- New tests for inputs, the GUI attachment, native builds (incl. a real end-to-end build on demand with
+  AXB_NATIVE_E2E=1: project venv + PyPI + contained build, runtime ran the .exe on the attached CSV), the decision brief,
+  budget/recurrence interplay and crash atomicity. Full suite: see the commit message.
+- Codex reviews (inspection): inputs NOT_READY (6) -> 0.1.39 NOT_READY (7) -> round 2 NOT_READY (2) -> round 3
+  NOT_READY (2) -> round 4 READY -> round 5 READY (after a regression found by the full run, fixed). Final evidence
+  checks: 4 rounds, last READY. Every confirmed defect fixed with a regression test.
+- Test runs on the final code (workspace/handoff/0.1.39-evidence): 42 separate sequential batches (method changed:
+  single runs were reaped by Claude Code's memory protection, cause undetermined); F139 339/339; F139b 338/339 + the
+  failed batch re-run 6/6 (browser harness timeout during Windows Update load, not counted as a pass); F139c 339/339
+  with each batch in its own Job Object: no processes remained in any audited batch job at the recorded checks.
+
+### Known issues
+- No clean Windows machine: a built .exe is verified on this PC with a clean environment only.
+- PyInstaller's transitive dependencies are not hash-locked (only the top-level version is pinned).
+- Other packagers and languages (Node, .NET, Java installers) are capability gaps.
+- dist/AXBranch.exe (AX Branch's own packaged window, built 2026-10-08) is stale; the Owner runs the source.
+
 ## [0.1.38] - 2026-10-18
 
 Failure-loop fixes from a real repeated-failure case (P-20261016-5fb8d6, law-firm diligence reviewer: 22 versions,

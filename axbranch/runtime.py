@@ -276,8 +276,9 @@ def _contains(text, needles):
     return missing
 
 
-def check(spec, entry_path, python, cwd, on_step=None):
-    """Run the spec against the artifact copied in cwd. Returns an evidence dict with 'ok'."""
+def check(spec, entry_path, python, cwd, on_step=None, executable=None):
+    """Run the spec against the artifact copied in cwd. Returns an evidence dict with 'ok'.
+    executable: the file name (in cwd) of a built native program: every launch runs IT, never `python <entry>`."""
     spec, corrections = normalize(spec)
     mode = spec.get('mode', 'cli')
     ev = {'mode': mode, 'owner_launch': spec.get('owner_launch', ''), 'steps': [], 'notes': corrections,
@@ -287,10 +288,19 @@ def check(spec, entry_path, python, cwd, on_step=None):
         return ev
     audit_dir = tempfile.mkdtemp(prefix='axb-net-')
     audit_log = os.path.join(audit_dir, 'audit.jsonl')
-    base = Launch([python, '-E', '-s', '-X', 'utf8', '-c', AUDIT, entry_path], {'AXB_AUDIT_LOG': audit_log}, cwd)
+    if executable:
+        # The Owner's real launch target. The audit hook cannot be injected into a frozen program: network evidence
+        # for it is unknown, stated rather than implied. The clean environment keeps Python off its PATH.
+        base = Launch([str(Path(cwd) / executable)], {}, cwd, native=True)
+        ev['native_executable'] = executable
+        ev['notes'] = ev['notes'] + [f'every launch ran the built {executable}, not the Python source; verified on '
+                                     'this PC with a clean environment, NOT on a clean Windows machine']
+    else:
+        base = Launch([python, '-E', '-s', '-X', 'utf8', '-c', AUDIT, entry_path], {'AXB_AUDIT_LOG': audit_log}, cwd)
     try:
         _check(spec, mode, base, cwd, ev, on_step)
-        ev['network'] = network_summary(audit_log)
+        ev['network'] = network_summary(audit_log) if not executable else {
+            'unknown': 'native executable: the in-process network audit hook cannot be injected'}
     finally:
         shutil.rmtree(audit_dir, ignore_errors=True)
     return ev
@@ -299,13 +309,21 @@ def check(spec, entry_path, python, cwd, on_step=None):
 class Launch:
     """How the artifact is started (the audit wrapper + the clean environment), and its record."""
 
-    def __init__(self, argv, env, cwd):
-        self.argv, self.env, self.cwd = argv, env, cwd
+    def __init__(self, argv, env, cwd, native=False):
+        self.argv, self.env, self.cwd, self.native = argv, env, cwd, native
+
+    def at(self, cwd):
+        """The same launch from another folder (a native program runs ITS copy there)."""
+        argv = [str(Path(cwd) / Path(self.argv[0]).name)] if self.native else self.argv
+        return Launch(argv, self.env, cwd, self.native)
 
     def start(self, args, stdin_text='', split=False):
         return sandbox.start(self.argv + list(args), self.cwd, stdin_text, extra_env=self.env, split=split)
 
     def record(self, args):
+        if self.native:
+            return {'executable': self.argv[0], 'command': [*self.argv, *args], 'cwd': str(self.cwd),
+                    'env_keys': sorted({*sandbox.clean_env('.'), *self.env}), 'launcher': 'native executable'}
         return {'executable': self.argv[0], 'command': [*self.argv[:-3], '-c', '<AUDIT wrapper>', *self.argv[-1:], *args],
                 'cwd': str(self.cwd), 'env_keys': sorted({*sandbox.clean_env('.'), *self.env}),
                 'launcher': 'runpy.run_path(entry, run_name="__main__") under the audit hook'}
@@ -377,7 +395,7 @@ def _check(spec, mode, base, cwd, ev, on_step):
     pristine, home = Path(tempfile.mkdtemp(prefix='axb-owner-')), None
     try:
         shutil.copytree(base.cwd, pristine / 'app')
-        owner = Launch(base.argv, base.env, str(pristine / 'app'))
+        owner = base.at(str(pristine / 'app'))
         if any(p.get('http_method') == 'RESTART' for p in spec.get('probes', [])):
             # The clean environment gives each process its own temp HOME/USERPROFILE; data a program keeps in the
             # user's profile would vanish on relaunch here but not on the Owner's PC: one profile for the flow.
@@ -386,7 +404,7 @@ def _check(spec, mode, base, cwd, ev, on_step):
                 (home / sub).mkdir(parents=True, exist_ok=True)
             base = Launch(base.argv, {**base.env, 'HOME': str(home), 'USERPROFILE': str(home),
                                       'APPDATA': str(home / 'AppData' / 'Roaming'),
-                                      'LOCALAPPDATA': str(home / 'AppData' / 'Local')}, base.cwd)
+                                      'LOCALAPPDATA': str(home / 'AppData' / 'Local')}, base.cwd, base.native)
         _launches(spec, mode, base, owner, ev, on_step)
     finally:
         shutil.rmtree(pristine, ignore_errors=True)

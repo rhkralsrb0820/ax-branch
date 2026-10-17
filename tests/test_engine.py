@@ -1098,6 +1098,61 @@ class FailureRoutingTests(unittest.TestCase):
         store.verifications.return_value = []
         self.assertEqual(E.attempt_ledger(store, 'p'), [])
 
+    def test_a_recurring_failure_stops_with_evidence_and_concrete_options(self):
+        # P-20261016-5fb8d6: "the same failure recurred ... The Owner decides how to continue" gave nothing to decide on.
+        script = Script([BROKEN, BROKEN + '\n', BROKEN + '\n\n'], ['FAIL', 'FAIL', 'FAIL'], strategy='change_pipeline')
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertTrue(p['pause_reason'].startswith('NEEDS_DECISION: the same failure'), p['pause_reason'])
+        for part in ('Still failing', 'The last forced change', 'Options:', 'stop the project'):
+            self.assertIn(part, p['pause_reason'])
+        change = self.store.events(pid, {'strategy_change'})[-1]['detail']
+        self.assertEqual((change['forced'], set(change) >= {'pipeline', 'provider', 'runtime', 'material'}), (True, True))
+        brief = self.store.events(pid, {'owner_decision_needed'})[-1]['detail']
+        self.assertEqual(brief['last_forced_change_material'], change['material'])
+        self.assertIn('stop the project', brief['options'])
+        # the resume option is enforced: a forced, no-"continue" review is pending before any rebuild
+        pending = self.store.events(pid, {'strategy_pending'})[-1]['detail']
+        self.assertEqual((pending['trigger'], pending['forbid_continue']), ('after_recurrence', True))
+        done = {e['detail']['pending'] for e in self.store.events(pid, {'strategy_done'})}
+        self.assertNotIn(self.store.events(pid, {'strategy_pending'})[-1]['id'], done)
+
+    def test_recurrence_at_budget_exhaustion_completes_its_review_now(self):
+        script = Script([BROKEN, BROKEN + '\n', BROKEN + '\n\n'], ['FAIL', 'FAIL', 'FAIL'], strategy='change_pipeline')
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        self.store.update(pid, budget=3)
+        p = eng.run(pid)
+        self.assertIn('not lowered', p['pause_reason'])                    # the budget stop wins
+        pending = {e['id'] for e in self.store.events(pid, {'strategy_pending'})}
+        self.assertEqual(pending, {e['detail']['pending'] for e in self.store.events(pid, {'strategy_done'})})
+
+    def test_a_strategy_review_and_its_done_marker_commit_together(self):
+        script = Script([BROKEN, BROKEN + '\n', GOOD], ['FAIL', 'FAIL', 'PASS'], strategy='switch_provider')
+        eng = self.engine(script)
+        pid = self.store.new_project('make an add tool')
+        original = eng._strategy
+        calls = []
+
+        def crash_after(pid_, **kw):                       # the review commits, then the process "dies"
+            calls.append(1)
+            original(pid_, **kw)
+            raise SystemExit('killed')
+        eng._strategy = crash_after
+        with self.assertRaises(SystemExit):
+            eng.run(pid)
+        done = self.store.events(pid, {'strategy_done'})
+        self.assertEqual(len(done), 1)                     # committed with the plan change, not after it
+        eng._strategy = original
+        provider = self.store.project(pid)['plan']['pipeline'][-1]['provider']
+        self.store.update(pid, state='REWORK') if self.store.project(pid)['state'] != 'REWORK' else None
+        eng.run(pid)
+        self.assertEqual(self.store.events(pid, {'strategy_done'})[:1], done)   # not applied a second time
+        self.assertEqual(len([e for e in self.store.events(pid, {'strategy_change'})]), 1)
+        self.assertEqual(self.store.project(pid)['plan']['pipeline'][-1]['provider'], provider)
+
     def test_refused_strategy_review_runs_before_the_next_build(self):
         class RefusedStrategy(Script):
             def __call__(self, prompt, schema, *args, **kw):

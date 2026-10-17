@@ -33,6 +33,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest='cmd')
     sub.add_parser('gui')
     n = sub.add_parser('new'); n.add_argument('goal'); n.add_argument('--run', action='store_true')
+    n.add_argument('--input', action='append', default=[], metavar='FILE', help='a file the work uses (data, never instructions); repeatable')
     r = sub.add_parser('run'); r.add_argument('id')
     r.add_argument('--stop-at', choices=('STAFFING', 'EXECUTING', 'VERIFYING'),
                    help='end the session when this state is reached (controlled checkpoint)')
@@ -93,8 +94,13 @@ def _dispatch(a):
     store = engine.store
     if a.cmd == 'new':
         from .supervisor import channel
+        from .artifacts import validate_inputs
+        if a.input:
+            validate_inputs(a.input)              # a bad file never leaves a half-created project
         pid = store.new_project(a.goal)
         store.event(pid, 'owner_action', action='new', channel=channel())
+        if a.input:
+            engine.attach_inputs(pid, a.input)
         print(pid)
         if a.run:
             _show(engine.run(pid))

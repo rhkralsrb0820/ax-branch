@@ -73,7 +73,7 @@ class AutostartTests(unittest.TestCase):
     def test_memory_line_records_free_memory_and_never_breaks_a_pass(self):
         from unittest import mock
         line = autostart.memory_line()
-        self.assertRegex(line, r'^free=\d+MB( top=\S+)?$')
+        self.assertRegex(line, r'^free=\d+MB( commit_free=\d+MB/\d+MB)?( top=\S+)?$')
         with mock.patch.object(autostart.subprocess, 'run', side_effect=OSError('no tasklist')):
             self.assertTrue(autostart.memory_line().startswith('memory=unknown'))
 

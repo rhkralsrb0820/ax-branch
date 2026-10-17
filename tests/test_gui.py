@@ -67,6 +67,31 @@ class GuiTests(unittest.TestCase):
         self.fail('GUI did not reach the expected state: ' + repr((self.app._notice[0], self.app.running,
                   pid and self.app.store.project(pid)['state'], pid and self.app.store.project(pid)['pause_reason'])))
 
+    def test_attached_file_goes_with_the_goal_as_a_read_only_input(self):
+        data = self.tmp / 'sales.csv'
+        data.write_text('item,amount\napple,10\n', encoding='utf-8')
+        from unittest import mock
+        with mock.patch('tkinter.filedialog.askopenfilenames', return_value=(str(data),)):
+            _press(self.app, '파일 첨부')
+        self.assertIn('sales.csv', self.app.attached_label.cget('text'))
+        self.app.goal.insert('1.0', 'make an add tool')
+        _press(self.app, '淸月 CEO에게 맡기기')
+        pid = self.app.selected
+        self.pump_until(lambda: not self.app.running)
+        files = [r['name'] for e in self.app.store.events(pid, {'owner_inputs'}) for r in e['detail']['files']]
+        self.assertEqual((files, self.app.attached), (['sales.csv'], []))
+        self.assertTrue((self.ws / 'projects' / pid / 'inputs' / 'sales.csv').is_file())
+
+    def test_a_failed_attachment_never_starts_a_project(self):
+        from unittest import mock
+        with mock.patch('tkinter.filedialog.askopenfilenames', return_value=(str(self.tmp / 'missing.csv'),)):
+            _press(self.app, '파일 첨부')
+        self.app.goal.insert('1.0', 'make an add tool')
+        with mock.patch('tkinter.messagebox.showerror') as shown:
+            _press(self.app, '淸月 CEO에게 맡기기')
+        self.assertTrue(shown.called)
+        self.assertEqual((self.app.store.projects(), self.app.running), ([], {}))
+
     def test_goal_to_verified_report_to_save_and_close(self):
         self.app.goal.insert('1.0', 'make an add tool')
         _press(self.app, '淸月 CEO에게 맡기기')
