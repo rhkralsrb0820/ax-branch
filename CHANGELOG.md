@@ -3,6 +3,40 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.40] - 2026-10-18
+
+Research documents receive source evidence instead of unexecuted prose runtime probes.
+
+### Added
+- Read-only public-source retrieval for cited markdown URLs, with content hashes, access outcomes,
+  recorded source text, operation leases and verifier claim/quotation judgments.
+- Exact quotation presence checks; unsupported required claims block verification as harness gaps.
+
+### Changed
+- Document runtime probes are removed visibly from new plans; source verification is a separate harness.
+- The verifier receives up to 100,000 characters of fetched evidence and must distinguish source text
+  presence from semantic support. Source content is untrusted data, never an instruction.
+
+### Fixed
+- Missing/inaccessible evidence, explicitly unverifiable claims and fabricated contradiction quotations
+  no longer silently pass the new source gate.
+- Malformed URLs, body-read errors and unknown charsets become source unavailability records.
+- HTTP connections use checked numeric addresses, including after redirects; environment proxies and
+  URL credentials are disabled. This closes the checked-host/second-DNS-lookup gap in the WIP reader.
+
+### Verification
+- Six new failure cases reproduced against the inherited WIP (3 assertions failed, 3 unhandled errors).
+- Source reader/gate/transport tests plus executive acceptance tests; full sequential suite and real
+  EXE build: 358/358 passed in 43 sequential audited batches; 0 skipped/failed/unrun, no job survivors.
+  See docs/evidence/2026-10-18-source-verification.md.
+
+### Known issues
+- Quotation presence is deterministic; entailment and selection of material claims remain model judgments.
+- Up to 40 sources, 2 MiB per source; verifier context is truncated and cannot imply exhaustive coverage.
+- HTTP errors, anti-bot blocks and non-text documents remain explicit evidence gaps. Socket timeouts
+  are per operation, not a hard overall deadline for DNS or slow streaming.
+- No clean Windows machine or new OS isolation. Existing packaged AXBranch.exe remains stale.
+
 ## [0.1.39] - 2026-10-18
 
 The Main Agent can take Owner files and ship native Windows programs; a repeated failure ends with a real decision.

@@ -1,5 +1,14 @@
 # AX Branch — PROJECT_STATE (development)
 
+## Current development update — 2026-10-18 / 0.1.40
+
+Source verification for cited research documents is implemented and regression-tested.
+Full validation: 358/358, real EXE build enabled, 43 sequential audited batches, no test job survivors.
+Evidence and limits: [source verification](evidence/2026-10-18-source-verification.md).
+Next: approved Goal 1 v2 re-verification, then isolated CSV analysis and Windows EXE goals using Codex.
+Existing production Owner decisions remain untouched. Earlier sections below are historical snapshots.
+
+
 Updated 2026-10-17 · source version **0.1.37** · repo `AX-Branch/ax-branch` (private GitHub `rhkralsrb0820/ax-branch`).
 Runtime project state is in `../workspace/axbranch.sqlite3` and each `HANDOFF.md`; this file
 covers the *development* of AX Branch itself.

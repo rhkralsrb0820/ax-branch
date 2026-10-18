@@ -22,6 +22,7 @@ REGISTRY = {
     'runtime_gui_startup': 'Desktop process startup/survival only; no interaction',
     'native_build_pyinstaller': 'One-file Windows .exe from the Python source; PyInstaller pinned, acquired into the project',
     'runtime_native_exe': 'Runtime checks and the exact Owner launch run the built .exe itself',
+    'source_fetch': 'Read-only GET of the public pages a document cites (no credentials; private addresses refused)',
 }
 AGENT = frozenset(('reasoning', 'code_generation', 'web_research'))
 LIMITS = [
