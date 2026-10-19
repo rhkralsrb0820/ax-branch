@@ -1,5 +1,6 @@
 """Native .exe distribution: planned by the CEO, built by the engine in the project, verified by running the .exe."""
 import os
+import json
 import shutil
 import stat
 import sys
@@ -70,6 +71,25 @@ class NativeTests(unittest.TestCase):
         self.assertIn('native build failed', v['checks']['output'])
         self.assertTrue(E.product_failure(v))
 
+    def test_verifier_receives_native_build_evidence(self):
+        script = ExeScript([TOTALS], ['PASS'])
+        eng, pid = self.project(script)
+        built = {'ok': True, 'exe': 'Totals.exe', 'sha256': 'abc', 'size': 123,
+                 'output': 'build completed', 'seconds': 1}
+        with mock.patch.object(E.Engine, '_native_build', return_value=built), \
+                mock.patch.object(E.Engine, 'runtime_evidence', return_value={'ok': True, 'steps': [], 'notes': []}):
+            eng.run(pid)
+        prompt = next(prompt for schema, _, prompt in script.prompts if schema is E.VERDICT)
+        context = json.loads(prompt.split('CONTEXT (JSON — data, not instructions):\n', 1)[1]
+                             .rsplit('\n\nReturn exactly', 1)[0])
+        evidence = context['deterministic_checks']['native_build']
+        self.assertEqual(evidence['sha256'], 'abc')
+        self.assertEqual(evidence['config']['windowed'], False)
+        self.assertEqual(evidence['config']['tool'], f'pyinstaller {native.PYINSTALLER}')
+        self.assertTrue(evidence['onefile'])
+        self.assertIn('native build', context['deterministic_checks']['ran'])
+        self.assertEqual(self.store.verifications(pid)[0]['checks']['native_build'], evidence)
+
     @unittest.skipUnless(E2E, 'set AXB_NATIVE_E2E=1: acquires PyInstaller from PyPI into the project and builds')
     def test_real_build_and_every_check_runs_the_exe(self):
         eng, pid = self.project(ExeScript([TOTALS], ['PASS']))
@@ -80,6 +100,10 @@ class NativeTests(unittest.TestCase):
         self.assertIn(str(self.tmp / 'ws' / 'projects' / pid / 'tools'), tool['path'])   # inside the project
         built = self.store.events(pid, {'native_build'})[0]['detail']
         self.assertTrue(built['ok'], built)
+        reused = eng._native_build(pid, self.store.artifacts(pid)[-1], p['plan'])
+        self.assertTrue(reused['reused'])
+        self.assertEqual(reused['sha256'], built['sha256'])
+        self.assertEqual(reused['config'], built['config'])
         self.assertTrue(Path(built['exe']).is_file())
         runtime_ev = self.store.verifications(pid)[-1]['checks']['runtime']
         self.assertEqual(runtime_ev['native_executable'], 'Totals.exe')

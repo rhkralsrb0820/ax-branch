@@ -3,6 +3,27 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.46] - 2026-10-20
+
+### Added
+- Native build evidence is included in deterministic checks given to the verifier and retained with its verdict.
+
+### Changed
+- Reusing a hash-checked EXE retains its recorded build provenance instead of returning only a success boolean.
+
+### Fixed
+- Goal 3's verifier could run the EXE but could not see the engine's PyInstaller configuration and build hash.
+
+### Verification
+- Regression reproduced the missing native_build context on 0.1.45. Native module 7/7, including a real EXE build.
+- F146 full suite: 375/375 tests, 43 sequential audited batches; no skips, failures, unrun tests or surviving test processes.
+- All 52 source/test hashes remained unchanged during the full run.
+
+### Known issues
+- Native EXE network activity is not observed by the Python audit hook. Goal 3 v1 remains HARNESS_BLOCKED;
+  no automatic waiver, forced PASS, firewall change or project resume was made.
+- Packaging and runtime evidence is from this PC, not a clean Windows installation.
+
 ## [0.1.45] - 2026-10-19
 
 Reverts 0.1.44: its premise was wrong, and the rule would have misfired on the motivating case.

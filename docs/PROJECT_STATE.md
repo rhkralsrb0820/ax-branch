@@ -1,5 +1,24 @@
 # AX Branch — PROJECT_STATE (development)
 
+## Current development update — 2026-10-20 / 0.1.46
+
+Codex has taken over from Claude after its quota limit. Claude automatic continuation was cancelled;
+the old Goal 3 worker tree was stopped before Codex continued the same saved project.
+0.1.45 (7d2c381) and the preceding local releases are now on origin/main with Owner authorization.
+
+- Goal 1 P-20261018-279325: OWNER_REVIEW, v3; reported verification 50/50 supported claims, no unmet criteria.
+- Goal 2 P-20261019-52454a: OWNER_REVIEW, v2; independent CSV check agrees on 100 rows, 16 projects, 31 PASS, 69 FAIL.
+- Goal 3 P-20261019-32a79d: PAUSED / HARNESS_BLOCKED, v1; consistency check passed. Native build and runtime
+  checks succeeded, but verifier lacks packaging provenance and native network audit evidence.
+- 0.1.46 supplies the build provenance (including reuse) to the verifier. It does not waive the native network gap.
+  Native module: 7/7, including real EXE build. Full suite F146: 375/375 tests, 43 sequential audited batches; no skips, failures, unrun tests or surviving test processes.
+- Existing production paused/review projects remain untouched. No Owner acceptance or closure is inferred.
+
+Owner decision (2026-10-20): preserve the current evidence standard and HOLD Goal 3 until a native-network
+observation tool is ready. Do not resume or waive the gap. 0.1.46 validation is complete; publish this verified fix with the Owner-authorized GitHub push.
+Earlier sections below are historical snapshots.
+
+
 ## Current development update — 2026-10-19 / 0.1.41
 
 Source delivery and one bounded evidence-context refinement are implemented. Claude reviewed them; B1/B2 are fixed.

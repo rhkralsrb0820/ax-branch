@@ -1167,8 +1167,10 @@ class Engine:
             built = self._native_build(pid, artifact, plan)
             if built is None:
                 return                       # paused: the build tool is unavailable (environment, not product)
+            checks['native_build'] = {**built, 'config': self._native_config(plan, artifact), 'onefile': True}
+            checks['ran'] = [*checks.get('ran', []), 'native build']
             if not built['ok']:
-                checks = {**checks, 'ok': False, 'exit_code': 1, 'ran': [*checks.get('ran', []), 'native build'],
+                checks = {**checks, 'ok': False, 'exit_code': 1, 'ran': checks['ran'],
                           'output': f"native build failed: {built['output'][-1500:]}"}
         selftest_ok = checks['ok']
         checks['runtime'] = self.runtime_evidence(artifact, plan.get('runtime'), plan['artifact_filename'])
@@ -1572,8 +1574,13 @@ class Engine:
 
     def _native_build(self, pid, artifact, plan):
         """Package this version into the Owner's .exe (once per version). None = paused (tool unavailable)."""
-        if self._dist_exe(artifact) is not None:
-            return {'ok': True}
+        exe = self._dist_exe(artifact)
+        if exe is not None:
+            config = self._native_config(plan, artifact)
+            recorded = next(e['detail'] for e in reversed(self.store.events(pid, {'native_build'}))
+                            if e['detail'].get('artifact') == artifact['id'] and e['detail'].get('ok')
+                            and e['detail'].get('config') == config)
+            return {**recorded, 'reused': True}
         nb, folder = plan['native_build'], self.workspace / 'projects' / pid
         with capabilities.lease(self.store, pid, 'native build', ['native_build_pyinstaller'], kind='harness'):
             try:
