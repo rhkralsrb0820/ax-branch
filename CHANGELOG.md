@@ -3,6 +3,30 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.44] - 2026-10-19
+
+Follow-up to Goal 1 v3: a claim its cited source does not contain paused every re-verification.
+
+### Added
+- The claim gate receives the source evidence the verifier actually saw (complete or truncated per source).
+
+### Changed
+- A claim the verifier judged unverifiable against an accessible source it received in full is a product
+  finding (correct the citation or claim, or label it an estimate), so the engine reworks the report instead of
+  pausing. Truncated or unread sources and invented quotes remain harness findings.
+
+### Fixed
+- P-20261018-279325 v3: a py2exe release date absent from its cited PyPI page was classed harness, so each
+  re-verification ended HARNESS_BLOCKED without a path to correct the report.
+
+### Verification
+- C144, audited batches: test_sources + test_engine + test_executive_gap + test_release 142/142, no skips,
+  failures or test job survivors. New gate test errors on 0.1.43 and passes now. Full suite not re-run.
+
+### Known issues
+- A careless verifier "unverifiable" on a complete source now costs a rework (never a false pass).
+- Claims on sources truncated in the verifier's context can still remain harness-unverifiable.
+
 ## [0.1.43] - 2026-10-19
 
 Follow-up to Goal 1 v3 re-verification: resolving earlier gaps created new ones in other sources.

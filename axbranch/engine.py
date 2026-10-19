@@ -1245,7 +1245,7 @@ class Engine:
                                        'issue': f'Approved criteria not judged by the verifier: {unjudged}.',
                                        'evidence': 'criteria list'})
             blocking.append(result['findings'][-1])
-        for finding in self._claim_gate(pid, p, result, fetched):
+        for finding in self._claim_gate(pid, p, result, fetched, context.get('source_evidence') or []):
             result['findings'].append(finding)
             blocking.append(finding)
         passed = checks['ok'] and not blocking and not unmet
@@ -1619,8 +1619,9 @@ class Engine:
         checks['sources_evidence_file'] = str(path)
         return fetched
 
-    def _claim_gate(self, pid, p, result, fetched):
-        """Check the verifier's claim judgments against what was fetched; return the findings that gate."""
+    def _claim_gate(self, pid, p, result, fetched, shown=()):
+        """Check the verifier's claim judgments against what was fetched; return the findings that gate.
+        shown = the source_evidence the verifier actually received (complete or truncated per source)."""
         if fetched is None:
             result['claim_checks'] = []
             return []
@@ -1635,11 +1636,25 @@ class Engine:
                      'issue': f"Claim contradicted by its cited source (quote found verbatim in the fetched text): "
                               f"{c['claim'][:200]}", 'evidence': f"{c['source_url']}: {c['quote'][:300]}"}
                     for c in checked if c['checked_verdict'] == 'contradicted']
-        if counts['unverifiable']:
+        # The verifier read the WHOLE accessible source and found no support: the report's citation is unsupported,
+        # which a rework can fix (P-20261018-279325 v3: a release date absent from its cited page paused the
+        # project as HARNESS_BLOCKED on every re-verification). A truncated or unread source stays harness.
+        key = lambda url: str(url or '').rstrip('/')
+        complete = {key(u) for r in shown if r.get('accessible') and not r.get('text_truncated')
+                    for u in (r.get('url'), r.get('final_url')) if u}
+        unsupported = [c for c in checked if c['checked_verdict'] == 'unverifiable' and c.get('verdict') == 'unverifiable'
+                       and key(c.get('source_url')) in complete]
+        if unsupported:
+            findings.append({'severity': 'major', 'kind': 'product', 'criterion': -1, 'deterministic': True,
+                             'issue': 'Claims not supported by their cited source, which the verifier received in full: '
+                                      'correct the citation or the claim, or label it an estimate.',
+                             'evidence': '; '.join(f"{c['source_url']}: {c['claim'][:150]}" for c in unsupported)[:500]})
+        if counts['unverifiable'] > len(unsupported):
             findings.append({'severity': 'major', 'kind': 'harness', 'criterion': -1, 'deterministic': True,
                              'issue': 'Required factual claims remain unverifiable: quotes not found in the fetched sources '
                                       '(or from inaccessible ones); those claims are unverified.',
-                             'evidence': '; '.join(f"{c['source_url']}: {c['check']}" for c in checked if c['checked_verdict'] == 'unverifiable')[:500]})
+                             'evidence': '; '.join(f"{c['source_url']}: {c['check']}" for c in checked
+                                                   if c['checked_verdict'] == 'unverifiable' and c not in unsupported)[:500]})
         if not checked:
             findings.append({'severity': 'major', 'kind': 'harness', 'criterion': -1, 'deterministic': True,
                              'issue': 'Sources were fetched but no claim was checked against them.',
