@@ -3,6 +3,30 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.42] - 2026-10-19
+
+Follow-up to real Goal 1 v3: a reworked report's verifier saw only page navigation for six sources.
+
+### Added
+- `sources.retrieval_claims`: exact quotes from every earlier verification of the project are retrieval anchors
+  (verdicts dropped, never evidence of support); the latest verification alone sets refinement priority.
+
+### Changed
+- The verifier's evidence context and its one bounded refinement use those anchors, not only the same version's.
+
+### Fixed
+- A new version after a rework lost the earlier quote locations, so long sources were excerpted from their
+  navigation (P-20261018-279325 v3: 6 of 24 claims unverifiable although v2 had verified quotes for all six).
+- Refinement priority and quote anchors match a cited URL with or without a trailing slash, as the claim check does.
+
+### Verification
+- C142, audited batches: test_sources + test_engine + test_executive_gap + test_release 140/140, no skips,
+  failures or test job survivors. New regression test for anchors across versions. Full suite not re-run.
+
+### Known issues
+- The first verification of a project still has no anchors; retrieval then ranks by report terms (heuristic).
+- Korean claim text contributes few retrieval terms; English quotes and numbers carry the ranking.
+
 ## [0.1.41] - 2026-10-19
 
 Follow-up to real Goal 1: fetched text must contain the relevant source, not a challenge or encoded bytes.

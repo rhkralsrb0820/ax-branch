@@ -1204,14 +1204,15 @@ class Engine:
                                      for e in self.store.events(pid, {'owner_ruling'})
                                      if e['detail'].get('criterion_text') in plan['acceptance_criteria']]}
         if fetched is not None:
-            previous = [v for v in self.store.verifications(pid) if v['iteration'] == artifact['iteration']]
-            claims = previous[-1]['result'].get('claim_checks', []) if previous else []
-            context['source_evidence'] = sources.evidence_context(fetched, text, claims)
+            # Every earlier verification of this project, not only this version's: a rework keeps verified content,
+            # and its earlier exact quotes locate the passages (P-20261018-279325 v3 saw navigation only without them).
+            history = [v['result'] for v in self.store.verifications(pid)]
+            context['source_evidence'] = sources.evidence_context(fetched, text, sources.retrieval_claims(history))
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
         if fetched is not None and any(c.get('verdict') == 'unverifiable' for c in result.get('claim_checks', [])):
-            expanded = sources.evidence_context(fetched, text, result['claim_checks'])
+            expanded = sources.evidence_context(fetched, text, sources.retrieval_claims(history + [result]))
             if expanded != context['source_evidence']:
                 self.store.event(pid, 'source_context_expanded', iteration=p['iteration'],
                                  reason='one bounded refinement after unverifiable source claims',

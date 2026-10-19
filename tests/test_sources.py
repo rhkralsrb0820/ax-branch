@@ -356,6 +356,25 @@ class SourceRefinementTests(unittest.TestCase):
         self.assertTrue(all(not r['text_truncated'] for r in packed[:3]))
         self.assertTrue(packed[3]['text_truncated'])
 
+    def test_earlier_version_quotes_locate_passages_without_counting_as_judgments(self):
+        # P-20261018-279325 v3: a rework kept v2's verified content, but the new version's verifier saw only page
+        # navigation because quotes were taken from the same version's verifications only.
+        passage = 'The generated exe is about 125 MB and opening it for the first time takes about 25 seconds.'
+        text = ('navigation menu sign in explore pricing. ' * 3000) + passage + (' footer' * 200)
+        fetched = [{**SOURCE, 'url': 'https://example.com/discussion/', 'final_url': None, 'text': text},
+                   {**SOURCE, 'url': 'https://example.com/other', 'final_url': None, 'text': 'y ' * 5000}]
+        older = {'claim_checks': [{'claim': 'size', 'source_url': 'https://example.com/discussion', 'quote': passage,
+                                   'verdict': 'unverifiable', 'checked_verdict': 'unverifiable'}]}
+        latest = {'claim_checks': [{'claim': 'other', 'source_url': 'https://example.com/other', 'quote': '',
+                                    'verdict': 'unverifiable'}]}
+        claims = sources.retrieval_claims([older, latest])
+        self.assertNotIn('verdict', claims[0])
+        packed = sources.evidence_context(fetched, '보고서 PyInstaller', claims, budget=20000)
+        self.assertIn(passage, packed[0]['text'])
+        self.assertFalse(packed[1]['text_truncated'])
+        self.assertTrue(packed[0]['text_truncated'])
+        self.assertEqual(sources.retrieval_claims([]), [])
+
     def test_engine_refines_missing_evidence_once_without_rebuilding(self):
         passage = 'RarephraseX uniquely substantiates QuuxMarkerZ without borrowed terminology.'
         class AdaptiveReport(ReportScript):

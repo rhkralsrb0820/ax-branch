@@ -300,6 +300,16 @@ def excerpt(text, query, budget, quotes=()):
     return '\n[... omitted ...]\n'.join(chunks[i][1] for i in sorted(selected))[:budget]
 
 
+def retrieval_claims(results):
+    """Claims that steer retrieval: the latest verification's judgments set refinement priority; quotes from
+    earlier verifications are location anchors only (verdicts dropped, never evidence of support)."""
+    if not results:
+        return []
+    anchors = [{k: c.get(k, '') for k in ('claim', 'source_url', 'quote')}
+               for r in results[:-1] for c in r.get('claim_checks') or []]
+    return anchors + list(results[-1].get('claim_checks') or [])
+
+
 def evidence_context(fetched, report, prior_claims=(), budget=200_000):
     """Bounded evidence allocation: unresolved sources first, retain prior quote locations elsewhere.
     Full text is already stored; refinement neither changes the report nor treats earlier model judgments as proof.
@@ -309,9 +319,10 @@ def evidence_context(fetched, report, prior_claims=(), budget=200_000):
     floor = min(1000, budget // len(fetched))
     allocation = [min(len(r['text']), floor) for r in fetched]
     remaining = budget - sum(allocation)
-    unresolved = {c.get('source_url') for c in prior_claims
+    key = lambda url: str(url or '').rstrip('/')      # as check_claims matches a cited URL
+    unresolved = {key(c.get('source_url')) for c in prior_claims
                   if c.get('checked_verdict', c.get('verdict')) == 'unverifiable'}
-    priority = [i for i, r in enumerate(fetched) if r['url'] in unresolved or r.get('final_url') in unresolved]
+    priority = [i for i, r in enumerate(fetched) if key(r['url']) in unresolved or key(r.get('final_url')) in unresolved]
     for group in (priority, [i for i in range(len(fetched)) if i not in priority]):
         # Fill shorter sources first, then share the remaining budget fairly across the longer ones.
         pending = sorted(group, key=lambda i: len(fetched[i]['text']) - allocation[i])
@@ -322,7 +333,7 @@ def evidence_context(fetched, report, prior_claims=(), budget=200_000):
             remaining -= extra
     result = []
     for i, rec in enumerate(fetched):
-        related = [c for c in prior_claims if c.get('source_url') in (rec['url'], rec.get('final_url'))]
+        related = [c for c in prior_claims if key(c.get('source_url')) in (key(rec['url']), key(rec.get('final_url')))]
         query = report + ' ' + ' '.join(c.get('claim', '') for c in related)
         quotes = [c.get('quote', '') for c in related]
         result.append({k: rec.get(k) for k in ('url', 'final_url', 'status', 'accessible', 'error', 'retrieval_note')}
