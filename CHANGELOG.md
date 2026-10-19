@@ -3,6 +3,30 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.43] - 2026-10-19
+
+Follow-up to Goal 1 v3 re-verification: resolving earlier gaps created new ones in other sources.
+
+### Added
+- Regression test: unresolved sources cannot starve the other sources' evidence.
+
+### Changed
+- Evidence allocation gives previously unresolved sources at most half of the remaining budget when other
+  sources exist (they still come first and keep more than the floor).
+
+### Fixed
+- The priority group's last source took the whole remainder, so every other source fell to the 1000-character
+  floor (P-20261018-279325 v3: a 5 kB PyPI record cut at an older release; 3 of 4 new gaps were present in
+  the full fetched text).
+
+### Verification
+- C143, audited batches: test_sources + test_engine + test_executive_gap + test_release 141/141, no skips,
+  failures or test job survivors. New test fails on 0.1.42 and passes now. Full suite not re-run.
+
+### Known issues
+- Allocation is still heuristic; one claim (py2exe release date) is absent from its cited source and stays
+  unverifiable by design.
+
 ## [0.1.42] - 2026-10-19
 
 Follow-up to real Goal 1 v3: a reworked report's verifier saw only page navigation for six sources.

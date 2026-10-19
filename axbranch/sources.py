@@ -323,14 +323,20 @@ def evidence_context(fetched, report, prior_claims=(), budget=200_000):
     unresolved = {key(c.get('source_url')) for c in prior_claims
                   if c.get('checked_verdict', c.get('verdict')) == 'unverifiable'}
     priority = [i for i, r in enumerate(fetched) if key(r['url']) in unresolved or key(r.get('final_url')) in unresolved]
-    for group in (priority, [i for i in range(len(fetched)) if i not in priority]):
-        # Fill shorter sources first, then share the remaining budget fairly across the longer ones.
+    rest = [i for i in range(len(fetched)) if i not in priority]
+    # Unresolved sources come first but get at most half: filling them completely left every other source at the
+    # floor, so the next round found new gaps there (P-20261018-279325 v3: a 5 kB registry record cut to 1 kB).
+    pool = remaining // 2 if priority and rest else remaining
+    for group in (priority, rest):
+        # Fill shorter sources first, then share the pool fairly across the longer ones.
         pending = sorted(group, key=lambda i: len(fetched[i]['text']) - allocation[i])
-        while pending and remaining > 0:
+        while pending and pool > 0:
             i = pending.pop(0)
-            extra = min(len(fetched[i]['text']) - allocation[i], remaining // (len(pending) + 1))
+            extra = min(len(fetched[i]['text']) - allocation[i], pool // (len(pending) + 1))
             allocation[i] += extra
+            pool -= extra
             remaining -= extra
+        pool = remaining
     result = []
     for i, rec in enumerate(fetched):
         related = [c for c in prior_claims if key(c.get('source_url')) in (key(rec['url']), key(rec.get('final_url')))]

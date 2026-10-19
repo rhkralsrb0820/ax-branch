@@ -351,10 +351,23 @@ class SourceRefinementTests(unittest.TestCase):
                     'text': ('x ' * size)} for i, size in enumerate([30000, 15000, 7000, 80000])]
         previous = [{'source_url': f'https://example.com/{i}', 'verdict': 'unverifiable',
                      'claim': 'needed evidence', 'quote': ''} for i in range(3)]
-        packed = sources.evidence_context(fetched, 'report', previous, budget=120000)
-        self.assertLessEqual(sum(len(r['text']) for r in packed), 120000)
+        packed = sources.evidence_context(fetched, 'report', previous, budget=220000)   # their 104k fit in half
+        self.assertLessEqual(sum(len(r['text']) for r in packed), 220000)
         self.assertTrue(all(not r['text_truncated'] for r in packed[:3]))
         self.assertTrue(packed[3]['text_truncated'])
+
+    def test_unresolved_sources_cannot_starve_the_others(self):
+        # P-20261018-279325 v3: large unresolved pages took the whole budget; a 5 kB registry record kept 1 kB.
+        record = ('{"releases":{' + ''.join(f'"0.{i}.0":["2025-01-01T00:00:00Z"],' for i in range(200))
+                  + '"0.4.6":["2026-10-13T10:00:00Z"]}}')
+        fetched = [{**SOURCE, 'url': f'https://example.com/big{i}', 'final_url': None, 'text': 'x ' * 100000}
+                   for i in range(3)] + [{**SOURCE, 'url': 'https://pypi.org/project/demo/', 'final_url': None,
+                                           'text': record}]
+        previous = [{'source_url': f'https://example.com/big{i}', 'verdict': 'unverifiable'} for i in range(3)]
+        packed = sources.evidence_context(fetched, 'report', previous, budget=60000)
+        self.assertLessEqual(sum(len(r['text']) for r in packed), 60000)
+        self.assertIn('"0.4.6":["2026-10-13T10:00:00Z"]', packed[3]['text'])
+        self.assertGreater(len(packed[0]['text']), 5000)   # unresolved sources still get more than the floor
 
     def test_earlier_version_quotes_locate_passages_without_counting_as_judgments(self):
         # P-20261018-279325 v3: a rework kept v2's verified content, but the new version's verifier saw only page
