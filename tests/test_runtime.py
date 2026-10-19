@@ -584,5 +584,47 @@ srv.serve_forever()
             self.assertNotEqual(runtime.classify_step({'ok': False, 'problems': [text]}), 'product')   # Codex E4
 
 
+class BrowserFallbackTests(unittest.TestCase):
+    def render(self, first_dom, requests):
+        import json
+        from unittest import mock
+        report = dict(innerText='ready', clicks=[], details=[], offending=[], userAgent='test',
+                      href='http://127.0.0.1/', navigation=[], page_loads_in_tab=1)
+        calls = []
+        def dump(exe, port, path, selectors, needles, record, order):
+            calls.append(exe)
+            record.update(browser_requests=requests if exe == 'edge' else ['/'], browser_exit_code=0)
+            return first_dom if exe == 'edge' else ('<script type="application/json" id="axb-report">'
+                                                    + json.dumps(report) + '</script>')
+        with mock.patch.object(runtime, 'browser', return_value='edge'), \
+             mock.patch.object(runtime, 'browser_candidates', return_value=['edge', 'chrome']), \
+             mock.patch.object(runtime, '_dump_dom', side_effect=dump):
+            step = runtime._rendered(1, {'name': 'flow', 'expect_contains': ['ready']})
+        return step, calls
+
+    def test_empty_browser_without_requests_uses_one_recorded_alternative(self):
+        step, calls = self.render('', [])
+        self.assertEqual(calls, ['edge', 'chrome'])
+        self.assertTrue(step['ok'], step)
+        self.assertEqual(step['browser'], 'chrome')
+        self.assertEqual(step['browser_fallback']['from'], 'edge')
+
+    def test_browser_that_made_requests_is_not_replayed(self):
+        step, calls = self.render('', ['/save'])
+        self.assertEqual(calls, ['edge'])
+        self.assertFalse(step['ok'])
+
+    def test_timed_out_browser_with_requests_is_not_replayed(self):
+        step, calls = self.render(None, ['/save'])
+        self.assertEqual(calls, ['edge'])
+        self.assertFalse(step['ok'])
+        self.assertNotIn('browser_fallback', step)
+
+    def test_nonempty_invalid_page_is_not_hidden_by_fallback(self):
+        step, calls = self.render('<html><body>error</body></html>', [])
+        self.assertEqual(calls, ['edge'])
+        self.assertFalse(step['ok'])
+
+
 if __name__ == '__main__':
     unittest.main()

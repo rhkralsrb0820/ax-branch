@@ -122,11 +122,11 @@ class SourceGateTests(unittest.TestCase):
         self.store.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def run_report(self, claim_checks):
+    def run_report(self, claim_checks, source=None):
         script = ReportScript(claim_checks)
         eng = E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x', llm=script)
         pid = self.store.new_project('Python 배포 방법을 조사한 보고서')
-        with mock.patch.object(sources, 'fetch', return_value=dict(SOURCE)) as fetch:
+        with mock.patch.object(sources, 'fetch', return_value=dict(SOURCE) if source is None else source) as fetch:
             eng.run(pid, stop_at='REWORK')
         return pid, script, fetch
 
@@ -142,6 +142,19 @@ class SourceGateTests(unittest.TestCase):
         self.assertTrue(Path(v['checks']['sources_evidence_file']).is_file())     # what was read is kept
         verdict_prompt = next(pr for s, _, pr in script.prompts if s is E.VERDICT)
         self.assertIn('source_evidence', verdict_prompt)
+
+    def test_alternative_source_provenance_survives_gate_and_summary(self):
+        note = 'Official metadata projection; original HTML inaccessible, not read.'
+        source = {**SOURCE, 'final_url': 'https://pypi.org/pypi/demo/json', 'retrieval_note': note,
+                  'original_response': {'url': SOURCE['url'], 'status': 403, 'error': 'challenge'}}
+        pid, _, _ = self.run_report([{'claim': 'one package', 'source_url': SOURCE['url'],
+                                     'quote': GOOD_QUOTE, 'verdict': 'supported'}], source)
+        v = self.store.verifications(pid)[-1]
+        self.assertEqual(v['verdict'], 'PASS')
+        self.assertEqual(v['checks']['sources'][0]['retrieval_note'], note)
+        self.assertEqual(v['checks']['sources'][0]['original_response']['status'], 403)
+        self.assertIn(source['final_url'], v['result']['claim_checks'][0]['check'])
+        self.assertIn(note, v['result']['claim_checks'][0]['check'])
 
     def test_an_invented_quote_never_passes(self):
         pid, _, _ = self.run_report([{'claim': 'C++ 컴파일', 'source_url': SOURCE['url'],
@@ -259,6 +272,112 @@ class SourceTransportTests(unittest.TestCase):
         rec = sources.fetch('https://user:secret@example.com/', opener=opener)
         self.assertFalse(rec['accessible'])
         opener.open.assert_not_called()
+
+
+
+
+class SourceDeliveryTests(unittest.TestCase):
+    def response(self, data, encoding=''):
+        import io
+        from types import SimpleNamespace
+        response = io.BytesIO(data)
+        response.status = 200
+        response.headers = {'Content-Type': 'text/html; charset=utf-8', 'Content-Encoding': encoding}
+        with mock.patch.object(sources, '_public', return_value=(True, '')):
+            return sources.fetch('https://example.com/page', opener=SimpleNamespace(open=lambda *a, **kw: response))
+
+    def test_gzip_page_is_decoded_before_claim_verification(self):
+        import gzip
+        rec = self.response(gzip.compress(PAGE.encode()), 'gzip')
+        self.assertTrue(rec['accessible'])
+        self.assertIn('bundles a Python application', rec['text'])
+
+    def test_expanded_gzip_content_stays_bounded(self):
+        import gzip
+        with mock.patch.object(sources, 'MAX_BYTES', 1024):
+            rec = self.response(gzip.compress(b'a' * 100_000), 'gzip')
+        self.assertLessEqual(len(rec['text']), 1024)
+        self.assertIn('truncated', rec['error'])
+
+    def test_http_200_challenge_is_not_source_content(self):
+        rec = self.response(b'<html>Client Challenge A required part of this site could not load.</html>')
+        self.assertFalse(rec['accessible'])
+        self.assertIn('challenge', rec['error'])
+
+    def test_metadata_alternative_has_explicit_provenance(self):
+        original = {**SOURCE, 'url': 'https://pypi.org/project/demo/', 'accessible': False, 'error': 'challenge'}
+        api = {**SOURCE, 'url': 'https://pypi.org/pypi/demo/json', 'final_url': 'https://pypi.org/pypi/demo/json',
+               'text': json.dumps({'info': {'name': 'demo', 'version': '1.0'},
+                                   'releases': {'1.0': [{'upload_time_iso_8601': '2026-10-18T00:00:00Z'}]}})}
+        with mock.patch.object(sources, 'fetch', side_effect=[original, api]) as fetch:
+            rec = sources.fetch_with_metadata(original['url'])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(rec['url'], original['url'])
+        self.assertEqual(rec['final_url'], 'https://pypi.org/pypi/demo/json')
+        self.assertIn('original HTML inaccessible', rec['retrieval_note'])
+        self.assertEqual(rec['original_response']['error'], 'challenge')
+        self.assertIn('2026-10-18T00:00:00Z', rec['text'])
+
+    def test_metadata_failure_does_not_hide_the_original_gap(self):
+        original = {**SOURCE, 'url': 'https://pypi.org/project/demo/', 'accessible': False, 'error': 'challenge'}
+        api = {**original, 'url': 'https://pypi.org/pypi/demo/json', 'status': 404, 'error': 'HTTP 404'}
+        with mock.patch.object(sources, 'fetch', side_effect=[original, api]):
+            rec = sources.fetch_with_metadata(original['url'])
+        self.assertFalse(rec['accessible'])
+        self.assertEqual(rec['alternative_attempt']['status'], 404)
+
+    def test_whitespace_only_long_source_does_not_crash_retrieval(self):
+        self.assertEqual(sources.excerpt(' \n\t' * 5000, 'report', 1000), '')
+
+    def test_excerpt_includes_relevant_late_passage_without_inventing_text(self):
+        passage = 'Authenticode timestamp preserves the signing certificate verification evidence.'
+        text = ('navigation and general introduction. ' * 700) + passage + (' unrelated footer' * 80)
+        excerpt = sources.excerpt(text, 'Authenticode timestamp certificate verification', 4000)
+        self.assertIn(passage, excerpt)
+        self.assertLessEqual(len(excerpt), 4000)
+        checked = sources.check_claims([{'claim': 'timestamp', 'source_url': SOURCE['url'],
+                                        'quote': passage, 'verdict': 'supported'}], [{**SOURCE, 'text': text}])
+        self.assertEqual(checked[0]['checked_verdict'], 'supported')
+
+
+
+
+class SourceRefinementTests(unittest.TestCase):
+    setUp = SourceGateTests.setUp
+    tearDown = SourceGateTests.tearDown
+
+    def test_unresolved_sources_receive_full_text_within_the_total_budget(self):
+        fetched = [{**SOURCE, 'url': f'https://example.com/{i}', 'final_url': None,
+                    'text': ('x ' * size)} for i, size in enumerate([30000, 15000, 7000, 80000])]
+        previous = [{'source_url': f'https://example.com/{i}', 'verdict': 'unverifiable',
+                     'claim': 'needed evidence', 'quote': ''} for i in range(3)]
+        packed = sources.evidence_context(fetched, 'report', previous, budget=120000)
+        self.assertLessEqual(sum(len(r['text']) for r in packed), 120000)
+        self.assertTrue(all(not r['text_truncated'] for r in packed[:3]))
+        self.assertTrue(packed[3]['text_truncated'])
+
+    def test_engine_refines_missing_evidence_once_without_rebuilding(self):
+        passage = 'RarephraseX uniquely substantiates QuuxMarkerZ without borrowed terminology.'
+        class AdaptiveReport(ReportScript):
+            def __call__(self, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.VERDICT:
+                    visible = passage in prompt
+                    result['claim_checks'] = [{'claim': 'RarephraseX evidence', 'source_url': SOURCE['url'],
+                                              'quote': passage if visible else '',
+                                              'verdict': 'supported' if visible else 'unverifiable'}]
+                return result, used, notes
+        script = AdaptiveReport([])
+        script.verdicts = ['PASS', 'PASS']
+        eng = E.Engine(self.store, workspace=self.tmp/'ws', vault=self.tmp/'v', gai_db=self.tmp/'x', llm=script)
+        pid = self.store.new_project('공개 원문을 대조한 보고서')
+        source = {**SOURCE, 'text': ('mundane unrelated navigation. ' * 10000) + passage + (' footer navigation ' * 200)}
+        with mock.patch.object(sources, 'fetch', return_value=source):
+            eng.run(pid, stop_at='REWORK')
+        self.assertEqual(self.store.verifications(pid)[-1]['verdict'], 'PASS')
+        self.assertEqual(len(self.store.events(pid, {'source_context_expanded'})), 1)
+        self.assertEqual(sum(schema is E.VERDICT for schema, _, _ in script.prompts), 2)
+        self.assertEqual(len(self.store.artifacts(pid)), 1)
 
 
 if __name__ == '__main__':

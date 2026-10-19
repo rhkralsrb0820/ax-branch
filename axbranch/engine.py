@@ -1204,13 +1204,24 @@ class Engine:
                                      for e in self.store.events(pid, {'owner_ruling'})
                                      if e['detail'].get('criterion_text') in plan['acceptance_criteria']]}
         if fetched is not None:
-            budget = 100_000 // max(1, len(fetched))
-            context['source_evidence'] = [{k: r[k] for k in ('url', 'final_url', 'status', 'accessible', 'error')}
-                                          | {'text': r['text'][:budget], 'text_truncated': len(r['text']) > budget}
-                                          for r in fetched]
+            previous = [v for v in self.store.verifications(pid) if v['iteration'] == artifact['iteration']]
+            claims = previous[-1]['result'].get('claim_checks', []) if previous else []
+            context['source_evidence'] = sources.evidence_context(fetched, text, claims)
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
+        if fetched is not None and any(c.get('verdict') == 'unverifiable' for c in result.get('claim_checks', [])):
+            expanded = sources.evidence_context(fetched, text, result['claim_checks'])
+            if expanded != context['source_evidence']:
+                self.store.event(pid, 'source_context_expanded', iteration=p['iteration'],
+                                 reason='one bounded refinement after unverifiable source claims',
+                                 characters=sum(len(r['text']) for r in expanded))
+                context = {**context, 'source_evidence': expanded,
+                           'previous_claim_checks': result['claim_checks']}
+                result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM,
+                                        'Re-verify all approved criteria using the refined source excerpts. '
+                                        'Previous claim judgments are hypotheses, not facts; judge the evidence again.',
+                                        context, VERDICT, prefer=_other(producer))
         verifier_retrievals = self.last_retrievals
         if used == producer:
             self.store.event(pid, 'decision', what="verification ran on the producer's engine",
@@ -1591,12 +1602,18 @@ class Engine:
         if not urls:
             return None
         with capabilities.lease(self.store, pid, 'source check', ['source_fetch'], kind='harness'):
-            fetched = [sources.fetch(u) for u in urls]
+            fetched = []
+            for u in urls:
+                if self.cancel is not None and self.cancel.is_set():
+                    raise Rejected('Owner stopped source verification')
+                self.beat(pid, 'reading a cited public source')
+                fetched.append(sources.fetch_with_metadata(u))
         folder = self.workspace / 'projects' / pid / 'evidence'
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"sources_v{artifact['iteration']}_{len(self.store.verifications(pid)) + 1}.json"
+        path = folder / f"sources_v{artifact['iteration']}_{len(self.store.verifications(pid)) + 1}_{time.time_ns()}.json"
         path.write_text(json.dumps(fetched, ensure_ascii=False, indent=1), encoding='utf-8')
-        checks['sources'] = [{k: r[k] for k in ('url', 'final_url', 'status', 'accessible', 'bytes', 'sha256', 'error')}
+        checks['sources'] = [{k: r.get(k) for k in ('url', 'final_url', 'status', 'accessible', 'bytes', 'sha256', 'error',
+                                                     'retrieval_note', 'original_response')}
                              for r in fetched]
         checks['sources_evidence_file'] = str(path)
         return fetched

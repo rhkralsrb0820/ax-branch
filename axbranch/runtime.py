@@ -157,11 +157,18 @@ EDGE_PATHS = (r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
               r'C:\Program Files\Microsoft\Edge\Application\msedge.exe')
 
 
-def browser():
-    """A local headless browser that executes page JavaScript (Edge ships with Windows), or None."""
+def browser_candidates():
+    """Installed browsers in preference order, including Windows Chrome outside PATH."""
     import os
     import shutil
-    return next((p for p in EDGE_PATHS if os.path.isfile(p)), None) or shutil.which('msedge') or shutil.which('chrome')
+    paths = [*EDGE_PATHS, r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+             r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+             shutil.which('msedge'), shutil.which('chrome')]
+    return list(dict.fromkeys(p for p in paths if p and os.path.isfile(p)))
+
+
+def browser():
+    return next(iter(browser_candidates()), None)
 
 
 def canonical_probe(probe):
@@ -878,7 +885,8 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
         # The page script runs to the end of its virtual-time budget; when the browser does not fast-forward (load),
         # that takes real time. A fixed limit killed correct long action flows (6 actions = 95 s budget > 90 s).
         record['timeout_s'] = max(BROWSER_TIMEOUT, budget // 1000 + 30)
-        finished = proc.wait(record['timeout_s']) is not None
+        record['browser_exit_code'] = proc.wait(record['timeout_s'])
+        finished = record['browser_exit_code'] is not None
         dom, err = proc.streams()
         record.update(browser_requests=list(proxy.requests), browser_stderr_tail=err[-600:])
         return dom if finished else None
@@ -906,17 +914,24 @@ def _rendered(port, probe):
         return step
     selectors = [s.strip() for s in (probe.get('http_body') or '').split('||') if s.strip()]
     step['browser'] = exe
-    # One retry, only when the browser itself did not finish: headless Edge occasionally hangs under
-    # heavy load (seen once in a full test run; the same probe then took 3 s). A page that really
-    # hangs the browser fails both attempts; a content mismatch is never retried.
+    # Retry only before any app request: a timed-out page may already have changed application state.
     for attempt in (1, 2):
         record = {}
         dom = _dump_dom(exe, port, path, selectors, probe.get('expect_absent', []), record, probe.get('expect_contains', []))
-        if dom is not None:
+        if dom is not None or record.get('browser_requests'):
             break
+    # Retry another installed browser only before any app request: never repeat an executed user action.
+    alternative = next((p for p in browser_candidates() if p != exe), None)
+    if dom == '' and not record.get('browser_requests') and alternative:
+        step['browser_fallback'] = {'from': exe, 'reason': 'empty output before any app request', **record}
+        record = {}
+        dom = _dump_dom(alternative, port, path, selectors, probe.get('expect_absent', []), record,
+                        probe.get('expect_contains', []))
+        step['browser'] = alternative
+        attempt += 1
     step.update(attempts=attempt, **record)
     if dom is None:
-        step.update(ok=False, problems=[f"browser did not finish within {record.get('timeout_s', BROWSER_TIMEOUT)}s (2 attempts)"])
+        step.update(ok=False, problems=[f"browser did not finish within {record.get('timeout_s', BROWSER_TIMEOUT)}s ({attempt} attempts)"])
         return step
     found = re.findall(r'<script type="application/json" id="axb-report">(.*?)</script>', dom, flags=re.S)
     try:

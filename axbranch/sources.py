@@ -5,6 +5,10 @@ link-local and reserved addresses are refused, re-checked on every redirect), si
 cannot be read is recorded as such and can never support a claim. A claim counts as supported only when the
 verifier's quote is found verbatim (whitespace-normalised) in the text actually fetched from that source."""
 import hashlib
+import gzip
+import io
+import json
+import collections
 import html.parser
 import http.client
 import ipaddress
@@ -134,7 +138,7 @@ def _fetch(url, opener=None):
         if not ok:
             rec['error'] = why
             return rec
-        request = urllib.request.Request(current, headers={'User-Agent': USER_AGENT, 'Accept': 'text/html,text/plain,*/*'})
+        request = urllib.request.Request(current, headers={'User-Agent': USER_AGENT, 'Accept': 'text/html,text/plain,*/*', 'Accept-Encoding': 'identity'})
         try:
             resp = opener.open(request, timeout=TIMEOUT)
         except urllib.error.HTTPError as e:
@@ -150,6 +154,7 @@ def _fetch(url, opener=None):
             return rec
         with resp:
             data = resp.read(MAX_BYTES + 1)
+            encoding = resp.headers.get('Content-Encoding', '').lower()
             rec.update(status=resp.status, final_url=current, content_type=resp.headers.get('Content-Type', ''))
         if len(data) > MAX_BYTES:
             data = data[:MAX_BYTES]
@@ -157,14 +162,26 @@ def _fetch(url, opener=None):
         if not (rec['content_type'].lower().startswith(('text/', 'application/xhtml+xml', 'application/json'))):
             rec['error'] = 'unsupported content type (text sources only)'
             return rec
+        raw_sha = hashlib.sha256(data).hexdigest()
+        if encoding == 'gzip' or data.startswith(b'\x1f\x8b'):
+            with gzip.GzipFile(fileobj=io.BytesIO(data)) as compressed:
+                data = compressed.read(MAX_BYTES + 1)
+        elif encoding not in ('', 'identity'):
+            rec['error'] = f'unsupported content encoding: {encoding}'
+            return rec
+        if len(data) > MAX_BYTES:
+            data = data[:MAX_BYTES]
+            rec['error'] = f'decoded content truncated at {MAX_BYTES} bytes'
         charset = re.search(r'charset=([\w-]+)', rec['content_type'] or '', re.I)
         body = data.decode(charset.group(1) if charset else 'utf-8', errors='replace')
         if 'html' in (rec['content_type'] or '').lower() or body.lstrip()[:15].lower().startswith(('<!doctype', '<html')):
             parser = _Text()
             parser.feed(body)
             body = ' '.join(' '.join(parser.parts).split())
-        rec.update(bytes=len(data), sha256=hashlib.sha256(data).hexdigest(), text=body,
+        rec.update(bytes=len(data), sha256=raw_sha, text=body,
                    accessible=200 <= rec['status'] < 300 and bool(body.strip()))
+        if body.lstrip().startswith('Client Challenge') and 'A required part of this site' in body[:500]:
+            rec.update(accessible=False, error='source returned a client challenge, not its content')
         return rec
     rec['error'] = f'more than {MAX_REDIRECTS} redirects'
     return rec
@@ -176,7 +193,7 @@ def fetch(url, opener=None):
     """
     try:
         return _fetch(url, opener)
-    except (OSError, ValueError, LookupError, http.client.HTTPException) as e:
+    except (OSError, EOFError, ValueError, LookupError, http.client.HTTPException) as e:
         return {'url': url, 'final_url': None, 'status': None, 'content_type': None, 'bytes': 0,
                 'sha256': None, 'accessible': False, 'error': f'{type(e).__name__}: {e}'[:300], 'text': ''}
 
@@ -206,5 +223,109 @@ def check_claims(claims, fetched):
             checked, note = 'unverifiable', 'quote not found verbatim in the fetched source text'
         else:
             checked, note = verdict, 'quote found in the fetched source text' if verdict in ('supported', 'contradicted') else ''
+        if rec and rec.get('retrieval_note'):
+            note += f" (via {rec['final_url']}: {rec['retrieval_note']})"
         out.append({**c, 'checked_verdict': checked, 'check': note})
     return out
+
+
+def metadata_url(url):
+    """Official public PyPI metadata, a distinct source explicitly recorded, never a challenge solver."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    if parts.username is not None or parts.password is not None:
+        return None
+    match = re.fullmatch(r'/project/([A-Za-z0-9._-]+)/?', parts.path)
+    return f'https://pypi.org/pypi/{match[1]}/json' if parts.hostname == 'pypi.org' and match else None
+
+
+def fetch_with_metadata(url):
+    original = fetch(url)
+    alternative = metadata_url(url) if not original['accessible'] else None
+    if not alternative:
+        return original
+    rec = fetch(alternative)
+    if not rec['accessible']:
+        original['alternative_attempt'] = {k: rec[k] for k in ('url', 'status', 'error')}
+        return original
+    try:
+        data = json.loads(rec['text'])
+        info = data['info']
+        # Retain relevant registry metadata rather than binary download URLs and descriptions. This is
+        # a labelled JSON projection, not a claim that we read the blocked HTML page.
+        projection = {'info': {k: info.get(k) for k in ('name', 'version', 'license', 'license_expression',
+                      'requires_python', 'summary', 'project_urls')},
+                      'releases': {version: sorted({f.get('upload_time_iso_8601', '') for f in files})
+                                   for version, files in data.get('releases', {}).items()}}
+        rec['text'] = json.dumps(projection, ensure_ascii=False, separators=(',', ':'))
+        rec['retrieval_note'] = 'Official PyPI JSON metadata projection; original HTML inaccessible, not read.'
+        rec['original_response'] = {k: original[k] for k in ('url', 'status', 'error', 'sha256')}
+        rec['url'] = url
+        rec['final_url'] = alternative
+        return rec
+    except (ValueError, KeyError, TypeError, AttributeError):
+        original['alternative_attempt'] = {'url': alternative, 'error': 'invalid registry metadata'}
+        return original
+
+
+def excerpt(text, query, budget, quotes=()):
+    """Extract exact spans across a long source; rank overlap with report terms, not just the page prefix.
+    Selection is retrieval only, not proof of relevance or exhaustive coverage. Quotes still check against text.
+    """
+    if len(text) <= budget:
+        return text
+    text = ' '.join(text.split())
+    if len(text) <= budget:
+        return text
+    query = _URL.sub(' ', query)
+    tokens = lambda value: set(re.findall(r'[a-z][a-z0-9_-]{2,}|[0-9]+(?:\.[0-9]+)+|[0-9]{2,}', value.lower()))
+    terms = tokens(query)
+    chunks = [(pos, text[pos:pos + 1000]) for pos in range(0, len(text), 800)]
+    sets = [tokens(chunk) for _, chunk in chunks]
+    frequency = collections.Counter(token for group in sets for token in group)
+    ranked = sorted(range(len(chunks)), key=lambda i: sum(1 / frequency[t] for t in sets[i] & terms), reverse=True)
+    anchors = []
+    for quote in quotes:
+        pos = normalise(text).find(normalise(quote)) if quote else -1
+        if pos >= 0:
+            anchors.extend(range(pos // 800, min(len(chunks), (pos + len(quote)) // 800 + 1)))
+    ranked = list(dict.fromkeys(anchors + ranked))
+    selected, used = {0}, len(chunks[0][1])
+    for i in ranked:
+        if i not in selected and used + len(chunks[i][1]) + 25 <= budget:
+            selected.add(i)
+            used += len(chunks[i][1]) + 25
+    return '\n[... omitted ...]\n'.join(chunks[i][1] for i in sorted(selected))[:budget]
+
+
+def evidence_context(fetched, report, prior_claims=(), budget=200_000):
+    """Bounded evidence allocation: unresolved sources first, retain prior quote locations elsewhere.
+    Full text is already stored; refinement neither changes the report nor treats earlier model judgments as proof.
+    """
+    if not fetched:
+        return []
+    floor = min(1000, budget // len(fetched))
+    allocation = [min(len(r['text']), floor) for r in fetched]
+    remaining = budget - sum(allocation)
+    unresolved = {c.get('source_url') for c in prior_claims
+                  if c.get('checked_verdict', c.get('verdict')) == 'unverifiable'}
+    priority = [i for i, r in enumerate(fetched) if r['url'] in unresolved or r.get('final_url') in unresolved]
+    for group in (priority, [i for i in range(len(fetched)) if i not in priority]):
+        # Fill shorter sources first, then share the remaining budget fairly across the longer ones.
+        pending = sorted(group, key=lambda i: len(fetched[i]['text']) - allocation[i])
+        while pending and remaining > 0:
+            i = pending.pop(0)
+            extra = min(len(fetched[i]['text']) - allocation[i], remaining // (len(pending) + 1))
+            allocation[i] += extra
+            remaining -= extra
+    result = []
+    for i, rec in enumerate(fetched):
+        related = [c for c in prior_claims if c.get('source_url') in (rec['url'], rec.get('final_url'))]
+        query = report + ' ' + ' '.join(c.get('claim', '') for c in related)
+        quotes = [c.get('quote', '') for c in related]
+        result.append({k: rec.get(k) for k in ('url', 'final_url', 'status', 'accessible', 'error', 'retrieval_note')}
+                      | {'text': excerpt(rec['text'], query, allocation[i], quotes),
+                         'text_truncated': len(rec['text']) > allocation[i]})
+    return result

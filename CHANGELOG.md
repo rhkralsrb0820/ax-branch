@@ -3,6 +3,41 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.41] - 2026-10-19
+
+Follow-up to real Goal 1: fetched text must contain the relevant source, not a challenge or encoded bytes.
+
+### Added
+- Explicit official PyPI JSON metadata alternative when its cited project page cannot be read; preserve the
+  original failed response and name the actual API URL and projected metadata representation.
+
+### Changed
+- Verifier evidence uses bounded exact-span retrieval across long sources (200k characters total), with visible
+  omissions. A quotation is still checked against the retained source text, not the retrieval excerpts alone.
+- Unverifiable source claims trigger at most one evidence-context refinement and re-verification, preserving
+  the artifact and approved criteria; prior unresolved sources receive context priority.
+- A timed-out browser attempt that already made app requests is no longer retried (no replayed actions).
+- Source reads update the worker heartbeat and check Owner cancellation between URLs; evidence filenames are unique.
+
+### Fixed
+- Empty long whitespace sources no longer crash excerpt selection.
+- Empty browser output before any app request can use one installed alternative, recording both attempts.
+- A metadata alternative is labelled in the source summary and checked-claim note, not shown as the page.
+- Bounded gzip decoding for a real python.org response previously delivered as garbled bytes.
+- HTTP 200 client-challenge pages are marked inaccessible instead of counted as source content.
+- Prefix-only truncation hid relevant license/performance statements later in the fetched text.
+
+### Verification
+- Full suite before the review fixes: 370/370 (real EXE build enabled, no skips or test job survivors).
+- After the B1/B2 review fixes: test_runtime + test_sources 71/71; the full suite was not re-run.
+- Goal 1 bounded refinement reached a provider usage limit, not a pass.
+  See docs/evidence/2026-10-19-source-refinement.md.
+
+### Known issues
+- Retrieval is heuristic, not exhaustive; semantic support remains a model judgment. Public APIs can also fail.
+- Only the PyPI project-page metadata alternative is supported. No captcha solving, credentials or private access.
+- Same-PC EXE validation only; socket operation timeouts are not a total DNS/streaming deadline.
+
 ## [0.1.40] - 2026-10-18
 
 Research documents receive source evidence instead of unexecuted prose runtime probes.

@@ -1,5 +1,15 @@
 # AX Branch — PROJECT_STATE (development)
 
+## Current development update — 2026-10-19 / 0.1.41
+
+Source delivery and one bounded evidence-context refinement are implemented. Claude reviewed them; B1/B2 are fixed.
+Full suite 370/370 before the fixes; affected modules 71/71 after them.
+Evidence: [source refinement](evidence/2026-10-19-source-refinement.md).
+Goal 1 v2 is PAUSED / RateLimited after entering refinement, with no consistency problems. Research E2E has NOT passed.
+Next: Claude-led Goal 1 re-verification, then Goal 2 (CSV) and Goal 3 (EXE).
+Existing production Owner decisions remain untouched. Earlier sections are historical snapshots.
+
+
 ## Current development update — 2026-10-18 / 0.1.40
 
 Source verification for cited research documents is implemented and regression-tested.
