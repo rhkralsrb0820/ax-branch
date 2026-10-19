@@ -3,6 +3,29 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.45] - 2026-10-19
+
+Reverts 0.1.44: its premise was wrong, and the rule would have misfired on the motivating case.
+
+### Added
+- Nothing.
+
+### Changed
+- The claim gate again classes every unverifiable claim as a harness finding (0.1.43 behaviour).
+
+### Fixed
+- 0.1.44 assumed the py2exe release date was absent from its cited PyPI page; the page states "Jun 21, 2026"
+  (my search used the ISO form). The verifier had the complete page and missed the date, so 0.1.44 would have
+  turned a verifier miss into a product finding asking the producer to "correct" a correct claim.
+
+### Verification
+- Goal 1 P-20261018-279325 v3 reached OWNER_REVIEW under 0.1.44 with no unverifiable claim, so the reverted rule
+  never fired (V-20261019-d343f5: 50/50 supported). Restored code equals 0.1.43 (C143 141/141). C145 audited batches 141/141, no skips, failures or survivors.
+
+### Known issues
+- A verifier that keeps missing facts in long or differently formatted sources can still pause a correct report
+  as HARNESS_BLOCKED; re-verification is the recovery, and coverage remains a model judgment.
+
 ## [0.1.44] - 2026-10-19
 
 Follow-up to Goal 1 v3: a claim its cited source does not contain paused every re-verification.

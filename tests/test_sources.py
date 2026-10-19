@@ -181,23 +181,11 @@ class SourceGateTests(unittest.TestCase):
 
 
 class SourceFailureRegressionTests(unittest.TestCase):
-    def gate(self, claims, fetched, shown=()):
+    def gate(self, claims, fetched):
         from types import SimpleNamespace
         eng = E.Engine.__new__(E.Engine)
         eng.store = SimpleNamespace(event=lambda *a, **kw: None)
-        return eng._claim_gate('p', {'iteration': 2}, {'claim_checks': claims}, fetched, shown)
-
-    def test_claim_absent_from_a_completely_shown_source_is_a_product_finding(self):
-        # P-20261018-279325 v3: a release date absent from its cited page paused every re-verification as harness.
-        claim = {'claim': 'release date', 'source_url': SOURCE['url'] + '/', 'quote': '', 'verdict': 'unverifiable'}
-        complete = [{'url': SOURCE['url'], 'final_url': None, 'accessible': True, 'text_truncated': False}]
-        findings = self.gate([claim], [SOURCE], complete)
-        self.assertEqual([f['kind'] for f in findings], ['product'])
-        truncated = [{**complete[0], 'text_truncated': True}]
-        self.assertEqual([f['kind'] for f in self.gate([claim], [SOURCE], truncated)], ['harness'])
-        # A quote the verifier invented is the verifier's error, not the report's.
-        invented = {**claim, 'quote': 'an invented quotation absent from the original', 'verdict': 'supported'}
-        self.assertEqual([f['kind'] for f in self.gate([invented], [SOURCE], complete)], ['harness'])
+        return eng._claim_gate('p', {'iteration': 2}, {'claim_checks': claims}, fetched)
 
     def test_all_inaccessible_sources_cannot_silently_pass(self):
         blocked = {**SOURCE, 'accessible': False, 'status': 429, 'error': 'HTTP 429', 'text': ''}
