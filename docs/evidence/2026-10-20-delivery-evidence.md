@@ -28,4 +28,16 @@ yet recorded only environment key names. No record held the hash of the executab
 ## Limits
 - Same PC: Python is installed here but unreachable from the run's PATH. This is not a clean Windows machine.
 - Network activity of a native EXE is unknown (no in-process audit hook); it is never reported as zero.
-- Whether the CEO now stops re-requesting evidence is confirmed only by the real Goal 3 continuation (recorded separately).
+
+## Real Goal 3 continuation under 0.1.47
+- Feedback went through Engine.owner_review, labelled as Claude acting on the Owner's delegation.
+- The CEO classed it NO_PRODUCT_EVIDENCE and re-verified the same v1. Nothing was rebuilt.
+- Verification V-20261020-9418f4 (Codex): PASS, no unmet criteria. All 14 runtime steps ok.
+- Run copy SHA-256 = build SHA-256 = 6975be47e86bdb35214e4ebe9c67ea756d5fdf2e893e9248b66e5c20b3afb860.
+  The run's PATH was C:\WINDOWS\system32, with python_on_path [].
+- CEO: "goal yes". It made no further request for path/hash/PATH evidence, and reached OWNER_REVIEW with
+  next = owner_decision. The remaining items it names are outside this PC's capability and are disclosed:
+  - a clean Windows machine with no Python ever installed;
+  - observed network silence of the native EXE;
+  - a real Explorer double-click.
+- consistency problems: [].
