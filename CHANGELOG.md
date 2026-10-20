@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.47] - 2026-10-20
+
+The CEO's delivery judgment receives the EXE identity and run environment the verifier already had.
+
+### Added
+- Native runs record the SHA-256 of the executable copy that ran and the PATH it ran with, plus every
+  python.exe / python3.exe / py.exe / python found on that PATH (measured, expected empty).
+
+### Changed
+- `_deliver` passes the CEO the native build record (path, size, SHA-256, tool, configuration) and the run
+  record (executable hash, same_bytes_as_build, execution environment, network status, notes).
+
+### Fixed
+- P-20261019-32a79d (Goal 3): the CEO ordered the same path/size/hash and "Python absent from PATH" evidence in
+  three rounds because it saw only step names; the verifier had the build record, but no run hash or PATH value
+  existed anywhere.
+
+### Verification
+- New tests: the delivery context carries build identity and run environment (fails on 0.1.46 with KeyError);
+  the real-EXE E2E test asserts the bytes that ran equal the build and no Python is on the run's PATH.
+- Full audited suite F147 with AXB_NATIVE_E2E=1: see docs/evidence/2026-10-20-delivery-evidence.md.
+
+### Known issues
+- Same-PC evidence only: Python stays installed on this PC; it is unreachable from the run's PATH, which is not
+  a clean Windows machine. Network use by the native EXE remains unknown (no in-process audit hook).
+
 ## [0.1.46] - 2026-10-20
 
 ### Added

@@ -12,6 +12,7 @@ Modes
         run HTTP probes, require the server to survive them and still answer afterwards.
   gui   start it and require it to stay up; the window itself is not exercised (recorded).
 """
+import hashlib
 import html
 import http.client
 import http.server
@@ -300,6 +301,14 @@ def check(spec, entry_path, python, cwd, on_step=None, executable=None):
         # for it is unknown, stated rather than implied. The clean environment keeps Python off its PATH.
         base = Launch([str(Path(cwd) / executable)], {}, cwd, native=True)
         ev['native_executable'] = executable
+        # The delivery judgment asks for these (P-20261019-32a79d asked three times): which bytes ran, and that no
+        # Python was reachable on the PATH they ran with. Measured here, not asserted.
+        path = sandbox.clean_env('.')['PATH']
+        ev['native_executable_sha256'] = hashlib.sha256((Path(cwd) / executable).read_bytes()).hexdigest()
+        ev['execution_environment'] = {
+            'PATH': path, 'python_on_path': [str(Path(d) / n) for d in path.split(os.pathsep) if d
+                                             for n in ('python.exe', 'python3.exe', 'py.exe', 'python')
+                                             if (Path(d) / n).is_file()]}
         ev['notes'] = ev['notes'] + [f'every launch ran the built {executable}, not the Python source; verified on '
                                      'this PC with a clean environment, NOT on a clean Windows machine']
     else:

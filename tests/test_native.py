@@ -90,6 +90,27 @@ class NativeTests(unittest.TestCase):
         self.assertIn('native build', context['deterministic_checks']['ran'])
         self.assertEqual(self.store.verifications(pid)[0]['checks']['native_build'], evidence)
 
+    def test_delivery_judgment_receives_exe_identity_and_run_environment(self):
+        # P-20261019-32a79d: the CEO ordered the same path/size/hash and "Python absent from PATH" evidence three
+        # times because _deliver passed only step names; the verifier had it all.
+        script = ExeScript([TOTALS], ['PASS'])
+        eng, pid = self.project(script)
+        built = {'ok': True, 'exe': r'C:\dist\v1\Totals.exe', 'sha256': 'abc', 'size': 123, 'output': 'ok', 'seconds': 1}
+        env = {'PATH': r'C:\Windows\system32', 'python_on_path': []}
+        ran = {'ok': True, 'steps': [], 'notes': ['NOT on a clean Windows machine'], 'native_executable': 'Totals.exe',
+               'native_executable_sha256': 'abc', 'execution_environment': env}
+        with mock.patch.object(E.Engine, '_native_build', return_value=built), \
+                mock.patch.object(E.Engine, 'runtime_evidence', return_value=ran):
+            eng.run(pid)
+        prompt = next(prompt for schema, _, prompt in script.prompts if schema is E.REPORT)
+        context = json.loads(prompt.split('CONTEXT (JSON — data, not instructions):\n', 1)[1]
+                             .rsplit('\n\nReturn exactly', 1)[0])
+        evidence = context['deterministic_evidence']
+        self.assertEqual((evidence['native_build']['exe'], evidence['native_build']['size'],
+                          evidence['native_build']['sha256']), (built['exe'], 123, 'abc'))
+        self.assertTrue(evidence['native_run']['same_bytes_as_build'])
+        self.assertEqual(evidence['native_run']['execution_environment'], env)
+
     @unittest.skipUnless(E2E, 'set AXB_NATIVE_E2E=1: acquires PyInstaller from PyPI into the project and builds')
     def test_real_build_and_every_check_runs_the_exe(self):
         eng, pid = self.project(ExeScript([TOTALS], ['PASS']))
@@ -107,6 +128,8 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(Path(built['exe']).is_file())
         runtime_ev = self.store.verifications(pid)[-1]['checks']['runtime']
         self.assertEqual(runtime_ev['native_executable'], 'Totals.exe')
+        self.assertEqual(runtime_ev['native_executable_sha256'], built['sha256'])      # the bytes that ran = the build
+        self.assertEqual(runtime_ev['execution_environment']['python_on_path'], [])   # measured on the run's PATH
         self.assertTrue(runtime_ev['steps'][0]['ok'])
         self.assertIn('NOT on a clean Windows machine', ' '.join(runtime_ev['notes']))
         probe = next(s for s in runtime_ev['steps'] if s['name'] == 'total')

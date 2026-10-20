@@ -2257,6 +2257,18 @@ class Engine:
                 'runtime_steps': [{'name': st.get('name'), 'ok': st.get('ok'), 'problems': st.get('problems', [])[:3]}
                                   for st in runtime_ev.get('steps', [])][:30],
                 'network': {k: (runtime_ev.get('network') or {}).get(k) for k in ('external_count', 'external_unblocked')}}
+            # Delivery identity and run environment the verifier already had: without them the CEO kept ordering
+            # the same evidence again (P-20261019-32a79d: path/size/hash and "Python absent from PATH", 3 rounds).
+            built = last['checks'].get('native_build')
+            if built:
+                context['deterministic_evidence']['native_build'] = {
+                    k: built.get(k) for k in ('ok', 'exe', 'size', 'sha256', 'tool', 'config', 'reused')}
+                context['deterministic_evidence']['native_run'] = {
+                    'executable': runtime_ev.get('native_executable'), 'sha256': runtime_ev.get('native_executable_sha256'),
+                    'same_bytes_as_build': (runtime_ev.get('native_executable_sha256') == built.get('sha256')
+                                            if runtime_ev.get('native_executable_sha256') else None),
+                    'execution_environment': runtime_ev.get('execution_environment'),
+                    'network': runtime_ev.get('network'), 'notes': runtime_ev.get('notes', [])[:5]}
         if p['plan'].get('ceo_directive'):
             context['previous_ceo_directive'] = p['plan']['ceo_directive']
         report, used = self._ask(pid, 'CEO', REPORT_SYSTEM,
