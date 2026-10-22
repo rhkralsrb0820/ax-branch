@@ -1,4 +1,4 @@
-"""Upgrade Proposal: locked below the satisfaction gate; above it, a draft only — never a purchase."""
+"""Upgrade Proposal: always a draft only — never a purchase; past satisfaction does not block proposing."""
 import shutil
 import tempfile
 import unittest
@@ -26,14 +26,17 @@ class UpgradeTests(unittest.TestCase):
         pid = self.store.new_project('g')
         self.store.update(pid, state='CLOSED', satisfaction=satisfaction)
 
-    def test_locked_without_enough_satisfaction(self):
-        self.assertEqual(upgrade.propose(self.store, self.tmp / 'ws', self.llm)[0], 'locked')   # no data at all
-        self.closed(95); self.closed(80)
-        status, facts = upgrade.propose(self.store, self.tmp / 'ws', self.llm)
-        self.assertEqual((status, facts['average_satisfaction']), ('locked', 87.5))
-        self.assertEqual(self.calls, [])                       # the CEO is not even asked
+    def test_low_or_missing_satisfaction_does_not_block_a_proposal(self):
+        # Owner decision 2026-10-22: proposing is allowed; the former 90% gate blocked even drafts.
+        status, path = upgrade.propose(self.store, self.tmp / 'ws', self.llm)          # no closed project at all
+        self.assertEqual(status, 'drafted')
+        self.assertIn('n/a (no closed projects)', path.read_text(encoding='utf-8'))
+        self.closed(40)
+        status, path = upgrade.propose(self.store, self.tmp / 'ws', self.llm)
+        self.assertIn('40% over 1 closed projects', path.read_text(encoding='utf-8'))
+        self.assertEqual(len(self.calls), 2)
 
-    def test_draft_only_above_gate(self):
+    def test_draft_only_never_a_purchase(self):
         self.closed(95); self.closed(90)
         status, path = upgrade.propose(self.store, self.tmp / 'ws', self.llm)
         self.assertEqual(status, 'drafted')

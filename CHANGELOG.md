@@ -3,6 +3,30 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.49] - 2026-10-22
+
+Governance change approved by the Owner (2026-10-22): proposing a paid tool is no longer gated by satisfaction.
+
+### Added
+- Nothing new; a gate is removed.
+
+### Changed
+- `governance.SATISFACTION_GATE` and `upgrade_proposal_allowed` are removed. `upgrade.propose` always drafts from
+  measured evidence, and past satisfaction stays in the draft as evidence only.
+- Unchanged: `PAID_EXPANSION_LOCKED`. Payment, paid API, plan upgrade, publication, external contact, sensitive data,
+  governance change and tool installs remain in `REQUIRES_OWNER`.
+
+### Fixed
+- A 90% average-satisfaction gate blocked even DRAFTING a costed proposal. That conflated proposing with
+  purchasing and prevented a capability gap from becoming an Owner decision.
+
+### Verification
+- test_upgrade: drafts with no closed project and at 40% satisfaction; a draft is never a purchase.
+- test_engine: governance still lists every paying/publishing action as Owner-only. Both modules pass.
+
+### Known issues
+- A per-project capability decision record (what was tried, cost, minimal approval) is the next release.
+
 ## [0.1.48] - 2026-10-22
 
 Measure before optimising: every provider call records its prompt size and the token usage the CLI reported.

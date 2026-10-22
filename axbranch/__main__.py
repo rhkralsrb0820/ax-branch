@@ -184,13 +184,7 @@ def _dispatch(a):
     elif a.cmd == 'upgrade-proposal':
         from . import providers, upgrade
         status, result = upgrade.propose(store, engine.workspace, providers.call)
-        if status == 'locked':
-            avg = result['average_satisfaction']
-            print(f"Paid expansion is locked: average Owner satisfaction "
-                  f"{'n/a' if avg is None else f'{avg:.0f}%'} over {len(result['owner_satisfaction'])} closed projects "
-                  f"(gate {result['gate']}%). No proposal drafted; nothing purchased.")
-        else:
-            print(f'Draft written (NOT approved, nothing purchased): {result}')
+        print(f'Draft written (NOT approved, nothing purchased): {result}')
     elif a.cmd == 'finish':
         p = engine.close(a.id, a.choice, a.confirm, a.satisfaction)
         if p['state'] == 'ARCHIVE_PENDING_APPROVAL':

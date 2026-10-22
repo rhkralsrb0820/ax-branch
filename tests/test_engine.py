@@ -1047,10 +1047,11 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(len(knowledge.intel(db, 'agent orchestration design')), 1)
         shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_upgrade_gate(self):
-        self.assertFalse(gov.upgrade_proposal_allowed([]))
-        self.assertFalse(gov.upgrade_proposal_allowed([95, 80]))
-        self.assertTrue(gov.upgrade_proposal_allowed([95, 90]))
+    def test_paying_stays_owner_only_after_proposals_are_ungated(self):
+        self.assertFalse(hasattr(gov, 'SATISFACTION_GATE'))                     # proposals are not gated
+        self.assertTrue(gov.PAID_EXPANSION_LOCKED)
+        self.assertTrue({'payment', 'paid_api', 'plan_upgrade', 'publish', 'external_contact',
+                         'sensitive_data', 'governance_change'} <= gov.REQUIRES_OWNER)
 
 
 class FailureRoutingTests(unittest.TestCase):

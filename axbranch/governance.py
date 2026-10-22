@@ -7,7 +7,9 @@ STRATEGY_EVERY = 2      # every N verification FAILs the CEO must review strateg
 MAX_STAGES = 5
 PROVIDERS = ('claude', 'codex')
 PAID_EXPANSION_LOCKED = True   # no new paid API / plan / cloud / GPU / NIM
-SATISFACTION_GATE = 90         # % average Owner satisfaction that permits an Upgrade *proposal* — never a purchase
+# Owner decision 2026-10-22: researching, costing and DRAFTING a paid-tool proposal is allowed regardless of past
+# satisfaction (the former 90% gate blocked even proposals). Paying, paid execution, credentials, new sensitive
+# permissions, publication and external contact still require the Owner (REQUIRES_OWNER below).
 CHECK_TIMEOUT = 120            # seconds a generated program may run during verification
 
 # Actions only the Owner may authorize. The CEO's response schemas cannot express
@@ -23,8 +25,3 @@ SUMMARY = ('Governance (fixed; the CEO cannot change it): no payments, paid APIs
            'and any new external connection a delivered program would make need the Owner. Verification '
            'standards never drop after repeated failure.')
 
-
-def upgrade_proposal_allowed(satisfactions):
-    """True only when the Owner's average satisfaction meets the gate. Even then the
-    CEO may only *propose*; purchase still needs explicit Owner approval."""
-    return bool(satisfactions) and sum(satisfactions) / len(satisfactions) >= SATISFACTION_GATE
