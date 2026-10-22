@@ -87,5 +87,23 @@ class AuthorityTests(unittest.TestCase):
         self.assertIsNone(providers.authority('gemini', False))                   # unknown provider: fail closed
 
 
+class UsageTests(unittest.TestCase):
+    """Shapes captured from the real CLIs on 2026-10-22 (claude result envelope, codex exec --json)."""
+
+    def test_reported_usage_is_read_and_missing_usage_stays_unknown(self):
+        envelope = {'type': 'result', 'total_cost_usd': 0.020204, 'usage': {
+            'input_tokens': 2, 'cache_creation_input_tokens': 2392, 'cache_read_input_tokens': 0, 'output_tokens': 53}}
+        self.assertEqual(providers._claude_usage(envelope)['cache_creation_input_tokens'], 2392)
+        self.assertEqual(providers._claude_usage(envelope)['cli_reported_cost_usd'], 0.020204)
+        events = '{"type":"thread.started"}\nnot json\n{"type":"turn.completed","usage":{"input_tokens":11995,' \
+                 '"cached_input_tokens":0,"output_tokens":15,"reasoning_output_tokens":0}}\n'
+        self.assertEqual(providers._codex_usage(events)['input_tokens'], 11995)
+        self.assertEqual(providers._codex_usage(events)['source'], 'codex turn.completed')
+        self.assertIsNone(providers._claude_usage({'type': 'result'}))
+        self.assertIsNone(providers._codex_usage('{"type":"turn.completed"}'))
+        providers.clear_usage()
+        self.assertIsNone(providers.last_usage())
+
+
 if __name__ == '__main__':
     unittest.main()

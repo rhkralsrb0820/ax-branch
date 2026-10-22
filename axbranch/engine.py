@@ -754,6 +754,7 @@ class Engine:
         activity.parent.mkdir(parents=True, exist_ok=True)
         tick({'provider': prefer, 'elapsed': 0, 'output_bytes': 0, 'idle': 0})
         prompt = _prompt(system, task, context)
+        providers.clear_usage()            # never attribute an earlier turn's usage to this one
         try:
             result, used, notes = self.llm(prompt, schema, prefer=prefer, web=web,
                                            cancel=self.cancel, on_tick=tick)
@@ -770,6 +771,7 @@ class Engine:
         call = self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started),
                                 capability_grant=context['capability_grant'],
                                 prompt_sha256=hashlib.sha256(prompt.encode('utf-8')).hexdigest(),
+                                prompt_chars=len(prompt), tokens=providers.last_usage() or 'UNKNOWN',
                                 authority=providers.authority(used, web) or 'UNKNOWN')
         self.beat(pid, f'call done {who} ({used})')
         if audited:

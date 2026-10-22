@@ -508,6 +508,16 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(starts and all('who' in e['detail'] for e in starts))
         self.assertTrue(all('seconds' in e['detail'] for e in self.store.events(pid, {'call'})))
 
+    def test_call_records_prompt_size_and_unknown_tokens_without_reported_usage(self):
+        from axbranch import providers
+        providers._usage.value = {'source': 'an earlier real turn', 'input_tokens': 999}   # stale: must not leak
+        eng = self.engine(Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        calls = [e['detail'] for e in self.store.events(pid, {'call'})]
+        self.assertTrue(calls)
+        self.assertTrue(all(c['tokens'] == 'UNKNOWN' and c['prompt_chars'] > 0 for c in calls))
+
     def test_works_plus_plain_language_request_reopens_without_classification(self):
         script = Script([LAUNCHABLE, GOOD, LAUNCHABLE], ['PASS', 'PASS', 'PASS'], probe_disposition='PRODUCT_DEFECT')
         eng = self.engine(script)

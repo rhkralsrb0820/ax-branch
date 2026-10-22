@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -160,6 +161,42 @@ def _claude_result(stream):
     return stream.strip()[-4000:]
 
 
+_usage = threading.local()
+
+
+def clear_usage():
+    _usage.value = None
+
+
+def last_usage():
+    """Token usage the CLI itself reported for this thread's last successful turn; None = not reported (UNKNOWN).
+    Never estimated from time or text length."""
+    return getattr(_usage, 'value', None)
+
+
+def _claude_usage(envelope):
+    u = envelope.get('usage')
+    if not isinstance(u, dict):
+        return None
+    return {'source': 'claude result envelope', 'cli_reported_cost_usd': envelope.get('total_cost_usd'),
+            **{k: u.get(k) for k in ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens',
+                                     'output_tokens')}}
+
+
+def _codex_usage(events):
+    for line in reversed(events.strip().splitlines()):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        u = event.get('usage') if isinstance(event, dict) else None
+        if isinstance(u, dict):
+            return {'source': f"codex {event.get('type', 'event')}",
+                    **{k: u.get(k) for k in ('input_tokens', 'cached_input_tokens', 'output_tokens',
+                                             'reasoning_output_tokens')}}
+    return None
+
+
 def run_claude(prompt, schema, web=False, cancel=None, on_tick=None):
     binary = shutil.which('claude')
     tools = 'WebSearch,WebFetch' if web else ''
@@ -192,6 +229,7 @@ def run_claude(prompt, schema, web=False, cancel=None, on_tick=None):
                 result = json.loads(envelope.get('result') or '')
             except json.JSONDecodeError:
                 raise Rejected('Claude Code reply is not one JSON object.') from None
+        _usage.value = _claude_usage(envelope)
         return result
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -217,6 +255,7 @@ def run_codex(prompt, schema, web=False, cancel=None, on_tick=None):
             raise Rejected('Codex reply is not one JSON object.') from None
         if not isinstance(result, dict):
             raise Rejected('Codex reply must be a JSON object.')
+        _usage.value = _codex_usage(events)
         return result
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

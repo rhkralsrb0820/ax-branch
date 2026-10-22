@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.48] - 2026-10-22
+
+Measure before optimising: every provider call records its prompt size and the token usage the CLI reported.
+
+### Added
+- `call` events carry `prompt_chars` and `tokens`. tokens holds the usage block the CLI itself returned (Claude
+  result envelope: input/cache/output tokens and its own cost figure; Codex `turn.completed`: input/cached/
+  output/reasoning tokens). It is `UNKNOWN` when nothing was reported, and is never estimated from time or length.
+
+### Changed
+- Usage is kept per thread and cleared before each call, so one turn's usage is never attributed to another.
+
+### Fixed
+- Token consumption was unmeasurable: calls recorded only duration and a prompt hash, though both CLIs report
+  usage (checked live 2026-10-22: a trivial Codex turn reported 11,995 input tokens).
+
+### Verification
+- New tests: usage parsing from the captured real CLI shapes; missing usage stays None; an engine call with
+  a scripted provider records UNKNOWN even after a stale earlier value.
+- C148 audited batches (engine, provider_tree, executive_gap, sources, native, decision_trace, release): 172/173,
+  the one skip being the real-EXE E2E (needs AXB_NATIVE_E2E=1); no failures or test job survivors.
+
+### Known issues
+- The Claude figure `cli_reported_cost_usd` is the CLI's own number, not a subscription charge.
+- No reduction is claimed yet; this release only makes it measurable.
+
 ## [0.1.47] - 2026-10-20
 
 The CEO's delivery judgment receives the EXE identity and run environment the verifier already had.
