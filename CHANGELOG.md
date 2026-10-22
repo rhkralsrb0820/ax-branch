@@ -3,6 +3,39 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.50] - 2026-10-22
+
+Re-verification of the same artifact no longer re-sends sources whose supported claims are unchanged.
+
+### Added
+- `verification_basis`: a hash of the acceptance criteria, the verifier rules and the runtime spec, stored with
+  every verification.
+- `sources.settle`: for the same artifact and basis, a formerly supported claim is reused only if its source is
+  readable now with byte-identical raw content and the quote is still verbatim. Every other formerly supported
+  claim must be rechecked (source changed, unreadable, or quote gone).
+- `sources.merge_reused`: reused claims are kept labelled `reused_from`. A recheck claim the verifier does not judge
+  again becomes unverifiable, so an earlier PASS is never carried over silently. Event `verification_reuse`.
+
+### Changed
+- Settled sources get only their quote passages in the verifier context. The verifier is told which claims were
+  reused and which to recheck. A new provider call is never assumed to remember anything.
+
+### Fixed
+- Every re-verification re-sent the full report and evidence (Goal 1: 16 verifier calls).
+
+### Verification
+- Tests: unchanged claim reused and labelled; changed source / unreadable source / missing quote force a recheck and
+  can never yield PASS; changed criteria mean full verification. test_sources 35/35.
+- Fixed task (measure_reverify.py, same report with 3 true claims + 1 false, Codex verifier, one run each):
+  - re-verification prompt 104,828 -> 16,780 chars; input tokens 34,591 -> 15,451 (cached 0 both);
+    output 732 -> 478; 21 s -> 17 s;
+  - the false claim was caught both times, and the 3 true claims were reused with labels.
+  This is one observation, not a general savings rate.
+
+### Known issues
+- Reuse requires the same artifact. A rework that changes the report triggers full verification, since claims
+  are not mapped to edited passages.
+
 ## [0.1.49] - 2026-10-22
 
 Governance change approved by the Owner (2026-10-22): proposing a paid tool is no longer gated by satisfaction.

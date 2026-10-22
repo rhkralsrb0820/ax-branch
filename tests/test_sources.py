@@ -342,6 +342,78 @@ class SourceDeliveryTests(unittest.TestCase):
 
 
 
+class ClaimSequence(ReportScript):
+    """One claim_checks list per verifier call, in order."""
+    def __init__(self, rounds):
+        super().__init__([])
+        self.verdicts, self.rounds = ['PASS'] * 6, list(rounds)
+
+    def __call__(self, prompt, schema, *args, **kw):
+        if schema is E.VERDICT:
+            self.claim_checks = self.rounds.pop(0)
+        return super().__call__(prompt, schema, *args, **kw)
+
+
+class ReverificationReuseTests(unittest.TestCase):
+    setUp = SourceGateTests.setUp
+    tearDown = SourceGateTests.tearDown
+    GOOD = {'claim': '하나의 패키지', 'source_url': SOURCE['url'], 'quote': GOOD_QUOTE, 'verdict': 'supported'}
+    GAP = {'claim': '다른 주장', 'source_url': SOURCE['url'], 'quote': '', 'verdict': 'unverifiable'}
+
+    def reverify(self, second_round, second_source=None, change_criteria=False):
+        """Verify (one supported + one unverifiable claim -> HARNESS_BLOCKED), then re-verify the SAME artifact."""
+        script = ClaimSequence([[self.GOOD, self.GAP], second_round])
+        eng = E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x', llm=script)
+        pid = self.store.new_project('Python 배포 방법을 조사한 보고서')
+        with mock.patch.object(sources, 'fetch', return_value=dict(SOURCE)):
+            eng.run(pid, stop_at='REWORK')
+        self.assertIn('HARNESS_BLOCKED', self.store.project(pid)['pause_reason'])
+        if change_criteria:
+            p = self.store.project(pid)
+            self.store.update(pid, plan={**p['plan'], 'acceptance_criteria': p['plan']['acceptance_criteria'] + ['new']})
+        self.store.resume(pid, by='test')
+        with mock.patch.object(sources, 'fetch', return_value=dict(second_source or SOURCE)):
+            eng.run(pid, stop_at='REWORK')
+        prompts = [pr for s, _, pr in script.prompts if s is E.VERDICT]
+        return pid, self.store.verifications(pid), prompts[-1]
+
+    def test_unchanged_supported_claim_is_reused_labelled_and_rechecked(self):
+        rejudged = {**self.GAP, 'quote': 'PyInstaller bundles a Python application', 'verdict': 'supported'}
+        pid, (first, second), prompt = self.reverify([rejudged])
+        self.assertIn('"previously_verified_claims"', prompt)
+        reused = [c for c in second['result']['claim_checks'] if c.get('reused_from')]
+        self.assertEqual([(c['claim'], c['reused_from'], c['checked_verdict']) for c in reused],
+                         [('하나의 패키지', first['id'], 'supported')])                 # distinguishable from new
+        self.assertEqual(second['verdict'], 'PASS', second['result']['findings'])
+        self.assertEqual(self.store.events(pid, {'verification_reuse'})[-1]['detail']['reused'], 1)
+
+    def test_changed_source_is_never_carried_over_as_a_pass(self):
+        changed = {**SOURCE, 'sha256': 'e' * 64}                       # same quote, different bytes
+        pid, (first, second), prompt = self.reverify([], second_source=changed)   # the verifier judges nothing
+        self.assertIn('"claims_to_recheck"', prompt)
+        self.assertNotIn('reused_from', json.dumps(second['result']['claim_checks']))
+        rechecked = [c for c in second['result']['claim_checks'] if c.get('recheck_of')]
+        self.assertEqual([(c['checked_verdict'], c['recheck_reason']) for c in rechecked],
+                         [('unverifiable', 'source content changed since that verification')])
+        self.assertEqual(second['verdict'], 'FAIL')
+
+    def test_unreadable_source_or_missing_quote_forces_a_recheck(self):
+        gone = {**SOURCE, 'accessible': False, 'status': 503, 'error': 'HTTP 503', 'text': ''}
+        _, (_, second), _ = self.reverify([], second_source=gone)
+        self.assertEqual(second['verdict'], 'FAIL')
+        reused, recheck = sources.settle(
+            {'id': 'V-1', 'checks': {'sources': [SOURCE]}, 'result': {'claim_checks': [
+                {**self.GOOD, 'checked_verdict': 'supported'}, {**self.GAP, 'checked_verdict': 'unverifiable'}]}},
+            [{**SOURCE, 'text': 'the page was rewritten'}])
+        self.assertEqual((reused, [c['why'] for c in recheck]), ([], ['quote no longer found verbatim']))
+
+    def test_changed_criteria_means_full_verification(self):
+        _, _, prompt = self.reverify([self.GOOD, {**self.GAP, 'quote': GOOD_QUOTE, 'verdict': 'supported'}],
+                                     change_criteria=True)
+        self.assertNotIn('"previously_verified_claims"', prompt)                  # the context key, not the rules text
+        self.assertEqual(sources.settle(None, [SOURCE]), ([], []))
+
+
 class SourceRefinementTests(unittest.TestCase):
     setUp = SourceGateTests.setUp
     tearDown = SourceGateTests.tearDown

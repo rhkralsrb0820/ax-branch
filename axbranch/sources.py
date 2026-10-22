@@ -310,20 +310,80 @@ def retrieval_claims(results):
     return anchors + list(results[-1].get('claim_checks') or [])
 
 
-def evidence_context(fetched, report, prior_claims=(), budget=200_000):
+def _key(url):
+    return str(url or '').rstrip('/')                  # as check_claims matches a cited URL
+
+
+def settle(prior, fetched):
+    """Which earlier judgments a re-verification may reuse. prior = the latest verification of the SAME artifact
+    under the SAME verification basis (criteria, verifier rules, runtime spec), or None.
+    reused: claims judged supported then whose source is accessible now with byte-identical raw content and whose
+    quote is still verbatim in it. recheck: the other formerly supported claims (source changed, unreadable, quote
+    gone) - they must be judged again and can never silently disappear (see merge_reused)."""
+    if not prior:
+        return [], []
+    before = {}
+    for s in prior['checks'].get('sources') or []:
+        for u in (s.get('url'), s.get('final_url')):
+            if u:
+                before[_key(u)] = s.get('sha256')
+    now = {}
+    for r in fetched:
+        for u in (r['url'], r.get('final_url')):
+            if u:
+                now[_key(u)] = r
+    reused, recheck = [], []
+    for c in prior['result'].get('claim_checks') or []:
+        if c.get('checked_verdict') != 'supported':
+            continue
+        url, quote = _key(c.get('source_url')), normalise(c.get('quote', ''))
+        rec = now.get(url)
+        base = {'claim': c.get('claim', ''), 'source_url': c.get('source_url', ''), 'quote': c.get('quote', ''),
+                'reused_from': prior['id']}
+        if rec is None or not rec['accessible']:
+            recheck.append({**base, 'why': 'source not readable now'})
+        elif not rec.get('sha256') or before.get(url) != rec['sha256']:
+            recheck.append({**base, 'why': 'source content changed since that verification'})
+        elif len(quote) < MIN_QUOTE or quote not in normalise(rec['text']):
+            recheck.append({**base, 'why': 'quote no longer found verbatim'})
+        else:
+            reused.append(base)
+    return reused, recheck
+
+
+def merge_reused(claims, reused, recheck):
+    """The verifier's new claim checks plus the reused ones (kept labelled reused_from). A claim to recheck that the
+    verifier did not judge again becomes unverifiable: an earlier PASS is never carried over silently."""
+    out = list(claims)
+    new_quotes = {(_key(c.get('source_url')), normalise(c.get('quote', ''))) for c in claims}
+    out += [{**c, 'verdict': 'supported'} for c in reused
+            if (_key(c['source_url']), normalise(c['quote'])) not in new_quotes]
+    judged = {(_key(c.get('source_url')), normalise(c.get('claim', ''))) for c in claims}
+    out += [{'claim': c['claim'], 'source_url': c['source_url'], 'quote': '', 'verdict': 'unverifiable',
+             'recheck_of': c['reused_from'], 'recheck_reason': c['why']} for c in recheck
+            if (_key(c['source_url']), normalise(c['claim'])) not in judged]
+    return out
+
+
+def evidence_context(fetched, report, prior_claims=(), budget=200_000, settled=()):
     """Bounded evidence allocation: unresolved sources first, retain prior quote locations elsewhere.
+    settled = sources whose every earlier claim is reused unchanged: they get only their quote passages.
     Full text is already stored; refinement neither changes the report nor treats earlier model judgments as proof.
     """
     if not fetched:
         return []
     floor = min(1000, budget // len(fetched))
-    allocation = [min(len(r['text']), floor) for r in fetched]
+    key = _key
+    settled = {key(u) for u in settled}
+    quotes_of = lambda r: sum(1 for c in prior_claims if key(c.get('source_url')) in (key(r['url']), key(r.get('final_url'))))
+    is_settled = lambda r: key(r['url']) in settled or key(r.get('final_url')) in settled
+    allocation = [min(len(r['text']), floor + 1100 * quotes_of(r) if is_settled(r) else floor) for r in fetched]
     remaining = budget - sum(allocation)
-    key = lambda url: str(url or '').rstrip('/')      # as check_claims matches a cited URL
     unresolved = {key(c.get('source_url')) for c in prior_claims
                   if c.get('checked_verdict', c.get('verdict')) == 'unverifiable'}
-    priority = [i for i, r in enumerate(fetched) if key(r['url']) in unresolved or key(r.get('final_url')) in unresolved]
-    rest = [i for i in range(len(fetched)) if i not in priority]
+    open_ = [i for i, r in enumerate(fetched) if not is_settled(r)]
+    priority = [i for i in open_ if key(fetched[i]['url']) in unresolved or key(fetched[i].get('final_url')) in unresolved]
+    rest = [i for i in open_ if i not in priority]
     # Unresolved sources come first but get at most half: filling them completely left every other source at the
     # floor, so the next round found new gaps there (P-20261018-279325 v3: a 5 kB registry record cut to 1 kB).
     pool = remaining // 2 if priority and rest else remaining

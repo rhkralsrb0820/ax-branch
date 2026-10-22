@@ -1,0 +1,88 @@
+{
+ "tag": "B149",
+ "version": "0.1.49",
+ "verifier": "codex",
+ "seconds": 45,
+ "verification_calls": [
+  {
+   "provider": "codex",
+   "seconds": 21,
+   "prompt_chars": 103746,
+   "tokens": {
+    "source": "codex turn.completed",
+    "input_tokens": 35181,
+    "cached_input_tokens": 0,
+    "output_tokens": 722,
+    "reasoning_output_tokens": 33
+   }
+  },
+  {
+   "provider": "codex",
+   "seconds": 21,
+   "prompt_chars": 104828,
+   "tokens": {
+    "source": "codex turn.completed",
+    "input_tokens": 34591,
+    "cached_input_tokens": 0,
+    "output_tokens": 732,
+    "reasoning_output_tokens": 40
+   }
+  }
+ ],
+ "verifications": [
+  {
+   "id": "V-20261022-cd0bd8",
+   "verdict": "FAIL",
+   "false_claim_caught": true,
+   "claims": [
+    [
+     "https://docs.python.org/3/library/json.html",
+     "supported",
+     null
+    ],
+    [
+     "https://docs.python.org/3/library/csv.html",
+     "supported",
+     null
+    ],
+    [
+     "https://peps.python.org/pep-0008/",
+     "supported",
+     null
+    ],
+    [
+     "https://peps.python.org/pep-0008/",
+     "contradicted",
+     null
+    ]
+   ]
+  },
+  {
+   "id": "V-20261022-e0fb81",
+   "verdict": "FAIL",
+   "false_claim_caught": true,
+   "claims": [
+    [
+     "https://docs.python.org/3/library/json.html",
+     "supported",
+     null
+    ],
+    [
+     "https://docs.python.org/3/library/csv.html",
+     "supported",
+     null
+    ],
+    [
+     "https://peps.python.org/pep-0008/",
+     "supported",
+     null
+    ],
+    [
+     "https://peps.python.org/pep-0008/",
+     "contradicted",
+     null
+    ]
+   ]
+  }
+ ]
+}
