@@ -16,6 +16,7 @@ PINS = ('torch==2.14.1+cpu', 'transformers==5.20.2', 'peft==0.21.2', 'accelerate
 TORCH_INDEX = 'https://download.pytorch.org/whl/cpu'
 ENV_TIMEOUT = 1800        # seconds to create the environment (large wheels)
 PROBE_SECONDS = 300       # the feasibility run must finish well inside this
+JOB_SECONDS = 1800        # one training run of an artifact's train.py (CPU); longer work needs a GPU decision
 
 # A real LoRA update on a tiny randomly initialised model (no download): base weights stay frozen, the adapter
 # changes, and the loss moves. It proves the toolchain trains on this CPU and measures its speed.

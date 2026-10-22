@@ -3,6 +3,42 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.52] - 2026-10-22
+
+The training RUN harness: a resolved model_training capability actually trains, once per version.
+
+### Added
+- `Engine._training_run`: the bundle's `train.py` runs in the pinned training stack (contained, `JOB_SECONDS`=1800,
+  harness lease "Model training"). Everything under `./outputs` is kept in `projects/<id>/training/<key>`, and the
+  record (event `training_run`, `checks['training']`) holds exit, seconds, file sizes and SHA-256s, and
+  `metrics.json`.
+- A completed run for the same artifact bytes, pins and Owner inputs is reused (`reused: true`), never retrained.
+  `AXB_DONE.json` is written last.
+
+### Changed
+- For a training project, the deterministic self-test runs on the training stack, and runtime checks run with that
+  stack and the kept `./outputs` (evaluation and app load the trained files).
+- CEO rules: train/dev/test split, tune on dev only. The final test evaluation is a runtime check fixed in the plan,
+  never a number the training script reports; downloads are network_access; `--self-test` must not need outputs.
+
+### Fixed
+- Nothing previously ran training: the capability could be attached, but no harness executed a job.
+
+### Verification
+- test_training (a real contained run of a small train.py; only the stack is stood in by this interpreter):
+  - outputs are kept with hashes and metrics;
+  - runtime checks load ./outputs;
+  - the second request reuses the run (no new lease);
+  - a failed run is a deterministic FAIL, never marked done;
+  - a missing train.py is not a success.
+- C152 audited batches (training, capabilities, engine, bundle, inputs, native, executive_gap, edits, release):
+  151/152, the one skip being the real-EXE E2E (needs AXB_NATIVE_E2E=1); no failures or test job survivors.
+
+### Known issues
+- No OS network isolation: a training script that downloads without declaring network_access is not technically
+  blocked (policy, not enforcement).
+- CPU only; long training needs the cloud-GPU decision.
+
 ## [0.1.51] - 2026-10-22
 
 A capability gap becomes tried options and a recorded decision; model training is the first resolvable one.

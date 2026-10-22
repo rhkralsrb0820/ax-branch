@@ -18,7 +18,7 @@ import traceback
 from pathlib import Path
 
 from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, kindex, knowledge, library, metrics, native,
-               permissions, providers, runtime, sandbox, sources, supervisor)
+               permissions, providers, runtime, sandbox, sources, supervisor, training)
 from . import __version__
 from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
 
@@ -183,6 +183,13 @@ Rules:
   web_research enables the existing public research adapter; it never authorizes delivered-program connections.
   Model weight training (LoRA of small public models): declare model_training on the stage that needs it; the
   engine tries free options with a real small run and records the decision (Owner approval if none works).
+  When attached, the deliverable is a bundle with train.py: the engine runs it ONCE per version in a pinned CPU stack
+  (torch, transformers, peft, accelerate, scikit-learn; no GPU; time-limited) from the bundle folder, and it must write
+  everything it produces (adapter weights, label map, metrics.json with dev-split results) under ./outputs/. Runtime
+  checks then run in a folder containing those ./outputs with the same stack, so the evaluation command and the app
+  load them. Split train/dev/test; tune on dev only; the final test-split evaluation is a runtime check fixed in the
+  plan, never a number the training script reports. Downloads (public datasets/models) are network_access.
+  The entry's --self-test runs on the same stack BEFORE training: unit checks only, never needing ./outputs.
   Do not pretend an unsupported capability (e.g. GUI interaction) is available: declare its
   name so the engine records the gap and stops before production. Installed tools are not execution adapters.
   Harness capabilities belong to runtime, never to production agents. Limits in the inventory are binding.
@@ -1102,11 +1109,12 @@ class Engine:
             self.store.add_artifact(pid, it, path, sha, plan['artifact_kind'], agent, manifest)
             self.store.set_state(pid, 'VERIFYING', reason=f'artifact v{it} built')
 
-    def checks(self, path, kind, entry=None, rejected=()):
+    def checks(self, path, kind, entry=None, rejected=(), python=None):
         """Deterministic evidence. A model's opinion can never override these.
-        path: the file, or for a bundle its folder (entry = relative path of the file to run)."""
+        path: the file, or for a bundle its folder (entry = relative path of the file to run).
+        python: the interpreter for the self-test (a training project's own stack), else this one."""
         if kind == 'bundle':
-            return self._bundle_checks(Path(path), entry, rejected)
+            return self._bundle_checks(Path(path), entry, rejected, python)
         text = Path(path).read_text(encoding='utf-8')
         if kind != 'python':
             ok = len(text.strip()) >= 200
@@ -1132,7 +1140,7 @@ class Engine:
             return {'ok': False, 'ran': ran, 'output': f'self-test timed out ({gov.CHECK_TIMEOUT}s); process tree killed'}
         return {'ok': code == 0, 'ran': ran, 'exit_code': code, 'output': output[-3000:]}
 
-    def _bundle_checks(self, folder, entry, rejected):
+    def _bundle_checks(self, folder, entry, rejected, python=None):
         ran = ['paths']
         if rejected:
             return {'ok': False, 'ran': ran, 'output': 'refused files: ' + '; '.join(rejected)}
@@ -1144,7 +1152,7 @@ class Engine:
                 compile(py.read_text(encoding='utf-8'), str(py), 'exec')
             except (SyntaxError, UnicodeDecodeError) as e:
                 return {'ok': False, 'ran': ran, 'output': f'{py.relative_to(folder).as_posix()}: {e}'}
-        python = sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
+        python = python or (sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py')))
         if not python:
             return {'ok': False, 'ran': ran, 'output': 'no Python interpreter to run the self-test'}
         ran.append('self-test')
@@ -1191,9 +1199,27 @@ class Engine:
         self.store.trace_action(pid, 'verify', f"verify:{artifact['id']}:{len(done)}", artifact=artifact['id'])
         text = artifacts.text_of(artifact)
         rejected = json.loads(artifact['manifest'])['rejected'] if artifact.get('manifest') else ()
+        python = None
+        if 'model_training' in plan.get('harness_capabilities', ()):
+            # The code imports the training stack (torch...): its self-test runs on that stack, not this interpreter.
+            try:
+                python = training.ensure_env(self.workspace / 'projects' / pid)['python']
+            except native.ToolUnavailable as e:
+                self.store.pause(pid, f'INFRA_FAILED: training stack unavailable: {e}'[:400], resume_state='VERIFYING')
+                return
         with capabilities.lease(self.store, pid, 'deterministic checks', ['python_checks']
                                 if artifact['kind'] != 'markdown' else [], kind='harness'):
-            checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected)
+            checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected, python)
+        if checks['ok'] and 'model_training' in plan.get('harness_capabilities', ()):
+            job = self._training_run(pid, artifact)
+            if job is None:
+                return                       # paused: the training stack is unavailable (environment, not product)
+            checks['training'] = job
+            checks['ran'] = [*checks.get('ran', []), 'model training']
+            if not job['ok']:
+                checks['ok'] = False
+                checks['output'] = (checks.get('output', '') + '\nMODEL TRAINING FAILED: '
+                                    + (job.get('why') or job.get('output_tail', '')))[-3000:]
         if checks['ok'] and (plan.get('native_build') or {}).get('tool') == 'pyinstaller':
             built = self._native_build(pid, artifact, plan)
             if built is None:
@@ -2054,6 +2080,68 @@ class Engine:
     def _python(self):
         return sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))
 
+    def _training_run(self, pid, artifact):
+        """Run the bundle's train.py once in the pinned training stack (contained, time-limited). Everything it writes
+        under ./outputs is kept per project. A completed run for the same artifact bytes, pins and Owner inputs is
+        reused, never retrained (an interrupted project resumes without repeating finished training)."""
+        key = hashlib.sha256(json.dumps([[rel, sha] for rel, _, sha in artifacts.files_of(artifact)], ensure_ascii=False)
+                             .encode('utf-8') + ' '.join(training.PINS).encode('utf-8')
+                             + json.dumps([r.get('sha256') for r in self._input_records(pid)]).encode('utf-8')).hexdigest()
+        out = self.workspace / 'projects' / pid / 'training' / key[:16]
+        done = out / 'AXB_DONE.json'
+        if done.is_file():
+            rec = {**json.loads(done.read_text(encoding='utf-8')), 'reused': True}
+            self.store.event(pid, 'training_run', artifact=artifact['id'], **rec)
+            return rec
+        try:
+            env = training.ensure_env(self.workspace / 'projects' / pid)
+        except native.ToolUnavailable as e:
+            self.store.pause(pid, f'INFRA_FAILED: training stack unavailable: {e}'[:400], resume_state='VERIFYING')
+            return None
+        shutil.rmtree(out, ignore_errors=True)
+        started = time.monotonic()
+        with tempfile.TemporaryDirectory(prefix='axb-train-', ignore_cleanup_errors=True) as cwd:
+            artifacts.materialize(artifact, cwd)
+            self._copy_inputs(artifact['path'], cwd)
+            if not (Path(cwd) / 'train.py').is_file():
+                rec = {'ok': False, 'why': 'model_training is attached but the bundle has no train.py'}
+                self.store.event(pid, 'training_run', artifact=artifact['id'], **rec)
+                return rec
+            with capabilities.lease(self.store, pid, 'Model training', ['model_training'], kind='harness'):
+                self.beat(pid, 'model training (train.py)')
+                code, tail = native._run([env['python'], 'train.py'], cwd, training.JOB_SECONDS)
+            if (Path(cwd) / 'outputs').is_dir():
+                shutil.copytree(Path(cwd) / 'outputs', out)
+        files = sorted(({'path': p.relative_to(out).as_posix(), 'bytes': p.stat().st_size,
+                         'sha256': artifacts.sha(p.read_bytes())} for p in out.rglob('*') if p.is_file()),
+                       key=lambda f: f['path']) if out.is_dir() else []
+        metrics = None
+        if (out / 'metrics.json').is_file():
+            try:
+                metrics = json.loads((out / 'metrics.json').read_text(encoding='utf-8'))
+            except ValueError:
+                metrics = 'unreadable metrics.json'
+        rec = {'ok': code == 0 and bool(files), 'exit': code, 'seconds': round(time.monotonic() - started),
+               'time_limit': training.JOB_SECONDS, 'output_tail': tail[-1500:], 'files': files[:50], 'metrics': metrics,
+               'dir': str(out), 'key': key, 'pins': list(training.PINS)}
+        if code is None:
+            rec['why'] = f'train.py did not finish within {training.JOB_SECONDS}s (stopped)'
+        elif code != 0:
+            rec['why'] = f'train.py exited {code}'
+        elif not files:
+            rec['why'] = 'train.py wrote nothing under ./outputs'
+        if rec['ok']:
+            done.write_text(json.dumps(rec, ensure_ascii=False), encoding='utf-8')     # written last
+        self.store.event(pid, 'training_run', artifact=artifact['id'], **rec)
+        return rec
+
+    def _trained(self, artifact):
+        """The kept outputs of this artifact's successful training run, or None."""
+        pid = artifact.get('project_id')
+        rec = next((e['detail'] for e in reversed(self.store.events(pid, {'training_run'}))
+                    if e['detail'].get('artifact') == artifact['id'] and e['detail'].get('ok')), None) if pid else None
+        return Path(rec['dir']) if rec and Path(rec['dir']).is_dir() else None
+
     def runtime_evidence(self, artifact, spec, entry):
         """Launch the artifact the way the Owner will (Runtime Acceptance) in a contained temp copy."""
         if artifact['kind'] not in ('python', 'bundle'):
@@ -2069,9 +2157,14 @@ class Engine:
             # The Owner runs the .exe; the source is not a stand-in for it (Owner, 2026-10-18).
             return {'ok': False, 'mode': (spec or {}).get('mode'), 'notes': ['no built .exe for this version: '
                     'Runtime Acceptance was not run on the Python source instead'], 'steps': []}
+        trained = self._trained(artifact)
+        if trained is not None and training.env_python()[1].is_file():
+            python = str(training.env_python()[1])      # evaluation and the app load the trained outputs
         with tempfile.TemporaryDirectory(prefix='axb-run-', ignore_cleanup_errors=True) as cwd:
             artifacts.materialize(artifact, cwd)
             self._copy_inputs(artifact['path'], cwd)
+            if trained is not None:
+                shutil.copytree(trained, Path(cwd) / 'outputs', dirs_exist_ok=True)
             if exe is not None:
                 shutil.copyfile(exe, Path(cwd) / exe.name)
             rel = entry if artifact['kind'] == 'bundle' else Path(artifact['path']).name
