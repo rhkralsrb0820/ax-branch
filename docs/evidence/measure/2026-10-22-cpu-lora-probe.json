@@ -1,0 +1,29 @@
+{
+ "ok": true,
+ "evidence": {
+  "steps": 30,
+  "seconds": 0.47,
+  "loss_first": 1.3846241235733032,
+  "loss_last": 0.9149240255355835,
+  "torch": "2.14.1+cpu",
+  "trainable": 2308,
+  "total": 119496,
+  "adapter_changed": true,
+  "base_frozen": true
+ },
+ "environment": {
+  "tool": "training-env",
+  "pins": [
+   "torch==2.14.1+cpu",
+   "transformers==5.20.2",
+   "peft==0.21.2",
+   "accelerate==1.15.0",
+   "scikit-learn==1.9.1"
+  ],
+  "python": "C:\\Users\\HP\\AppData\\Local\\axb\\te-9af54a16\\Scripts\\python.exe",
+  "acquired": true,
+  "seconds": 273,
+  "source": "https://download.pytorch.org/whl/cpu + PyPI (pip)"
+ },
+ "wall_seconds": 294
+}

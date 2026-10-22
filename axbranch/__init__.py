@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-__version__ = '0.1.50'
+__version__ = '0.1.51'
 
 
 def _root():

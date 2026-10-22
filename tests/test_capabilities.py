@@ -23,16 +23,77 @@ class CapabilityTests(unittest.TestCase):
         def llm(prompt, schema, **kw):
             result, used, notes = script(prompt, schema, **kw)
             if schema is E.PLAN:
-                result['pipeline'][-1]['capabilities'] = ['ml_training']
+                result['pipeline'][-1]['capabilities'] = ['gui_interaction']
             return result, used, notes
 
-        pid = self.store.new_project('Train a model')
+        pid = self.store.new_project('Drive a desktop app')
         result = self.engine(llm).run(pid)
         self.assertEqual((result['state'], result['resume_state']), ('PAUSED', 'STAFFING'))
-        self.assertIn('ml_training', result['pause_reason'])
+        self.assertIn('gui_interaction', result['pause_reason'])
         self.assertEqual(len(script.prompts), 1)
         self.assertFalse(self.store.artifacts(pid))
         self.assert_revoked(pid)
+
+    def training_plan(self, options, runs=1):
+        """A plan whose builder stage declares model_training; the resolver's options are stand-ins."""
+        script = F.Script([F.GOOD] * 2, ['PASS'] * 2)
+
+        def llm(prompt, schema, **kw):
+            result, used, notes = script(prompt, schema, **kw)
+            if schema is E.PLAN:
+                result['pipeline'][-1]['capabilities'] = ['model_training']
+            return result, used, notes
+
+        pid = self.store.new_project('Train a small classifier')
+        with mock.patch.object(C, 'options', lambda name, training=None: options if name in C.TRAINING_NAMES else ()):
+            result = self.engine(llm).run(pid)
+        return pid, result, script
+
+    def test_training_gap_fails_over_to_the_next_option_and_proceeds(self):
+        calls = []
+        cpu = lambda d: calls.append('cpu') or {'ok': False, 'why': 'pip failed'}
+        cloud = lambda d: calls.append('cloud') or {'ok': True, 'evidence': {'adapter_changed': True}}
+        pid, result, _ = self.training_plan((('local_cpu_lora', cpu), ('free_cloud_gpu', cloud)))
+        self.assertEqual(calls, ['cpu', 'cloud'])                                  # tried in order, real attempts
+        attempts = [e['detail'] for e in self.store.events(pid, {'capability_attempt'})]
+        self.assertEqual([(a['option'], a['ok']) for a in attempts], [('local_cpu_lora', False), ('free_cloud_gpu', True)])
+        self.assertEqual(attempts[0]['why'], 'pip failed')
+        decision = self.store.events(pid, {'capability_decision'})[-1]['detail']
+        self.assertEqual((decision['status'], decision['chosen']), ('resolved', 'free_cloud_gpu'))
+        self.assertIn('model_training', self.store.project(pid)['plan']['harness_capabilities'])
+        self.assertTrue(self.store.artifacts(pid))                                 # production continued
+        # Harness authority only: no production agent lease ever carried model_training.
+        self.assertFalse([e for e in self.store.events(pid, {'capability_attached'})
+                          if 'model_training' in e['detail']['capabilities']])
+
+    def test_no_working_option_is_an_owner_decision_with_cost_and_minimal_approval(self):
+        cpu = lambda d: {'ok': False, 'why': 'LoRA probe failed (exit 1)'}
+        cloud = lambda d: {'ok': False, 'why': 'no signed-in session', 'minimal_approval': 'Owner signs in to Colab',
+                           'cost': '0 on the free tier'}
+        pid, result, script = self.training_plan((('local_cpu_lora', cpu), ('free_cloud_gpu', cloud)))
+        self.assertEqual(result['state'], 'PAUSED')
+        self.assertTrue(result['pause_reason'].startswith('Owner action needed: capability model_training'))
+        self.assertIn('Owner signs in to Colab', result['pause_reason'])
+        decision = self.store.events(pid, {'capability_decision'})[-1]['detail']
+        self.assertEqual(decision['status'], 'needs_owner')
+        self.assertEqual(decision['cost'], ['UNKNOWN', '0 on the free tier'])
+        self.assertEqual([t['why'] for t in decision['tried']], ['LoRA probe failed (exit 1)', 'no signed-in session'])
+        self.assertFalse(self.store.artifacts(pid))                               # quality not lowered silently
+        self.assertEqual(E.stop_outcome(result)[0], 'OWNER_DECISION_REQUIRED')
+        # The Owner can answer it (not mistaken for a pending network approval, which blocks feedback).
+        self.engine(F.Script([F.GOOD], ['PASS'])).owner_review(pid, text='Use a non-trained baseline instead.')
+        self.assertEqual(self.store.project(pid)['state'], 'REWORK')
+
+    def test_a_resolved_capability_is_not_probed_again(self):
+        calls = []
+        cpu = lambda d: calls.append('cpu') or {'ok': True, 'evidence': {}}
+        pid, _, _ = self.training_plan((('local_cpu_lora', cpu),))
+        eng = self.engine(F.Script([F.GOOD], ['PASS']))
+        with mock.patch.object(C, 'options', lambda name, training=None: (('local_cpu_lora', cpu),)
+                               if name in C.TRAINING_NAMES else ()):
+            self.assertTrue(eng._capability_gate(pid))
+        self.assertEqual(calls, ['cpu'])
+        self.assertEqual(len(self.store.events(pid, {'capability_decision'})), 1)
 
     def test_native_launch_detection_ignores_python_itself_and_urls(self):
         native = lambda s: 'native_executable_launch' in C.harness_requests({'mode': 'web', 'owner_launch': s})

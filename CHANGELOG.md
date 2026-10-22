@@ -3,6 +3,46 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.51] - 2026-10-22
+
+A capability gap becomes tried options and a recorded decision; model training is the first resolvable one.
+
+### Added
+- `axbranch/training.py`: a pinned CPU training stack (torch 2.14.1+cpu, transformers 5.20.2, peft 0.21.2,
+  accelerate 1.15.0, scikit-learn 1.9.1) from the official PyTorch CPU index and PyPI, at a short per-pin-set path.
+  `probe_cpu` runs a real tiny LoRA update (adapter changes, base frozen). `probe_cloud_gpu` states that a free
+  cloud GPU needs the Owner to sign in, with the cost and the minimal approval.
+- `capabilities.resolve`: tries each option with a real run and records `capability_attempt` (ok, why, evidence,
+  cost, minimal approval) and `capability_decision` (resolved + chosen, or needs_owner + costs, minimal approval,
+  next action).
+
+### Changed
+- `_capability_gate`: a declared training capability (model_training / ml_training / lora_training / fine_tuning /
+  gpu_training) is resolved before production. When resolved, it becomes `plan['harness_capabilities']` (never leased
+  to an agent) and is not re-probed on later runs. When unresolved, the project pauses with "Owner action needed:
+  capability ...": an Owner decision the Owner can answer, never a silent downgrade.
+
+### Fixed
+- A capability gap only paused with names: no options tried, no cost, no minimal approval.
+- First real probe failed: Windows' 260-character path limit under a deep project folder (pip could not write
+  torch's deepest header). Fixed with a short path. Enabling long paths is an admin setting, left untouched.
+
+### Verification
+- Real probe on this PC: stack acquired in 273 s; 30 LoRA steps in 0.47 s, loss 1.385 -> 0.915, 2,308 trainable
+  of 119,496 parameters, adapter changed, base frozen.
+- Tests:
+  - failover to the next option;
+  - no working option -> Owner decision with costs and minimal approval;
+  - the Owner can answer that pause;
+  - no re-probe after a resolved decision;
+  - an unknown capability still stops before any build.
+- C151 audited batches (capabilities, engine, executive_gap, live, native, sources, release): 181/182, the one
+  skip being the real-EXE E2E (needs AXB_NATIVE_E2E=1); no failures or test job survivors.
+
+### Known issues
+- The training RUN harness (execute an agent-written training job, collect the adapter and metrics) is not built
+  yet; this release only resolves and attaches the capability.
+
 ## [0.1.50] - 2026-10-22
 
 Re-verification of the same artifact no longer re-sends sources whose supported claims are unchanged.

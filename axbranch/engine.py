@@ -181,7 +181,9 @@ Rules:
 - Each stage declares capabilities from capability_inventory: reasoning, code_generation, web_research.
   Analyze the task's capability gaps before choosing specialists. Use only necessary capabilities. Declaring
   web_research enables the existing public research adapter; it never authorizes delivered-program connections.
-  Do not pretend an unsupported capability (e.g. ml_training or GUI interaction) is available: declare its
+  Model weight training (LoRA of small public models): declare model_training on the stage that needs it; the
+  engine tries free options with a real small run and records the decision (Owner approval if none works).
+  Do not pretend an unsupported capability (e.g. GUI interaction) is available: declare its
   name so the engine records the gap and stops before production. Installed tools are not execution adapters.
   Harness capabilities belong to runtime, never to production agents. Limits in the inventory are binding.
 - Use prior_knowledge and intelligence only when relevant; never invent evidence.
@@ -863,8 +865,31 @@ class Engine:
                                 else {'tool': 'none', 'exe_name': '', 'windowed': False})
         return plan
 
+    def _agent_caps(self, pid, stage):
+        """A stage's agent capabilities; a resolved harness capability (e.g. model_training) is run by the engine,
+        never leased to the agent."""
+        harness = set(self.store.project(pid)['plan'].get('harness_capabilities', ()))
+        return [c for c in stage.get('capabilities', []) if c not in harness]
+
     def _capability_gate(self, pid):
-        missing = capabilities.gaps(self.store.project(pid)['plan'], bool(runtime.browser()))
+        plan = self.store.project(pid)['plan']
+        missing = capabilities.gaps(plan, bool(runtime.browser()))
+        for name in [m for m in missing if capabilities.options(m)]:
+            resolved = next((e['detail'] for e in reversed(self.store.events(pid, {'capability_decision'}))
+                             if e['detail'].get('capability') == name and e['detail'].get('status') == 'resolved'), None)
+            decision = resolved or capabilities.resolve(self.store, pid, name, self.workspace / 'projects' / pid)
+            if decision['status'] != 'resolved':
+                self.store.event(pid, 'capability_gap', who='CEO plan', missing=[name], decision='needs_owner')
+                self.store.pause(pid, f"Owner action needed: capability {name} - "
+                                      + '; '.join(decision['minimal_approval'])[:400])
+                return False
+            # Harness authority, never an agent's: production agents still cannot execute anything.
+            plan = self.store.project(pid)['plan']
+            plan['harness_capabilities'] = sorted({*plan.get('harness_capabilities', []), name})
+            self.store.update(pid, plan=plan)
+            self.store.event(pid, 'capability_resolved', capability=name, chosen=decision['chosen'],
+                             reused_decision=bool(resolved))
+            missing = capabilities.gaps(plan, bool(runtime.browser()))
         if missing:
             self.store.event(pid, 'capability_gap', who='CEO plan', missing=missing)
             self.store.pause(pid, 'HARNESS_BLOCKED: CAPABILITY_GAP: ' + ', '.join(missing))
@@ -940,7 +965,7 @@ class Engine:
                     stage_context['owner_rework'] = plan['owner_rework']
                 out, used = self._ask(pid, stage['agent_role'], WORKER_SYSTEM.format(role=stage['agent_role']),
                                       stage['instructions'], stage_context,
-                                      WORK, prefer=stage['provider'], web=stage['web'], required=stage.get('capabilities', []))
+                                      WORK, prefer=stage['provider'], web=stage['web'], required=self._agent_caps(pid, stage))
                 self.store.save_output(pid, it, pv, idx, self._agent(pid, stage), used, out)
                 done = {'output': out}
             upstream.append({'stage': stage['name'], 'agent': stage['agent_role'], **done['output']})
@@ -996,7 +1021,7 @@ class Engine:
                                     'replacing an existing anchor snippet with that snippet plus the new code.')
         build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context,
                                 BUILD_EDITS if edits_only else BUILD, prefer=final['provider'], web=final['web'],
-                                required=final.get('capabilities', []))
+                                required=self._agent_caps(pid, final))
         build = {'content': '', 'files': [], **build}
         edits = build.get('edits') or []
         if edits and not (build['content'] or build['files']):

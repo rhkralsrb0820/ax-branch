@@ -5,6 +5,7 @@ governance, or grant OS isolation. Provider flags and contained processes enforc
 the authority; events alone are never claimed as enforcement.
 """
 import re
+import time
 from contextlib import contextmanager
 
 from .state import Rejected
@@ -23,10 +24,17 @@ REGISTRY = {
     'native_build_pyinstaller': 'One-file Windows .exe from the Python source; PyInstaller pinned, acquired into the project',
     'runtime_native_exe': 'Runtime checks and the exact Owner launch run the built .exe itself',
     'source_fetch': 'Read-only GET of the public pages a document cites (no credentials; private addresses refused)',
+    'model_training': 'Real weight/LoRA training of small public models on CPU in a project-local pinned stack '
+                      '(only after the resolver proved it works here; no GPU on this PC)',
 }
+# A capability a plan asks for that is not attached yet but may be obtainable: options are tried in order, every
+# attempt and the final decision are recorded, and nothing that needs the Owner (sign-in, payment) is done.
+TRAINING_NAMES = frozenset(('model_training', 'ml_training', 'lora_training', 'fine_tuning', 'gpu_training'))
 AGENT = frozenset(('reasoning', 'code_generation', 'web_research'))
 LIMITS = [
-    'ML/LLM research and code generation are available; model training/GPU execution is not.',
+    'ML/LLM research and code generation are available. Model training: declare model_training; the engine tries '
+    'free options (local CPU LoRA of small public models first) and records the decision. No GPU on this PC; a free '
+    'cloud GPU needs the Owner to sign in.',
     'No desktop GUI interaction, uploads, downloads, drag/drop or multi-tab harness.',
     'A native .exe is available only through native_build pyinstaller (Python source -> one .exe); other '
     'packagers, installers (.msi) and languages are capability gaps. No clean-Windows machine: a built .exe is '
@@ -89,12 +97,49 @@ def _launches_exe(spec, exe_name):
     return bool(exe_name) and names == {f'{exe_name}.exe'.lower()}
 
 
+def options(capability, training=None):
+    """(name, attempt) pairs in the order they are tried for a resolvable capability; () if none is known."""
+    if capability not in TRAINING_NAMES:
+        return ()
+    if training is None:
+        from . import training
+    return (('local_cpu_lora', training.probe_cpu), ('free_cloud_gpu', training.probe_cloud_gpu))
+
+
+def resolve(store, pid, capability, project_dir, tried_options=None):
+    """Try each option (a real small run, not a declaration); record every attempt and the decision."""
+    tried = []
+    for name, attempt in tried_options if tried_options is not None else options(capability):
+        started = time.monotonic()
+        try:
+            r = attempt(project_dir)
+        except Exception as e:                     # an option that crashes is a failed option, never a crash
+            r = {'ok': False, 'why': f'{type(e).__name__}: {e}'[:600]}
+        rec = {'option': name, 'ok': bool(r.get('ok')), 'seconds': round(time.monotonic() - started),
+               **{k: r[k] for k in ('why', 'evidence', 'environment', 'cost', 'minimal_approval') if k in r}}
+        store.event(pid, 'capability_attempt', capability=capability, **rec)
+        tried.append(rec)
+        if rec['ok']:
+            decision = {'capability': capability, 'status': 'resolved', 'chosen': name, 'tried': tried}
+            break
+    else:
+        approvals = [t['minimal_approval'] for t in tried if t.get('minimal_approval')]
+        decision = {'capability': capability, 'status': 'needs_owner', 'tried': tried,
+                    'cost': [t.get('cost', 'UNKNOWN') for t in tried],
+                    'minimal_approval': approvals or ['UNKNOWN: no option works here; the Owner decides whether to '
+                                                      'change the requirement'],
+                    'next_action': 'Owner approves one listed action or changes the requirement; the quality bar is '
+                                   'not lowered silently'}
+    store.event(pid, 'capability_decision', **decision)
+    return decision
+
+
 def gaps(plan, browser_available=True):
     """Validate new and legacy plans before production spends a provider call."""
     missing = []
     for stage in plan['pipeline']:
         names = agent_requests(stage.get('capabilities', []), stage.get('web', False))
-        missing.extend(k for k in names if k not in AGENT)
+        missing.extend(k for k in names if k not in AGENT and k not in plan.get('harness_capabilities', ()))
     available = inventory(browser_available)['available']
     missing.extend(k for k in harness_requests(plan.get('runtime'), plan.get('native_build')) if k not in available)
     return sorted(set(missing))

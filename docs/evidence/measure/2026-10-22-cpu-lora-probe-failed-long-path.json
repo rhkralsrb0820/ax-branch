@@ -1,0 +1,5 @@
+{
+ "ok": false,
+ "why": "pip install of the training stack failed (exit 1): sformers, peft\r\nERROR: Could not install packages due to an OSError: [Errno 2] No such file or directory: 'C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-HP-Desktop-AX-Branch\\\\ca247b84-67e5-4168-9f22-79e7c3a4cb3e\\\\scratchpad\\\\probe-project\\\\tools\\\\training-env\\\\Lib\\\\site-packages\\\\torch\\\\include\\\\ATen\\\\native\\\\transformers\\\\cuda\\\\mem_eff_attention\\\\epilogue\\\\epilogue_rescale_output.h'\r\nHINT: This error might have occurred since this system does not have Windows Long Path support enabled. You can find information on how to enable this at",
+ "wall_seconds": 164
+}
