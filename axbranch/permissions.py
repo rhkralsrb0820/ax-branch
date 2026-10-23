@@ -1,15 +1,22 @@
 """Standing Owner permissions: only public read access can carry across projects."""
+import re
 import time
 
 
 RISKS = ('public_read', 'api_key', 'login', 'paid', 'personal_data', 'posting')
 _KEYWORDS = (
-    ('api_key', ('key', 'token', 'apikey')),
+    ('api_key', ()),            # matched by _CREDENTIAL below (whole words), not substrings
     ('login', ('login', 'account', 'oauth', 'password')),
     ('paid', ('paid', 'subscription', 'billing', 'price plan')),
     ('personal_data', ('email', 'personal', 'user data', 'upload')),
     ('posting', ('post', 'publish', 'send', 'tweet', 'trade', 'order')),
 )
+
+
+# Credential words as whole words (plurals and API_KEY / HF_TOKEN included): a public model's "tokenizer" files
+# are not a credential (demo P-20261023-2a0e75 asked for huggingface.co as api_key), a real token or key still is.
+_CREDENTIAL = re.compile(r'(?<![a-z])(?:api[ _-]?keys?|apikeys?|keys?|tokens?|access[ _-]?tokens?|bearer|'
+                         r'secrets?|credentials?)(?![a-z])')
 
 
 def classify(entry):
@@ -20,7 +27,8 @@ def classify(entry):
     text = (entry.get('domain', '') + ' ' + entry.get('purpose', '')).lower()
     # Substring matches deliberately include compounds/plurals and ignore negation.
     for candidate, words in _KEYWORDS:
-        if any(word in text for word in words) and RISKS.index(candidate) > RISKS.index(risk):
+        hit = _CREDENTIAL.search(text) if candidate == 'api_key' else any(word in text for word in words)
+        if hit and RISKS.index(candidate) > RISKS.index(risk):
             risk = candidate
     return risk
 

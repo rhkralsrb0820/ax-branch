@@ -3,6 +3,30 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.57] - 2026-10-24
+
+Permission classification separates public file downloads from real credential requests.
+
+### Added
+- Regression test: a public model download (config, tokenizer, weights) stays public_read. A Hugging Face access
+  token, HF_TOKEN, an API key, a bearer header or stored credentials are each api_key.
+
+### Changed
+- The api_key rule matches credential words as WHOLE words (plurals and API_KEY / HF_TOKEN included) instead of
+  substrings. The other risk rules and the approval protection are unchanged, and there is no Hugging Face
+  exception: the domain is judged by what the entry says it needs.
+
+### Fixed
+- Demo P-20261023-2a0e75 declared huggingface.co for "config, tokenizer, weights" and it was escalated to api_key,
+  because "tokenizer" contains "token" (likewise "keyboard" contains "key").
+
+### Verification
+- test_permissions 11/11; the new test fails on 0.1.56. C157 audited batches (permissions, engine, capabilities,
+  executive_gap, release): 136/136, no failures or test job survivors.
+
+### Known issues
+- The other keyword rules remain substring-based by design (they include compounds and plurals, fail closed).
+
 ## [0.1.56] - 2026-10-24
 
 Demo screen usability: the project view is readable and operable at the default and minimum window sizes.

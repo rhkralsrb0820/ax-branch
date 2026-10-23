@@ -67,6 +67,18 @@ class PermissionsTests(unittest.TestCase):
                         self.assertEqual(classify({**self.public, field: word.upper()}), risk)
         self.assertEqual(classify({**self.public, 'purpose': 'post using login and API key'}), 'posting')
 
+    def test_public_tokenizer_download_is_public_but_a_real_credential_is_not(self):
+        # Demo P-20261023-2a0e75: "tokenizer" contains "token", so a public model download was classed api_key.
+        public = {'domain': 'huggingface.co', 'risk': 'public_read',
+                  'purpose': 'train.py downloads the small public encoder model (config, tokenizer, weights)'}
+        self.assertEqual(classify(public), 'public_read')
+        self.assertEqual(classify({**public, 'purpose': 'download tokenizer.json and vocab for keyboard-free use'}),
+                         'public_read')
+        for purpose in ('requires a Hugging Face access token', 'reads HF_TOKEN from the environment',
+                        'gated model: needs an API key', 'adds a bearer header', 'store user credentials'):
+            with self.subTest(purpose=purpose):
+                self.assertEqual(classify({**public, 'purpose': purpose}), 'api_key')
+
     def test_declared_risk_never_downgraded_or_reused(self):
         grant(self.store, self.pid, [self.public])
         for risk in RISKS[1:]:
