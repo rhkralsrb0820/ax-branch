@@ -1,5 +1,16 @@
 # AX Branch — TASK_STATE
 
+## Current development update — 2026-10-24 / 0.1.55 (forum demo)
+
+Demo evidence: [forum demo](evidence/2026-10-24-forum-demo.md); full suite F155 394/394 on 0.1.55.
+- Demo project P-20261023-2a0e75 is OWNER_REVIEW at v8 (verified). It serves the baseline: test team-routing 0.9669.
+  LoRA was really trained (test team-routing 0.9159) and lost: lora_not_better, honestly recorded.
+- The live GUI flow on a new goal (P-20261024-5bfdd1) passed end to end, including a real FAIL -> rework -> PASS.
+- Owner launcher: demo-2026-11/AXBranch-Demo.cmd (source run; no fresh EXE).
+- Not done: a packaged AX Branch EXE, the agent-table layout, the active-task feedback UX, and the permission label
+  defect (tokenizer -> api_key). Production law-firm project and held reviews untouched.
+
+
 ## Current development update — 2026-10-20 / 0.1.46
 
 Codex has taken over from Claude after its quota limit. Claude automatic continuation was cancelled;
