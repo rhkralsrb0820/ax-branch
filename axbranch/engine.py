@@ -2086,7 +2086,7 @@ class Engine:
             # The Owner runs what was verified: the kept training outputs and the same pinned stack the runtime
             # checks used (the demo app passed verification there but would fail on the plain interpreter).
             if not training.env_python()[1].is_file():
-                raise Rejected('The training stack this result was verified with is missing; it is not run without it.')
+                raise Rejected(training.MISSING_ENV.format(path=training.env_python()[0]))
             shutil.copytree(trained, run / 'outputs', dirs_exist_ok=True)
             python = str(training.env_python()[1])
         if not python:

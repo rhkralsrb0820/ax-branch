@@ -46,6 +46,7 @@ def main(argv=None):
         g.add_argument('--' + choice, dest='choice', action='store_const', const=choice)
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
     sub.add_parser('upgrade-proposal')
+    sub.add_parser('training-env')        # (re)create the pinned training stack a trained result needs
     ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
     sv = sub.add_parser('supervise'); sv.add_argument('--watch', action='store_true')
     sub.add_parser('library', help='completed artifacts by type, with their current version and lineage')
@@ -181,6 +182,10 @@ def _dispatch(a):
     elif a.cmd == 'effort':
         from .metrics import effort
         print(json.dumps(effort(store, a.id), ensure_ascii=False, indent=2))
+    elif a.cmd == 'training-env':
+        from . import training
+        env = training.ensure_env(os.getcwd())
+        print(f"training stack ready: {env['python']} ({'installed now' if env['acquired'] else 'already present'})")
     elif a.cmd == 'upgrade-proposal':
         from . import providers, upgrade
         status, result = upgrade.propose(store, engine.workspace, providers.call)

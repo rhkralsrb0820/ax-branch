@@ -16,6 +16,11 @@ PINS = ('torch==2.14.1+cpu', 'transformers==5.20.2', 'peft==0.21.2', 'accelerate
 TORCH_INDEX = 'https://download.pytorch.org/whl/cpu'
 ENV_TIMEOUT = 1800        # seconds to create the environment (large wheels)
 PROBE_SECONDS = 300       # the feasibility run must finish well inside this
+MISSING_ENV = ('이 결과는 검증 때 사용한 학습 환경(torch, transformers, peft, scikit-learn)이 있어야 실행됩니다. '
+               '이 PC에는 그 환경이 없어 실행하지 않았습니다 (필요한 위치: {path}).\n'
+               '복구: Python 3.12가 설치된 이 PC의 AX Branch 폴더에서 "python -X utf8 -m axbranch training-env"를 '
+               '실행하면 공식 PyTorch CPU 인덱스와 PyPI에서 같은 버전을 무료로 설치합니다 (약 1 GB, 수 분, 인터넷 필요). '
+               'Python이 없는 PC에서는 이 결과를 실행할 수 없습니다.')
 JOB_SECONDS = 1800        # one training run of an artifact's train.py (CPU); longer work needs a GPU decision
 
 # A real LoRA update on a tiny randomly initialised model (no download): base weights stay frozen, the adapter

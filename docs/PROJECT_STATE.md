@@ -1,5 +1,16 @@
 # AX Branch — PROJECT_STATE (development)
 
+## Current development update — 2026-10-24 / 0.1.58 (demo package)
+
+Demo package: demo-2026-11/package-0.1.58/AXBranch/AXBranch.exe (outside the repo; sha256 in
+evidence/2026-10-24-pkg058-AXBranch.exe.sha256). Script: [5-minute demo](evidence/2026-10-24-demo-script-5min.md).
+- 0.1.56 screen usability; 0.1.57 credential classification (tokenizer is not a token); 0.1.58 package root
+  detection, the actionable missing-stack message and `axbranch training-env`.
+- Full suite F158: 399/399 on 0.1.58 incl. the real EXE build test (that test builds a GENERATED program's EXE;
+  the AX Branch package itself was verified separately by hand on this PC).
+- Not verified: another PC, Windows without Python, other display scalings.
+
+
 ## Current development update — 2026-10-24 / 0.1.55 (forum demo)
 
 Demo evidence: [forum demo](evidence/2026-10-24-forum-demo.md); full suite F155 394/394 on 0.1.55.

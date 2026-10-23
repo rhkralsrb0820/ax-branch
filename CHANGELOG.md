@@ -3,6 +3,43 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.58] - 2026-10-24
+
+A current AX Branch demo package, separate from the old dist build, verified as a package on this PC.
+
+### Added
+- `python -m axbranch training-env`: (re)creates the pinned training stack a trained result needs, with free
+  official downloads (about 1 GB). If the stack is already present it is not reinstalled.
+- The demo package (built outside the repo): demo-2026-11\package-0.1.58\AXBranch\AXBranch.exe (PyInstaller
+  onedir), with README-DEMO.txt separating the AX Branch app from the generated app's dependencies.
+
+### Changed
+- A packaged AXBranch.exe inside a workspace root that has `workspace\axbranch.sqlite3` but no vault opens that
+  workspace (the demo layout). Source runs keep the old rule, because the repo holds a scratch workspace/.
+- The missing-training-stack refusal is now Korean and actionable: what is missing, where, the recovery command,
+  and that a PC without Python cannot run that result.
+
+### Fixed
+- A frozen exe placed in the demo root would have opened an empty workspace beside itself (no obsidian/ vault there).
+
+### Verification
+- tests: test_root (frozen exe finds the demo root; a source run ignores a vault-less workspace; errors on 0.1.57);
+  test_training (missing-stack message with the recovery command).
+- Package itself (rebuilt from the final code, AXBranch.exe sha256 c9aab672...):
+  - started through the shell (double-click equivalent) and showed 0.1.58 on the demo workspace (2 projects);
+  - project navigation, pipeline and timeline records;
+  - 결과 실행 started the inquiry app with the training stack: health = baseline / 77 labels, classify ok;
+  - closed and reopened with the records kept;
+  - with the stack hidden (LOCALAPPDATA pointed at an empty folder), 결과 실행 refused with the Korean recovery
+    message and started nothing;
+  - viewing added no call_start or training_run events (29 -> 29, 4 -> 4).
+  - Screenshots: docs/evidence/ui/2026-10-24-pkg058-*.png.
+
+### Known issues
+- Not tested on another PC, on Windows without Python, or at other display scalings.
+- The generated inquiry app needs Python 3.12 + the 1 GB training stack on the target PC; the AX Branch package
+  does not include it.
+
 ## [0.1.57] - 2026-10-24
 
 Permission classification separates public file downloads from real credential requests.

@@ -3,16 +3,21 @@ import os
 import sys
 from pathlib import Path
 
-__version__ = '0.1.57'
+__version__ = '0.1.58'
 
 
 def _root():
     """The AX-Branch workspace root: the folder holding workspace/ and obsidian/."""
     if os.environ.get('AXB_ROOT'):
         return Path(os.environ['AXB_ROOT'])
-    here = Path(sys.executable if getattr(sys, 'frozen', False) else __file__).resolve()
+    frozen = getattr(sys, 'frozen', False)
+    here = Path(sys.executable if frozen else __file__).resolve()
     for parent in here.parents:
         if (parent / 'workspace').is_dir() and (parent / 'obsidian').is_dir():
+            return parent
+        # A packaged AXBranch.exe placed inside a workspace root without a vault (the demo package): its
+        # workspace holds the SQLite truth. Source runs never use this rule (the repo has a scratch workspace/).
+        if frozen and (parent / 'workspace' / 'axbranch.sqlite3').is_file():
             return parent
     return here.parent
 

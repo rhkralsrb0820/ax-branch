@@ -2,7 +2,9 @@
 
 Demo workspace: `C:\Users\HP\Desktop\AX-Branch\demo-2026-11`. It is separate from production and validation.
 Owner launcher: `C:\Users\HP\Desktop\AX-Branch\demo-2026-11\AXBranch-Demo.cmd`, which opens the 淸月 CEO app
-(source, Python 3.12) on the demo workspace. No EXE is provided for AX Branch itself; `dist/AXBranch.exe` is stale.
+(source, Python 3.12) on the demo workspace. Superseded on 2026-10-24 by the 0.1.58 package
+`demo-2026-11\package-0.1.58\AXBranch\AXBranch.exe` (see 2026-10-24-demo-script-5min.md); `dist/AXBranch/AXBranch.exe`
+is an old build from 2026-10-08.
 
 ## 1. Demo project P-20261023-2a0e75 "문의 분류 라우팅 AI" (customer inquiry → intent → team)
 

@@ -83,6 +83,17 @@ class TrainingTests(unittest.TestCase):
         self.assertIn(str(training.env_python()[1]), cmd)
         self.assertTrue((Path(kw['cwd']) / 'outputs' / 'model.json').is_file())
 
+    def test_missing_stack_refuses_the_owner_run_with_the_recovery_action(self):
+        eng, pid, p = self.run_project(FILES)
+        missing = self.tmp / 'no-stack'
+        with mock.patch.object(training, 'env_python', lambda d=None: (missing, missing / 'python.exe')):
+            with self.assertRaises(E.Rejected) as caught:
+                eng.launch_verified(pid, popen=lambda *a, **k: self.fail('must not start'))
+        message = str(caught.exception)
+        self.assertIn(str(missing), message)
+        self.assertIn('python -X utf8 -m axbranch training-env', message)
+        self.assertIn('Python이 없는 PC에서는', message)
+
     def test_failed_training_is_a_deterministic_failure_and_is_not_kept_as_done(self):
         broken = [{'path': 'train.py', 'content': 'raise SystemExit(3)\n'}, FILES[1]]
         eng, pid, p = self.run_project(broken, stop_at='REWORK')
