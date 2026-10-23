@@ -30,7 +30,11 @@ class App(tk.Tk):
         self.engine_factory = engine_factory or (lambda: open_engine(workspace))
         self.injected = engine_factory is not None
         self.title(f'AX Branch {__version__} — 淸月 AI CEO')
-        self.geometry('1180x760')
+        # Fit the screen (1920x1080 at 100% gave a 1180x760 window whose agent table showed only its header).
+        # Leave room for the Windows taskbar (at 88% of 1080 the bottom button bar sat under it).
+        w, h = min(1440, int(self.winfo_screenwidth() * .9)), min(880, int(self.winfo_screenheight() * .82))
+        self.geometry(f'{w}x{h}+{(self.winfo_screenwidth() - w) // 2}+{max(0, (self.winfo_screenheight() - h) // 2 - 30)}')
+        self.minsize(1000, 740)
         self.store = Store(workspace / 'axbranch.sqlite3')
         self.running = {}            # pid -> cancel Event
         self.selected = None
@@ -67,12 +71,20 @@ class App(tk.Tk):
         body.add(holder, weight=0)                        # the main area takes any extra width; divider draggable
         self.ids, self._rows, self._titles, self._tipwin = [], None, [], None
         self._labels = {}
-        right = ttk.PanedWindow(body, orient='vertical')
-        body.add(right, weight=1)
+        view = ttk.Frame(body)              # project view: status banner + panes
+        self.banner = tk.Label(view, font=('Malgun Gothic', 11, 'bold'), anchor='w', justify='left', padx=10, pady=6)
+        self.banner.pack(fill='x')
+        # Wrap to the current width: fixed wraplengths cut the banner and the Owner note in narrow windows.
+        view.bind('<Configure>', lambda e: (self.banner.config(wraplength=max(300, e.width - 24)),
+                                            self.owner_note.config(wraplength=max(300, e.width - 40))))
+        right = ttk.PanedWindow(view, orient='vertical')
+        right.pack(fill='both', expand=True)
+        body.add(view, weight=1)
+        self.view = view
         self.right = right
         self.body = body
         self.home = Home(body, workspace)
-        self.owner_box = ttk.LabelFrame(right, text='Owner 결정 — AX Branch가 기다리고 있습니다', padding=6)
+        self.owner_box = ttk.LabelFrame(view, text='Owner 결정 — AX Branch가 기다리고 있습니다', padding=6)
         self.owner_note = ttk.Label(self.owner_box, font=FONT, wraplength=820, justify='left')
         self.owner_note.pack(anchor='w')
         self.works_row = ttk.Frame(self.owner_box)
@@ -82,7 +94,7 @@ class App(tk.Tk):
         ttk.Label(self.works_row, text='실행해 보니:', font=FONT).pack(side='left')
         for label, value in (('작동함', 'yes'), ('작동하지 않음', 'no'), ('아직 확인 안 함', 'unknown')):
             ttk.Radiobutton(self.works_row, text=label, value=value, variable=self.works).pack(side='left', padx=4)
-        self.feedback = tk.Text(self.owner_box, height=4, font=FONT, wrap='word')
+        self.feedback = tk.Text(self.owner_box, height=3, font=FONT, wrap='word')
         self.decide_row = ttk.Frame(self.owner_box)
         for text, cmd in (('수정 요청 / 계속', self.owner_send), ('완료', self.owner_finish), ('중단', self.stop)):
             ttk.Button(self.decide_row, text=text, command=cmd).pack(side='left', padx=3)
@@ -92,7 +104,7 @@ class App(tk.Tk):
         self._owner_mode = None
         # Live execution view: project -> 淸月 CEO -> hired agents -> verification -> Owner review, read
         # from local state (supervisor status, heartbeat/activity files, SQLite) every refresh; no AI call.
-        self.live = tk.Text(right, font=FONT, wrap='word', state='disabled', height=8)
+        self.live = tk.Text(right, font=FONT, wrap='word', state='disabled', height=4)
         right.add(self.live, weight=0)
         graph = ttk.Frame(right)
         self.pipeline = tk.Canvas(graph, height=105, background='#ffffff', highlightthickness=0)
@@ -102,23 +114,27 @@ class App(tk.Tk):
         self.pipeline.configure(xscrollcommand=scroll.set)
         right.add(graph, weight=0)
         self._pipeline_signature = None
-        self.agents = ttk.Treeview(right, columns=tuple(COLUMNS), show='tree headings', height=8, selectmode='browse')
+        # Agents and their records side by side: stacked, they shared the leftover height and the table collapsed.
+        lower = ttk.PanedWindow(right, orient='horizontal')
+        right.add(lower, weight=1)
+        self.agents = ttk.Treeview(lower, columns=tuple(COLUMNS), show='tree headings', height=8, selectmode='browse')
         self.agents.heading('#0', text='Agent')
         self.agents.column('#0', width=230, stretch=False)
         for col, (title, width) in COLUMNS.items():
             self.agents.heading(col, text=title)
             self.agents.column(col, width=width, stretch=col in ('why', 'result'))
+        self.agents['displaycolumns'] = ('engine', 'task', 'status')     # the rest is in Agent 기록
         self.agents.bind('<<TreeviewSelect>>', lambda _e: self.show())
-        right.add(self.agents, weight=1)
-        tabs = ttk.Notebook(right)
-        right.add(tabs, weight=2)
+        lower.add(self.agents, weight=1)
+        tabs = ttk.Notebook(lower)
+        lower.add(tabs, weight=1)
         self.records = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
         self.timeline = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
         self.detail = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
         for widget, title in ((self.records, 'Agent 기록'), (self.timeline, '타임라인'), (self.detail, '프로젝트')):
             tabs.add(widget, text=title)
 
-        bar = ttk.Frame(self, padding=8); bar.pack(fill='x')
+        bar = ttk.Frame(self, padding=8); bar.pack(fill='x', side='bottom', before=body)   # never clipped
         for text, cmd in (('Library', self.library_window), ('리뷰 / 피드백…', self.review_dialog),
                           ('외부 연결 승인', lambda: self.network(True)),
                           ('외부 연결 거절', lambda: self.network(False)),
@@ -127,7 +143,7 @@ class App(tk.Tk):
             ttk.Button(bar, text=text, command=cmd).pack(side='left', padx=3)
         self.status = ttk.Label(bar, text=''); self.status.pack(side='right')
         self.protocol('WM_DELETE_WINDOW', self.quit_app)
-        body.forget(right)
+        body.forget(view)
         body.add(self.home, weight=1)
         self.refresh()
         if goal:
@@ -297,9 +313,10 @@ class App(tk.Tk):
             for w in (self.works_row, self.feedback, self.decide_row, self.approve_row):
                 w.pack_forget()
             if self._owner_mode is not None:
-                self.right.forget(self.owner_box)
+                self.owner_box.pack_forget()
             if mode is not None:
-                self.right.insert(0, self.owner_box, weight=0)
+                # Packed above the panes, never inside them: a pane was squeezed until its buttons vanished.
+                self.owner_box.pack(fill='x', before=self.right, padx=0, pady=(0, 4))
                 if mode == 'approval':
                     self.approve_row.pack(anchor='w', pady=4)
                 else:
@@ -557,8 +574,8 @@ class App(tk.Tk):
     # ---- display
     def go_home(self, category='청월 홈'):
         self.home_mode = True
-        if str(self.right) in self.body.panes():
-            self.body.forget(self.right)
+        if str(self.view) in self.body.panes():
+            self.body.forget(self.view)
             self.body.add(self.home, weight=1)
         self.home.render(None if category == '청월 홈' else category)
         self.home.update_state(self.store.projects())
@@ -567,7 +584,7 @@ class App(tk.Tk):
         self.home_mode = False
         if str(self.home) in self.body.panes():
             self.body.forget(self.home)
-            self.body.add(self.right, weight=1)
+            self.body.add(self.view, weight=1)
         self.show()
 
     def select_pipeline(self, key):
@@ -669,7 +686,11 @@ class App(tk.Tk):
                  f"Goal: {h['goal']}", f"다음: {h['next_action']}"]
         lines.append('')
         view = live.view(self.workspace, self.store, self.selected)
-        self._owner_panel(p, dict(view['header'])['상태'].split(' — ')[0])
+        status = dict(view['header'])['상태'].split(' — ')[0]
+        text, color = banner(p['state'], status, p['pause_reason'] or '')
+        if self.banner.cget('text') != text:
+            self.banner.config(text=text, bg=color)
+        self._owner_panel(p, status)
         _put(self.live, '\n'.join(f'{k}: {v}' for k, v in view['header'] if k not in ('목표', '다음 작업'))
              + f"\n다음: {dict(view['header'])['다음 작업']}")
         rows = {r['key']: r for r in view['pipeline']}
@@ -733,6 +754,27 @@ class App(tk.Tk):
 
 # User-facing status, mapped from the internal state / supervisor status (the DB state is never changed).
 INDICATOR_COLORS = {'working': '#2e9e44', 'owner': '#e8870e', 'waiting': '#2f74d0', 'error': '#d0342c', 'done': '#8a8a8a'}
+
+
+def banner(state, status, reason=''):
+    """(text, background) for the project view: what the project is doing, and WHEN Owner input takes effect.
+    Never claims that input is applied while a run is in progress (feedback is not queued during a run)."""
+    if state == 'CLOSED' or status == 'COMPLETED':
+        return '완료 · 종료된 프로젝트입니다. 기록과 결과만 볼 수 있습니다.', '#e5e8ec'
+    if status == 'WAITING_FOR_OWNER':
+        if 'approval needed' in reason:
+            return '승인 대기 · [외부 연결 승인/거절]을 누르는 즉시 결정이 기록되고, 이어서 실행할 수 있습니다.', '#ffe3b3'
+        if state == 'OWNER_REVIEW':
+            return '검토 대기 · 검증을 통과한 결과가 도착했습니다. [결과 실행]으로 확인하고, 의견은 보낼 때 반영됩니다.', '#d4f0e4'
+        return '결정 대기 · 프로젝트가 멈춰 Owner를 기다립니다. 적은 방향은 [수정 요청 / 계속]을 누를 때 반영됩니다.', '#ffe3b3'
+    if status in ('STALLED', 'FAILED') and state != 'CREATED':
+        return '오류 · 실행이 멈췄습니다. 아래 상태와 타임라인에서 원인을 확인한 뒤 [계속 실행 / 재개]하세요.', '#ffd6d1'
+    if status in ('ACTIVE', 'RECOVERING'):
+        return ('작업 중 · 지금은 피드백이 반영되지 않습니다. 결과가 검토 단계에 도착하면 입력하거나, '
+                '[중단] 후 입력하세요.', '#d7e6ff')
+    if state == 'PAUSED':
+        return f'일시중지 · {reason[:140] or "재개를 기다립니다"}', '#fff1cc'
+    return '대기 · 아직 실행되지 않았습니다.', '#eef1f5'
 
 
 def indicator(state, status):

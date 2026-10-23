@@ -3,6 +3,38 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.56] - 2026-10-24
+
+Demo screen usability: the project view is readable and operable at the default and minimum window sizes.
+
+### Added
+- Status banner on the project view (`gui.banner`). It names the state in plain words with distinct colours:
+  작업 중 / 승인 대기 / 검토 대기 / 결정 대기 / 오류 / 일시중지 / 완료. It says WHEN Owner input takes effect, and while a
+  run is in progress it says feedback is NOT applied (input is not queued during a run).
+
+### Changed
+- The window size follows the screen (up to 1440x880, centred, above the taskbar); minimum 1000x740.
+- The agent table and its records (Agent 기록 / 타임라인 / 프로젝트) sit side by side instead of stacked. The status
+  box is 4 lines, the feedback box 3. The agent table shows engine / current task / status, with the rest in the
+  records.
+- The Owner decision panel and the button bar are packed outside the shrinkable panes, so they are never squeezed
+  or clipped. The banner and the Owner note wrap to the window width.
+
+### Fixed
+- At 1180x760 (1920x1080, 100%) the agent table showed only its header. A 920-px window put the bottom button bar
+  under the taskbar, and at the minimum size the Owner buttons were squeezed to outlines.
+
+### Verification
+- test_gui: banner states, the no-false-applied claim, and the agent table taller than 100 px at the old
+  1180x760 size (the test errors on 0.1.55).
+- Screenshots on a COPY of the demo workspace at the default (1440x880) and minimum (1000x740) sizes:
+  docs/evidence/ui/2026-10-24-v056-*.png.
+- C156 audited batches (gui, home, live, supervisor, release): 46/46, no failures or test job survivors.
+
+### Known issues
+- At exactly the minimum height the last agent row is partly cut off (it scrolls).
+- Only this PC's 1920x1080 at 100% was tried; other scalings are unverified.
+
 ## [0.1.55] - 2026-10-24
 
 The Owner runs exactly what was verified for a trained result.

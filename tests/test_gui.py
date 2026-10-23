@@ -164,6 +164,29 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], pid)                         # no CLI / Explorer needed
         self.assertIn('[결과 실행]', self.app.owner_note.cget('text'))
 
+    def test_status_banner_distinguishes_states_and_never_claims_live_feedback(self):
+        from axbranch.gui import banner
+        texts = {key: banner(*key)[0] for key in [
+            ('EXECUTING', 'ACTIVE', ''), ('PAUSED', 'WAITING_FOR_OWNER', 'Owner approval needed (external_connection): x'),
+            ('OWNER_REVIEW', 'WAITING_FOR_OWNER', ''), ('PAUSED', 'WAITING_FOR_OWNER', 'NEEDS_DECISION: budget'),
+            ('EXECUTING', 'STALLED', ''), ('PAUSED', 'WAITING_FOR_PROVIDER', 'RateLimited: quota'), ('CLOSED', 'COMPLETED', '')]}
+        heads = [t.split(' · ')[0] for t in texts.values()]
+        self.assertEqual(heads, ['작업 중', '승인 대기', '검토 대기', '결정 대기', '오류', '일시중지', '완료'])
+        self.assertIn('반영되지 않습니다', texts[('EXECUTING', 'ACTIVE', '')])       # no false "applied" claim
+        self.assertEqual(len({banner(*k)[1] for k in texts}), 6)                    # distinct colours (both waits share)
+        # The default window keeps the agent table usable without dragging dividers (it showed only its header).
+        pid = self.app.store.new_project('make an add tool')
+        self.app.selected = pid
+        self.app.open_project()
+        self.app.deiconify()                               # a withdrawn window is never laid out
+        self.app.geometry('1180x760')                      # the old default, where the table showed only its header
+        for _ in range(5):
+            self.app.update()
+        try:
+            self.assertGreater(self.app.agents.winfo_height(), 100)
+        finally:
+            self.app.withdraw()
+
     def test_project_list_shows_short_title_and_status_dot_not_internal_state(self):
         from axbranch.gui import indicator, project_title
         pid = self.app.store.new_project('주식 분석 프로그램 만들어봐')
