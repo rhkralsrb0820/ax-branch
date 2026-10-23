@@ -14,6 +14,7 @@ from . import WORKSPACE, __version__, library, live, supervisor
 from .library import project_title
 from .engine import open_engine
 from .state import Busy, Store
+from .home import Home, draw_pipeline
 
 FONT = ('Malgun Gothic', 10)
 COLUMNS = {'engine': ('엔진', 70), 'task': ('현재 작업', 170), 'status': ('상태', 230), 'last': ('마지막 활동', 90),
@@ -33,11 +34,12 @@ class App(tk.Tk):
         self.store = Store(workspace / 'axbranch.sqlite3')
         self.running = {}            # pid -> cancel Event
         self.selected = None
+        self.home_mode = True
         self._notice = ['']           # set by worker threads, shown by the Tk thread
         self._last_supervision = 0.0
 
         top = ttk.Frame(self, padding=8); top.pack(fill='x')
-        ttk.Label(top, text='Goal', font=('Malgun Gothic', 11, 'bold')).pack(anchor='w')
+        ttk.Label(top, text='청월에게 맡길 새로운 업무', font=('Malgun Gothic', 11, 'bold')).pack(anchor='w')
         self.goal = tk.Text(top, height=3, font=FONT, wrap='word'); self.goal.pack(fill='x')
         goal_row = ttk.Frame(top); goal_row.pack(fill='x', pady=4)
         ttk.Button(goal_row, text='淸月 CEO에게 맡기기', command=self.start).pack(side='right')
@@ -49,6 +51,8 @@ class App(tk.Tk):
         # Project list: short title + one colored status dot (a Listbox can only color whole rows).
         holder = ttk.Frame(body, width=LIST_WIDTH)       # starting width of the list pane (~280 px)
         holder.pack_propagate(False)
+        for label in ('청월 홈', 'AI 동향', 'AI 취업'):
+            ttk.Button(holder, text=label, command=lambda name=label: self.go_home(name)).pack(fill='x', pady=3)
         self.list = tk.Text(holder, font=LIST_FONT, width=1, wrap='none', cursor='arrow',
                             spacing1=4, spacing3=4, padx=LIST_PAD, state='disabled')
         self.list.pack(fill='both', expand=True)
@@ -66,6 +70,8 @@ class App(tk.Tk):
         right = ttk.PanedWindow(body, orient='vertical')
         body.add(right, weight=1)
         self.right = right
+        self.body = body
+        self.home = Home(body, workspace)
         self.owner_box = ttk.LabelFrame(right, text='Owner 결정 — AX Branch가 기다리고 있습니다', padding=6)
         self.owner_note = ttk.Label(self.owner_box, font=FONT, wraplength=820, justify='left')
         self.owner_note.pack(anchor='w')
@@ -88,6 +94,14 @@ class App(tk.Tk):
         # from local state (supervisor status, heartbeat/activity files, SQLite) every refresh; no AI call.
         self.live = tk.Text(right, font=FONT, wrap='word', state='disabled', height=8)
         right.add(self.live, weight=0)
+        graph = ttk.Frame(right)
+        self.pipeline = tk.Canvas(graph, height=105, background='#ffffff', highlightthickness=0)
+        self.pipeline.pack(fill='x')
+        scroll = ttk.Scrollbar(graph, orient='horizontal', command=self.pipeline.xview)
+        scroll.pack(fill='x')
+        self.pipeline.configure(xscrollcommand=scroll.set)
+        right.add(graph, weight=0)
+        self._pipeline_signature = None
         self.agents = ttk.Treeview(right, columns=tuple(COLUMNS), show='tree headings', height=8, selectmode='browse')
         self.agents.heading('#0', text='Agent')
         self.agents.column('#0', width=230, stretch=False)
@@ -113,18 +127,23 @@ class App(tk.Tk):
             ttk.Button(bar, text=text, command=cmd).pack(side='left', padx=3)
         self.status = ttk.Label(bar, text=''); self.status.pack(side='right')
         self.protocol('WM_DELETE_WINDOW', self.quit_app)
+        body.forget(right)
+        body.add(self.home, weight=1)
         self.refresh()
         if goal:
             self.goal.insert('1.0', goal)
             self.after(500, self.start)
         elif resume:                     # same as selecting the project and pressing 계속 실행 / 재개
             self.selected = resume
+            self.open_project()
             self.after(500, self.resume)
 
     # ---- project workers
     def _launch(self, pid):
         """A run is its own background process, so closing this window never stops it; the window only
         reads its state. (In-window threads are kept for injected test engines.)"""
+        if pid == self.selected:
+            self.open_project()       # one path for start / resume / develop / rework: the project the Owner acts on
         if self.injected:
             return self._launch_thread(pid)
         if supervisor.status(self.workspace, self.store, pid)['status'] == 'ACTIVE':
@@ -391,7 +410,7 @@ class App(tk.Tk):
             self.selected = picked[1]
             self._rows = None
             self.refresh_list()
-            self.show()
+            self.open_project()
             win.destroy()
 
     def _develop_dialog(self, picked, win):
@@ -536,13 +555,34 @@ class App(tk.Tk):
             os.startfile(target)
 
     # ---- display
+    def go_home(self, category='청월 홈'):
+        self.home_mode = True
+        if str(self.right) in self.body.panes():
+            self.body.forget(self.right)
+            self.body.add(self.home, weight=1)
+        self.home.render(None if category == '청월 홈' else category)
+        self.home.update_state(self.store.projects())
+
+    def open_project(self):
+        self.home_mode = False
+        if str(self.home) in self.body.panes():
+            self.body.forget(self.home)
+            self.body.add(self.right, weight=1)
+        self.show()
+
+    def select_pipeline(self, key):
+        if self.agents.exists(key):
+            self.agents.selection_set(key)
+            self.agents.see(key)
+            self.show()
+
     def select(self, event=None):
         line = int(self.list.index(f'@{event.x},{event.y}').split('.')[0]) - 1 if event else -1
         if 0 <= line < len(self.ids):
             self.selected = self.ids[line]
             self._rows = None                             # redraw the highlight
             self.refresh_list()
-            self.show()
+            self.open_project()
         return 'break'
 
     def refresh_list(self, force=False):
@@ -618,6 +658,9 @@ class App(tk.Tk):
             self.store.event(self.selected, 'owner_action', action=action, channel='app')
 
     def show(self):
+        self.home.update_state(self.store.projects())
+        if self.home_mode:
+            return
         if not self.selected:
             return
         h = self.store.handoff(self.selected)
@@ -630,6 +673,10 @@ class App(tk.Tk):
         _put(self.live, '\n'.join(f'{k}: {v}' for k, v in view['header'] if k not in ('목표', '다음 작업'))
              + f"\n다음: {dict(view['header'])['다음 작업']}")
         rows = {r['key']: r for r in view['pipeline']}
+        signature = repr(view['pipeline'])
+        if signature != self._pipeline_signature:
+            self._pipeline_signature = signature
+            draw_pipeline(self.pipeline, view['pipeline'], self.select_pipeline)
         if list(self.agents.get_children()) != list(rows):
             self.agents.delete(*self.agents.get_children())
             for key in rows:

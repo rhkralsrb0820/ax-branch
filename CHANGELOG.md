@@ -3,6 +3,38 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.54] - 2026-10-24
+
+淸月 CEO home and pipeline view (started by Codex, completed by Claude).
+
+### Added
+- `axbranch/home.py` (Codex):
+  - the home shows the CEO summary from persisted project states, a real status graph (no invented progress), and
+    an explicit "collect" of two public feeds (OpenAI News RSS for AI trends; Python.org jobs RSS filtered to AI/ML);
+  - each item shows its date (or "게시일 미상"), its source domain and the collection time; failures are stated and
+    the earlier items kept;
+  - a clickable sequential pipeline drawn from `live.view`.
+- Stale feeds (collected more than 24 h ago) are labelled "오래된 정보 (N일 전) — 새로 수집하세요" (Claude).
+
+### Changed
+- `gui.py` (Codex): home / category buttons; the home pane is replaced by the project view when a project opens.
+- One project-opening path (Claude): `_launch` opens the project view for the selected project, so start, resume,
+  develop and Owner rework all show the Owner panel. Library selection opens it too.
+
+### Fixed
+- `test_waiting_project_shows_owner_panel_and_feedback_reworks_it` failed: launching a project left the window in
+  home mode, so the Owner decision panel never updated. Its assertions are unchanged.
+
+### Verification
+- C154 audited batches (gui, home, live, supervisor, release): 45/45, no failures or test job survivors.
+- Live feed check: OpenAI 30 items (latest 2026-10-24), Python.org AI jobs 10 items (that feed carries no dates).
+- Visual check on a COPY of the demo workspace: docs/evidence/ui/2026-10-24-home.png and -project-view.png.
+
+### Known issues
+- At the default window size the agent table is squeezed to its header (layout).
+- AI trends come from a single publisher feed; job items have no posting dates.
+- Not yet done: the active-task feedback UX and a full entrypoint walk-through by the Owner.
+
 ## [0.1.53] - 2026-10-24
 
 Repeated "edit did not apply" / empty-build failures of the demo project (P-20261023-2a0e75 v4-v6).
