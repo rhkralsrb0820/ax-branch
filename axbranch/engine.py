@@ -1022,10 +1022,16 @@ class Engine:
         edits_only = (latest is not None and latest['kind'] == plan['artifact_kind']
                       and len(baseline['current_version']['content']) > EDITS_ONLY_ABOVE)
         if edits_only:
+            # The schema below has ONLY edits: every instruction must say so (v6 of P-20261023-2a0e75 was told
+            # "files = every file of the bundle" by content_rule, returned a whole bundle nowhere, and was empty).
+            context['content_rule'] = ('This reply has no content/files fields: express the deliverable as edits. A '
+                                       'file you rewrite completely = one edit {path, find: "", replace: the complete '
+                                       'new file}; a new file = {path, find: "", replace: its content}.')
             context['edit_rule'] = (f"previous_artifact is large ({len(baseline['current_version']['content'])} "
-                                    'characters): return ONLY edits against it, never the whole file. '
+                                    'characters): return ONLY edits against it. '
                                     + context['edit_rule'].split('. Return the complete')[0] + '. Add new code by '
-                                    'replacing an existing anchor snippet with that snippet plus the new code.')
+                                    'replacing an existing anchor snippet with that snippet plus the new code. Use '
+                                    'find="" (whole-file replace) only for a file that changes almost entirely.')
         build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context,
                                 BUILD_EDITS if edits_only else BUILD, prefer=final['provider'], web=final['web'],
                                 required=self._agent_caps(pid, final))
@@ -1542,9 +1548,16 @@ class Engine:
             return
         finding = {'severity': 'critical', 'kind': 'product', 'issue': f"The final production stage ({final['agent_role']}, {used}) "
                    f'delivered no usable deliverable: {reason}.', 'evidence': (build.get('summary') or '')[:600]}
+        # The rejected reply itself is evidence: without it a "find occurs 0 times" cannot be traced (v4-v6 kept only
+        # summaries). Kept beside the project, never as an artifact version.
+        folder = self.workspace / 'projects' / pid / 'rejected'
+        folder.mkdir(parents=True, exist_ok=True)
+        raw = folder / f"build_v{p['iteration']}_{time.time_ns()}.json"
+        raw.write_text(json.dumps(build, ensure_ascii=False, indent=1), encoding='utf-8')
         with self.store.tx():
             self.store.event(pid, 'build_rejected', agent=final['agent_role'], provider=used,
-                             reason=reason, summary=(build.get('summary') or '')[:600])
+                             reason=reason, summary=(build.get('summary') or '')[:600], raw_output=str(raw),
+                             edits=len(build.get('edits') or []), files=len(build.get('files') or []))
             self.store.add_verification(pid, '', p['iteration'], 'FAIL',
                                         {'verdict': 'FAIL', 'lenses_applied': ['deterministic'], 'criteria': [],
                                          'findings': [finding]},

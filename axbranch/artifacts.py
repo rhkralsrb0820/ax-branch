@@ -114,8 +114,16 @@ def apply_edits(artifact, edits):
             files[rel] = edit.get('replace') or ''       # empty find on a new path = create the file
             continue
         find, text = edit.get('find') or '', files[rel]
-        if not find and not edit.get('replace') and len(files) > 1:
-            del files[rel]                               # empty find + empty replace on an existing file = delete it
+        if not find:
+            # Empty find on an existing file: empty replace deletes it (bundle), otherwise replace = the whole new
+            # file. A complete rewrite never has to reproduce the old text byte-exactly (P-20261023-2a0e75 v5 put
+            # whole-file replacements into find/replace and every one failed to match).
+            if edit.get('replace'):
+                files[rel] = edit['replace']
+            elif len(files) > 1:
+                del files[rel]
+            else:
+                return None, f'edit {i} ({rel}): an empty find and replace would delete the only file'
             continue
         hits = text.count(find) if find else 0
         if hits != 1:

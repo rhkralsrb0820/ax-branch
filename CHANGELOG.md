@@ -3,6 +3,39 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.53] - 2026-10-24
+
+Repeated "edit did not apply" / empty-build failures of the demo project (P-20261023-2a0e75 v4-v6).
+
+### Added
+- A rejected build's raw reply is kept (`projects/<id>/rejected/build_v<N>_*.json`; `build_rejected.raw_output`,
+  edit/file counts). v4-v6 kept only summaries, so the failing `find` text cannot be traced now.
+
+### Changed
+- In edits-only mode, every instruction matches the edits-only schema. `content_rule` no longer says "files = every
+  file of the bundle", and a whole-file rewrite is expressed as `{path, find: "", replace: <new file>}`.
+
+### Fixed
+- An existing file could only be replaced by reproducing its entire old text in `find`. Empty `find` + non-empty
+  `replace` now replaces the file. An empty edit on the only file is still refused, and bundle deletion is
+  unchanged.
+- Facts from the records:
+  - v6 summary "complete replacement bundle in files" with no edits -> "empty deliverable", consistent with the
+    contradiction (the schema had nowhere to put files);
+  - v5 "five complete replacement files, represented [as edits]" -> "edit 1 occurs 0 times";
+  - v4 "edit 12 occurs 0 times". The exact mismatching text of v4/v5 is UNKNOWN (not stored).
+  - Ruled out locally: line endings (v3 is LF-only) and truncation (140 KB < the 400,000-character cap).
+  - previous_artifact and the edit base are the same version.
+
+### Verification
+- New tests fail on 0.1.52 and pass now: whole-file replace; edits-only prompt rules + kept rejected reply.
+  test_edits 7/7.
+- C153 audited batches (edits, engine, bundle, native, training, capabilities, executive_gap, sources, release):
+  181/182, the one skip being the real-EXE E2E (needs AXB_NATIVE_E2E=1); no failures or test job survivors.
+
+### Known issues
+- A model may still copy an inexact snippet; the reply is now kept and the error names the edit.
+
 ## [0.1.52] - 2026-10-22
 
 The training RUN harness: a resolved model_training capability actually trains, once per version.

@@ -1,4 +1,5 @@
 """Edit-based builds: localized changes applied byte-exactly to the latest real version."""
+import json
 import shutil
 import tempfile
 import unittest
@@ -112,6 +113,25 @@ class EditTests(unittest.TestCase):
         self.assertIn('0 times', artifacts.apply_edits(art, [{'path': 'a.py', 'find': 'z', 'replace': ''}])[1])
         single, _ = artifacts.apply_edits(art, [{'path': 'a.py', 'find': '', 'replace': ''}])
         self.assertIsNone(single)                                      # the only file is never deleted
+        # P-20261023-2a0e75 v5: whole-file rewrites had to reproduce the old file in find and never matched.
+        whole, err = artifacts.apply_edits(art, [{'path': 'a.py', 'find': '', 'replace': 'x = 10\n'}])
+        self.assertEqual((whole, err), ({'a.py': 'x = 10\n'}, None))
+
+    def test_edits_only_rules_match_the_schema_and_rejected_replies_are_kept(self):
+        # P-20261023-2a0e75 v6: told "files = every file of the bundle" under an edits-only schema -> empty reply;
+        # v4-v6 kept only summaries, so the failing find could not be traced.
+        rewrite = {'path': 'add_tool.py', 'find': '', 'replace': LAUNCHABLE.replace("add(2, 3))", "add(2, 3), 'ok')")}
+        with mock.patch.object(E, 'EDITS_ONLY_ABOVE', 10):
+            p, pid, script = self.run_with([{'path': 'add_tool.py', 'find': 'not in the file', 'replace': 'x'}], [rewrite])
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p.get('pause_reason'))
+        edit_prompts = [pr for s, _, pr in script.prompts if s is E.BUILD_EDITS]
+        self.assertTrue(edit_prompts)
+        self.assertNotIn('files = every file of the bundle', edit_prompts[0])
+        self.assertIn('whole-file replace', edit_prompts[0])
+        rejected = self.store.events(pid, {'build_rejected'})[0]['detail']
+        kept = json.loads(Path(rejected['raw_output']).read_text(encoding='utf-8'))
+        self.assertEqual(kept['edits'][0]['find'], 'not in the file')               # the exact failing reply
+        self.assertIn("add(2, 3), 'ok')", Path(self.store.artifacts(pid)[-1]['path']).read_text(encoding='utf-8'))
 
     def test_a_bundle_file_can_be_deleted_or_renamed_by_edits(self):
         # Codex review 0.1.38: forced bundle edits could not remove or rename a file.
