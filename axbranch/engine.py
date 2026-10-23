@@ -2081,6 +2081,14 @@ class Engine:
             os.startfile(entry) if os.name == 'nt' else popen(['xdg-open', str(entry)])
             return entry, None
         python = self._python()
+        trained = self._trained(artifact)
+        if trained is not None:
+            # The Owner runs what was verified: the kept training outputs and the same pinned stack the runtime
+            # checks used (the demo app passed verification there but would fail on the plain interpreter).
+            if not training.env_python()[1].is_file():
+                raise Rejected('The training stack this result was verified with is missing; it is not run without it.')
+            shutil.copytree(trained, run / 'outputs', dirs_exist_ok=True)
+            python = str(training.env_python()[1])
         if not python:
             raise Rejected('No Python interpreter found to run the result.')
         flags = subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0

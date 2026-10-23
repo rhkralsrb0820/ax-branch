@@ -73,6 +73,16 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(len([e for e in self.store.events(pid, {'capability_attached'})
                               if e['detail']['who'] == 'Model training']), 1)
 
+    def test_owner_run_uses_the_verified_outputs_and_stack(self):
+        # Demo v8: verified with the training stack and ./outputs, but 결과 실행 used the plain interpreter.
+        eng, pid, p = self.run_project(FILES)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        started = []
+        path, _ = eng.launch_verified(pid, popen=lambda cmd, **kw: started.append((cmd, kw)))
+        cmd, kw = started[0]
+        self.assertIn(str(training.env_python()[1]), cmd)
+        self.assertTrue((Path(kw['cwd']) / 'outputs' / 'model.json').is_file())
+
     def test_failed_training_is_a_deterministic_failure_and_is_not_kept_as_done(self):
         broken = [{'path': 'train.py', 'content': 'raise SystemExit(3)\n'}, FILES[1]]
         eng, pid, p = self.run_project(broken, stop_at='REWORK')

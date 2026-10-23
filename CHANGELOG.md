@@ -3,6 +3,32 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.55] - 2026-10-24
+
+The Owner runs exactly what was verified for a trained result.
+
+### Added
+- Regression test: an Owner run of a trained result uses the training stack and the kept ./outputs.
+
+### Changed
+- `launch_verified` (결과 실행): when the version has a successful training run, its outputs are copied into the run
+  folder and the pinned training stack runs the entry, as in Runtime Acceptance. If that stack is missing, the
+  result is refused rather than run without it.
+
+### Fixed
+- Demo P-20261023-2a0e75 v8 passed verification with the training stack and ./outputs, but 결과 실행 would have
+  started it with the plain interpreter, without scikit-learn, torch or the trained files.
+
+### Verification
+- Real Owner path on the demo (2026-10-24): launch_verified started run/v8/app.py with
+  %LOCALAPPDATA%\axb\te-9af54a16; /api/health reported baseline with 77 labels; three new inquiries were routed to
+  카드팀 / 송금·이체팀 / 충전·환전팀; page screenshot in docs/evidence/ui. The process was then stopped.
+- C155 audited batches (training, engine, native, inputs, gui, bundle, release): 123/124, the one skip being
+  the real-EXE E2E (needs AXB_NATIVE_E2E=1); no failures or test job survivors.
+
+### Known issues
+- The training stack lives at a per-user path; moving the result to another PC needs that stack (not packaged).
+
 ## [0.1.54] - 2026-10-24
 
 淸月 CEO home and pipeline view (started by Codex, completed by Claude).
