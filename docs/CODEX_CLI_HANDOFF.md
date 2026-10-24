@@ -1,5 +1,17 @@
 # Codex CLI handoff — AX Branch (kept current by Claude)
 
+## LATEST (2026-10-25 06:50): HEAD ad9b3f4 (code 7fae36f), F161b 441/441
+- Added since 02:40:
+  - web artifact library + 이어서 개발 (`actions.develop`);
+  - 오너 개발실 redesign (`status.json` schema 2);
+  - preserved builds in `demo-2026-11/builds/` with BUILD.json;
+  - web-path E2E harness `tests/browser_web_e2e.py` and two runs (`docs/evidence/2026-10-25-web-e2e.md`);
+  - fix 7fae36f: the verifier gets the earlier stages' results.
+- **Running:** the web server from `demo-2026-11/builds/0.1.61-ad9b3f4` (stop it with `AXBranch.exe web --stop`).
+  The Owner's Tk window is untouched.
+- **Codex review loop:** read `outputs/ceo-demo-review/CODEX_REVIEW.md`; write results to `IMPLEMENTATION_STATUS.md`
+  there.
+
 ## CURRENT (2026-10-25 02:40): branch `dev/web-ui`, version 0.1.61, final code 7884507, NOT merged into main
 - The single structured status record is `docs/devroom/status.json`, shown in the web UI's 오너 개발실. Update it
   at each work unit; never mark code as verified without evidence.
