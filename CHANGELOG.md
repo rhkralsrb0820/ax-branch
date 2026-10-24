@@ -3,6 +3,31 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.59] - 2026-10-24
+
+### Added
+- Reference-inspired pastel dashboard: lavender navigation, rounded cards, CEO identity mark, state bars and a donut from stored project states.
+- Scrollable home and agent table; keyboard-accessible source links.
+
+### Changed
+- Goal composer lives in the main workspace and folds when a project opens. New-task navigation restores it.
+- Project actions are grouped in a menu; existing feedback, approval and execution handlers are preserved.
+
+### Fixed
+- Dashboard accounts for less common states without silently dropping them from the total.
+- Agent table has horizontal and vertical scrollbars instead of relying on window size.
+
+### Verification
+- Home, GUI and live-view regression tests; menu actions exercise the same end-to-end assertions.
+- Visual checks use an isolated database copy with execution disabled (engine factory refuses; supervision, launch
+  and result runs are stubbed), captured with PrintWindow of the app window only.
+- Full suite F159b on the unchanged final code: see docs/evidence/2026-10-24-dashboard-redesign.md (the earlier F159
+  ran while UI files were still being edited and is not counted).
+
+### Known issues
+- Tk rendering differs from web reference images; no glass blur or simulated activity charts.
+- Existing generated-app dependencies and feed coverage limitations remain.
+
 ## [0.1.58] - 2026-10-24
 
 A current AX Branch demo package, separate from the old dist build, verified as a package on this PC.

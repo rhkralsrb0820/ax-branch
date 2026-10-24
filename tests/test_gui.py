@@ -30,11 +30,39 @@ def _radios(widget):
 
 
 def _press(widget, text):
-    button = next(b for b in _buttons(widget) if b.cget('text') == text)
-    button.invoke()
+    button = next((b for b in _buttons(widget) if b.cget('text') == text), None)
+    if button is not None:
+        button.invoke()
+        return
+    # The redesigned command bar groups project actions in a real menu.
+    def menus(parent):
+        for child in parent.winfo_children():
+            if isinstance(child, tk.Menu):
+                yield child
+            yield from menus(child)
+    for menu in menus(widget):
+        for index in range((menu.index('end') or 0) + 1):
+            if menu.type(index) == 'command' and menu.entrycget(index, 'label') == text:
+                menu.invoke(index)
+                return
+    raise AssertionError(f'No UI action labelled {text}')
 
 
 class GuiTests(unittest.TestCase):
+    def test_dashboard_composer_folds_and_restores_without_executing(self):
+        self.app.update_idletasks()
+        self.assertEqual(self.app.composer.winfo_manager(), 'pack')
+        pid = self.app.store.new_project('layout check')
+        self.app.selected = pid
+        self.app.open_project()
+        self.app.update_idletasks()
+        self.assertEqual(self.app.composer.winfo_manager(), '')
+        self.assertFalse(self.app.running)
+        self.app.go_home()
+        self.app.update_idletasks()
+        self.assertEqual(self.app.composer.winfo_manager(), 'pack')
+        self.assertEqual(self.app.store.project(pid)['state'], 'CREATED')
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ws, self.vault = self.tmp / 'ws', self.tmp / 'vault'

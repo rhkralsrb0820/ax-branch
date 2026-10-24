@@ -7,6 +7,13 @@ from axbranch.home import parse_feed
 
 
 class FeedTests(unittest.TestCase):
+    def test_dashboard_counts_every_state_without_claiming_success(self):
+        from axbranch.home import state_groups
+        rows = [{'state': s} for s in ('EXECUTING', 'OWNER_REVIEW', 'PAUSED', 'CLOSED', 'ARCHIVING')]
+        groups = state_groups(rows)
+        self.assertEqual(sum(n for _, n, _ in groups), len(rows))
+        self.assertEqual(dict((label, n) for label, n, _ in groups)['종료'], 1)
+        self.assertEqual(state_groups([])[0][1], 0)
     def test_sorted_deduplicated_and_no_script_links(self):
         raw = b'''<rss><channel>
         <item><title>Older</title><link>https://example.com/old</link><pubDate>Mon, 19 Oct 2026 10:00:00 GMT</pubDate></item>

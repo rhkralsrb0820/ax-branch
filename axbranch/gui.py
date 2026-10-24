@@ -14,11 +14,22 @@ from . import WORKSPACE, __version__, library, live, supervisor
 from .library import project_title
 from .engine import open_engine
 from .state import Busy, Store
-from .home import Home, draw_pipeline
+from .home import Home, draw_pipeline, configure_theme, ceo_symbol, RoundedPanel
 
 FONT = ('Malgun Gothic', 10)
 COLUMNS = {'engine': ('엔진', 70), 'task': ('현재 작업', 170), 'status': ('상태', 230), 'last': ('마지막 활동', 90),
            'why': ('고용 이유', 220), 'result': ('결과', 260)}
+
+
+class RecordText(scrolledtext.ScrolledText):
+    """Keep Text's API and keyboard scrolling, replace the classic OS scrollbar."""
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, padx=16, pady=14, borderwidth=0, highlightthickness=0, **kwargs)
+        self.frame.configure(borderwidth=0, highlightthickness=0, relief='flat', background='white')
+        self.vbar.destroy()
+        self.vbar = ttk.Scrollbar(self.frame, orient='vertical', command=self.yview)
+        self.vbar.pack(side='right', fill='y')
+        self.configure(yscrollcommand=self.vbar.set)
 
 
 class App(tk.Tk):
@@ -26,6 +37,7 @@ class App(tk.Tk):
         """engine_factory: callable returning a fresh Engine (own SQLite connection) — tests
         inject one; goal: pre-filled and submitted once the window is up (`--goal`)."""
         super().__init__()
+        configure_theme(self)
         self.workspace = workspace
         self.engine_factory = engine_factory or (lambda: open_engine(workspace))
         self.injected = engine_factory is not None
@@ -42,33 +54,55 @@ class App(tk.Tk):
         self._notice = ['']           # set by worker threads, shown by the Tk thread
         self._last_supervision = 0.0
 
-        top = ttk.Frame(self, padding=8); top.pack(fill='x')
-        ttk.Label(top, text='청월에게 맡길 새로운 업무', font=('Malgun Gothic', 11, 'bold')).pack(anchor='w')
-        self.goal = tk.Text(top, height=3, font=FONT, wrap='word'); self.goal.pack(fill='x')
-        goal_row = ttk.Frame(top); goal_row.pack(fill='x', pady=4)
-        ttk.Button(goal_row, text='淸月 CEO에게 맡기기', command=self.start).pack(side='right')
+        shell = ttk.Frame(self, padding=16); shell.pack(fill='both', expand=True)
+        holder = ttk.Frame(shell, width=224, style='Sidebar.TFrame')
+        holder.pack(side='left', fill='y', padx=(0, 18))
+        holder.pack_propagate(False)
+        ttk.Label(holder, text='◒  AX Branch', style='Brand.TLabel').pack(anchor='w', padx=18, pady=(22, 4))
+        ttk.Label(holder, text='청월 AI 워크스페이스', style='Side.TLabel').pack(anchor='w', padx=18, pady=(0, 30))
+        main = ttk.Frame(shell); main.pack(side='left', fill='both', expand=True)
+        header = ttk.Frame(main); header.pack(fill='x', pady=(4, 16))
+        self.page_title = ttk.Label(header, text='워크스페이스  /  청월 홈', style='Page.TLabel')
+        self.page_title.pack(side='left')
+        ttk.Button(header, text='+ 새 업무', command=self.go_home).pack(side='right', padx=(12, 0))
+        ttk.Label(header, text=f'로컬 워크스페이스   ·   v{__version__}', style='Muted.TLabel').pack(side='right')
+        panel = RoundedPanel(main)
+        panel.pack(fill='x', pady=(0, 16))
+        self.composer = panel
+        top = panel.content
+        ceo_symbol(top).pack(side='left', padx=(0, 20))
+        composer_content = ttk.Frame(top, style='Card.TFrame')
+        composer_content.pack(side='left', fill='both', expand=True)
+        top = composer_content
+        ttk.Label(top, text='청월에게 어떤 일을 맡길까요?', style='CardTitle.TLabel').pack(anchor='w')
+        self.goal = tk.Text(top, height=2, font=('Malgun Gothic', 12), wrap='word', relief='flat', bg='#f6f7fb', fg='#202636', padx=12, pady=10, highlightthickness=1, highlightbackground='#e5e8f0', highlightcolor='#7964db'); self.goal.pack(fill='x')
+        goal_row = ttk.Frame(top, style='Card.TFrame'); goal_row.pack(fill='x', pady=4)
+        ttk.Button(goal_row, text='淸月 CEO에게 맡기기', style='Primary.TButton', command=self.start).pack(side='right')
         ttk.Button(goal_row, text='파일 첨부', command=self.attach).pack(side='right', padx=6)
         self.attached = []           # Owner input files for the next Goal (copied read-only when it starts)
-        self.attached_label = ttk.Label(goal_row, text=''); self.attached_label.pack(side='right')
+        self.attached_label = ttk.Label(goal_row, text='', style='Card.TLabel'); self.attached_label.pack(side='right')
 
-        body = ttk.PanedWindow(self, orient='horizontal'); body.pack(fill='both', expand=True, padx=8)
+        body = ttk.PanedWindow(main, orient='horizontal'); body.pack(fill='both', expand=True)
         # Project list: short title + one colored status dot (a Listbox can only color whole rows).
-        holder = ttk.Frame(body, width=LIST_WIDTH)       # starting width of the list pane (~280 px)
-        holder.pack_propagate(False)
-        for label in ('청월 홈', 'AI 동향', 'AI 취업'):
-            ttk.Button(holder, text=label, command=lambda name=label: self.go_home(name)).pack(fill='x', pady=3)
+        self.nav_buttons = {}
+        for label, symbol in (('청월 홈', '⌂'), ('AI 동향', '◈'), ('AI 취업', '▤')):
+            button = ttk.Button(holder, text=f'{symbol}   {label}', style='Selected.Nav.TButton' if label == '청월 홈' else 'Nav.TButton', command=lambda name=label: self.go_home(name))
+            button.pack(fill='x', padx=10, pady=4)
+            self.nav_buttons[label] = button
+        ttk.Separator(holder).pack(fill='x', padx=16, pady=20)
+        ttk.Label(holder, text='나의 프로젝트', style='Side.TLabel').pack(anchor='w', padx=18, pady=(0, 12))
         self.list = tk.Text(holder, font=LIST_FONT, width=1, wrap='none', cursor='arrow',
-                            spacing1=4, spacing3=4, padx=LIST_PAD, state='disabled')
+                            spacing1=8, spacing3=8, padx=LIST_PAD, state='disabled', relief='flat', borderwidth=0, bg='#eae6f5', fg='#56516b', highlightthickness=0)
         self.list.pack(fill='both', expand=True)
         for tag, color in INDICATOR_COLORS.items():
             self.list.tag_configure(tag, foreground=color)
-        self.list.tag_configure('selected', background='#d6e8ff')
+        self.list.tag_configure('selected', background='#d7ceeb')
         self.list.bind('<Button-1>', self.select)
         # Widths change -> titles are re-fitted; hover shows the full title.
         self.list.bind('<Configure>', lambda _e: self.refresh_list(force=True))
         self.list.bind('<Motion>', self._tip)
         self.list.bind('<Leave>', lambda _e: self._tip(None))
-        body.add(holder, weight=0)                        # the main area takes any extra width; divider draggable
+        ttk.Button(holder, text='▣   결과물 라이브러리', style='Nav.TButton', command=self.library_window).pack(side='bottom', fill='x', padx=12, pady=16, before=self.list)
         self.ids, self._rows, self._titles, self._tipwin = [], None, [], None
         self._labels = {}
         view = ttk.Frame(body)              # project view: status banner + panes
@@ -84,7 +118,7 @@ class App(tk.Tk):
         self.right = right
         self.body = body
         self.home = Home(body, workspace)
-        self.owner_box = ttk.LabelFrame(view, text='Owner 결정 — AX Branch가 기다리고 있습니다', padding=6)
+        self.owner_box = ttk.LabelFrame(view, text='결과 확인 및 피드백', padding=16)
         self.owner_note = ttk.Label(self.owner_box, font=FONT, wraplength=820, justify='left')
         self.owner_note.pack(anchor='w')
         self.works_row = ttk.Frame(self.owner_box)
@@ -94,7 +128,7 @@ class App(tk.Tk):
         ttk.Label(self.works_row, text='실행해 보니:', font=FONT).pack(side='left')
         for label, value in (('작동함', 'yes'), ('작동하지 않음', 'no'), ('아직 확인 안 함', 'unknown')):
             ttk.Radiobutton(self.works_row, text=label, value=value, variable=self.works).pack(side='left', padx=4)
-        self.feedback = tk.Text(self.owner_box, height=3, font=FONT, wrap='word')
+        self.feedback = tk.Text(self.owner_box, height=2, font=FONT, wrap='word', bg='#f5f3fa', padx=12, pady=10)
         self.decide_row = ttk.Frame(self.owner_box)
         for text, cmd in (('수정 요청 / 계속', self.owner_send), ('완료', self.owner_finish), ('중단', self.stop)):
             ttk.Button(self.decide_row, text=text, command=cmd).pack(side='left', padx=3)
@@ -104,7 +138,7 @@ class App(tk.Tk):
         self._owner_mode = None
         # Live execution view: project -> 淸月 CEO -> hired agents -> verification -> Owner review, read
         # from local state (supervisor status, heartbeat/activity files, SQLite) every refresh; no AI call.
-        self.live = tk.Text(right, font=FONT, wrap='word', state='disabled', height=4)
+        self.live = tk.Text(right, font=FONT, wrap='word', state='disabled', height=3, padx=14, pady=8, fg='#68718a')
         right.add(self.live, weight=0)
         graph = ttk.Frame(right)
         self.pipeline = tk.Canvas(graph, height=105, background='#ffffff', highlightthickness=0)
@@ -117,7 +151,16 @@ class App(tk.Tk):
         # Agents and their records side by side: stacked, they shared the leftover height and the table collapsed.
         lower = ttk.PanedWindow(right, orient='horizontal')
         right.add(lower, weight=1)
-        self.agents = ttk.Treeview(lower, columns=tuple(COLUMNS), show='tree headings', height=8, selectmode='browse')
+        agent_box = ttk.Frame(lower, style='Card.TFrame')
+        self.agents = ttk.Treeview(agent_box, columns=tuple(COLUMNS), show='tree headings', height=8, selectmode='browse')
+        agent_box.rowconfigure(0, weight=1)
+        agent_box.columnconfigure(0, weight=1)
+        self.agents.grid(row=0, column=0, sticky='nsew')
+        yscroll = ttk.Scrollbar(agent_box, orient='vertical', command=self.agents.yview)
+        yscroll.grid(row=0, column=1, sticky='ns')
+        xscroll = ttk.Scrollbar(agent_box, orient='horizontal', command=self.agents.xview)
+        xscroll.grid(row=1, column=0, sticky='ew')
+        self.agents.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
         self.agents.heading('#0', text='Agent')
         self.agents.column('#0', width=230, stretch=False)
         for col, (title, width) in COLUMNS.items():
@@ -125,22 +168,26 @@ class App(tk.Tk):
             self.agents.column(col, width=width, stretch=col in ('why', 'result'))
         self.agents['displaycolumns'] = ('engine', 'task', 'status')     # the rest is in Agent 기록
         self.agents.bind('<<TreeviewSelect>>', lambda _e: self.show())
-        lower.add(self.agents, weight=1)
+        lower.add(agent_box, weight=1)
         tabs = ttk.Notebook(lower)
         lower.add(tabs, weight=1)
-        self.records = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
-        self.timeline = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
-        self.detail = scrolledtext.ScrolledText(tabs, font=FONT, wrap='word', state='disabled')
+        self.records = RecordText(tabs, font=FONT, wrap='word', state='disabled')
+        self.timeline = RecordText(tabs, font=FONT, wrap='word', state='disabled')
+        self.detail = RecordText(tabs, font=FONT, wrap='word', state='disabled')
         for widget, title in ((self.records, 'Agent 기록'), (self.timeline, '타임라인'), (self.detail, '프로젝트')):
             tabs.add(widget, text=title)
 
-        bar = ttk.Frame(self, padding=8); bar.pack(fill='x', side='bottom', before=body)   # never clipped
+        bar = ttk.Frame(main, padding=(0, 10)); bar.pack(fill='x', side='bottom', before=body)   # never clipped
+        actions = ttk.Menubutton(bar, text='프로젝트 관리 ▾')
+        actions.pack(side='left')
+        menu = tk.Menu(actions, tearoff=False)
+        actions.configure(menu=menu)
         for text, cmd in (('Library', self.library_window), ('리뷰 / 피드백…', self.review_dialog),
                           ('외부 연결 승인', lambda: self.network(True)),
                           ('외부 연결 거절', lambda: self.network(False)),
                           ('계속 실행 / 재개', self.resume), ('중단', self.stop), ('프로젝트 종료…', self.finish),
                           ('폴더 열기', self.open_folder)):
-            ttk.Button(bar, text=text, command=cmd).pack(side='left', padx=3)
+            menu.add_command(label=text, command=cmd)
         self.status = ttk.Label(bar, text=''); self.status.pack(side='right')
         self.protocol('WM_DELETE_WINDOW', self.quit_app)
         body.forget(view)
@@ -573,6 +620,10 @@ class App(tk.Tk):
 
     # ---- display
     def go_home(self, category='청월 홈'):
+        for name, button in self.nav_buttons.items():
+            button.configure(style='Selected.Nav.TButton' if name == category else 'Nav.TButton')
+        self.composer.pack(fill='x', pady=(0, 16), before=self.body)
+        self.page_title.config(text='워크스페이스  /  ' + category)
         self.home_mode = True
         if str(self.view) in self.body.panes():
             self.body.forget(self.view)
@@ -581,6 +632,10 @@ class App(tk.Tk):
         self.home.update_state(self.store.projects())
 
     def open_project(self):
+        for button in self.nav_buttons.values():
+            button.configure(style='Nav.TButton')
+        self.composer.pack_forget()
+        self.page_title.config(text='워크스페이스  /  실행 파이프라인')
         self.home_mode = False
         if str(self.home) in self.body.panes():
             self.body.forget(self.home)
@@ -691,8 +746,9 @@ class App(tk.Tk):
         if self.banner.cget('text') != text:
             self.banner.config(text=text, bg=color)
         self._owner_panel(p, status)
-        _put(self.live, '\n'.join(f'{k}: {v}' for k, v in view['header'] if k not in ('목표', '다음 작업'))
-             + f"\n다음: {dict(view['header'])['다음 작업']}")
+        header = dict(view['header'])
+        _put(self.live, f"{project_title(p)}\n현재 작업  {header.get('현재 작업', '기록 확인')}\n"
+             '에이전트를 선택하면 작업 내용과 검증 근거를 볼 수 있습니다.')
         rows = {r['key']: r for r in view['pipeline']}
         signature = repr(view['pipeline'])
         if signature != self._pipeline_signature:
@@ -790,7 +846,7 @@ def indicator(state, status):
     return 'waiting', '●'                                 # PAUSED, WAITING_FOR_PROVIDER
 
 
-LIST_WIDTH, LIST_PAD, LIST_FONT = 280, 8, ('Malgun Gothic', 11)
+LIST_WIDTH, LIST_PAD, LIST_FONT = 224, 16, ('Malgun Gothic', 10)
 
 
 def fit(text, room, measure):
