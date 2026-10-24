@@ -104,6 +104,14 @@ class GuiTests(unittest.TestCase):
         with mock.patch.object(self.app, 'winfo_containing', return_value=self.app.project_departments):
             self.app._drop(200, 200)
         self.assertEqual([d['id'] for d in departments.attached(self.app.store, pid)], ['research'])
+        # A drop the hit test cannot place (outside, or covered by another window) connects nothing and says so.
+        self.app._drag = ('operations', 10, 10)
+        with mock.patch.object(self.app, 'winfo_containing', return_value=None), \
+                mock.patch('axbranch.gui.messagebox.showinfo') as info:
+            self.app._drop(200, 200)
+        self.assertIn('연결되지 않았습니다', info.call_args.args[1])
+        self.assertIn('프로젝트에 추가', info.call_args.args[1])
+        self.assertEqual([d['id'] for d in departments.attached(self.app.store, pid)], ['research'])
         with mock.patch('axbranch.gui.messagebox.showinfo') as info:            # duplicate refused, said once
             self.app.add_department('research', to_project=True)
         self.assertIn('이미 연결된 부서', info.call_args.args[1])

@@ -142,12 +142,41 @@ class DepartmentTests(unittest.TestCase):
 
     def test_no_fitting_department_is_a_recorded_temporary_agent(self):
         pipeline = [dict(DepartmentScript().pipeline[0]),
-                    dict(DepartmentScript().pipeline[1], department='', why='no attached department builds tools')]
+                    dict(DepartmentScript().pipeline[1], department='', agent_role='Interim builder',
+                         why='no attached department builds tools')]
         pid = self.project('research')
         p = self.engine(DepartmentScript(pipeline)).run(pid)
         self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
         temp = self.store.events(pid, {'temporary_agent'})[0]['detail']
         self.assertEqual((temp['stage'], temp['why'], temp['attached']), ('build', 'no attached department builds tools', ['research']))
+
+    def test_temporary_agent_cannot_bypass_attachment_tools_or_network(self):
+        # Only research (reasoning, no network) attached: a temporary agent may not take operations' role,
+        # declare tools no attached department grants, or research the web.
+        cases = [({'agent_role': 'Operations designer'}, "'operations'"),
+                 ({'capabilities': ['code_generation']}, 'no attached department provides'),
+                 ({'capabilities': ['web_research'], 'web': True}, 'web')]
+        for change, word in cases:
+            with self.subTest(word=word):
+                first = dict(DepartmentScript().pipeline[0], department='', **{'agent_role': 'Interim analyst', **change})
+                script = DepartmentScript([first, dict(DepartmentScript().pipeline[1], department='')])
+                pid = self.project('research')
+                p = self.engine(script).run(pid)
+                self.assertEqual(p['state'], 'PAUSED')
+                self.assertIn(word, self.store.events(pid, {'delegation_refused'})[-1]['detail']['reason'])
+                self.assertFalse(any(s in (E.WORK, E.BUILD) for s, _ in script.contexts))
+                self.assertFalse(self.store.events(pid, {'temporary_agent'}))
+        # Allowed: the final stage keeps the engine's build contract; the record names its tools.
+        last = dict(DepartmentScript().pipeline[1], department='', agent_role='Interim builder',
+                    capabilities=['code_generation'])
+        pid = self.project('research')
+        p = self.engine(DepartmentScript([DepartmentScript().pipeline[0], last])).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        temp = self.store.events(pid, {'temporary_agent'})[0]['detail']
+        self.assertEqual((temp['tools'], temp['web']), (['code_generation', 'reasoning'], False))
+        # Nothing attached: the pre-department rules apply unchanged (no department policy).
+        self.assertIsNone(D.check_stage({'name': 'x', 'agent_role': 'Operations designer', 'web': True,
+                                         'capabilities': ['web_research']}, {}, SPECS))
 
     def test_detached_department_gets_no_new_work_and_replanning_resumes(self):
         pid = self.project('research', 'operations')
@@ -168,6 +197,25 @@ class DepartmentTests(unittest.TestCase):
         self.assertNotIn('delegation refused', p['pause_reason'] or '')
         self.assertTrue(self.store.events(pid, {'temporary_agent'}))
 
+
+    def test_cli_attaches_refuses_duplicates_and_detaches(self):
+        # The packaged exe's mouse-free path (axbranch department <id> list|attach|detach): same rules as the window.
+        import contextlib, io
+        from unittest import mock
+        from axbranch import __main__ as cli
+        pid = self.project()
+        def run(*args):
+            out = io.StringIO()
+            with mock.patch.object(cli, 'open_engine', lambda **kw: self.engine(DepartmentScript())),                     contextlib.redirect_stdout(out):
+                return cli.main(['department', pid, *args]), out.getvalue().strip()
+        self.assertEqual(run('attach', 'research'), (None, 'research'))
+        code, text = run('attach', 'research')
+        self.assertEqual(code, 1)
+        self.assertIn('이미 연결된 부서', text)
+        self.assertEqual(run('attach', 'operations')[1], 'research, operations')
+        self.assertEqual(run('detach', 'research')[1], 'operations')
+        self.assertEqual(run('list')[1], 'operations')
+        self.assertEqual(len(self.store.events(pid, {'department_attached'})), 2)
 
 if __name__ == '__main__':
     unittest.main()

@@ -684,6 +684,10 @@ class App(tk.Tk):
             self.add_department(dep_id, to_project=False)
         elif target is self.view and not self.home_mode:
             self.add_department(dep_id, to_project=True)
+        else:   # missed, or the spot is covered by another window (the hit test then finds no AX Branch widget)
+            messagebox.showinfo('AX Branch', f"연결되지 않았습니다: {self.department_specs[dep_id]['name']}\n"
+                                '놓은 곳이 프로젝트 화면이나 목표 입력창이 아니었습니다(다른 창에 가려졌을 수 있음). '
+                                '부서를 클릭해 상세 화면의 [프로젝트에 추가]를 사용하세요.')
 
     def department_menu(self):
         menu = tk.Menu(self, tearoff=False)

@@ -184,7 +184,9 @@ Rules:
 - attached_departments are the function packages the Owner connected to THIS project. Delegate a stage to one by
   setting department=<its id>; use its agent_role and only its tools. Never name a department that is not attached
   (the engine refuses it). Use department="" (a temporary agent) only when no attached department fits, and say why
-  in the stage's why. Departments pass results forward: a later stage receives the earlier stages' outputs.
+  in the stage's why (the missing function). A temporary agent is bound by the attached departments too: only their
+  tools (plus reasoning; the final stage may always produce), web only if one of them has network, and never the
+  agent_role of a library department that is not attached. Departments pass results forward: a later stage receives the earlier stages' outputs.
   Model weight training (LoRA of small public models): declare model_training on the stage that needs it; the
   engine tries free options with a real small run and records the decision (Owner approval if none works).
   When attached, the deliverable is a bundle with train.py: the engine runs it ONCE per version in a pinned CPU stack
@@ -881,10 +883,12 @@ class Engine:
         specs = self._attached_departments(pid)
         return {'attached_departments': [departments.summary(s) for s in specs.values()]} if specs else {}
 
-    def _attached_departments(self, pid):
-        """{id: spec} of the departments attached to this project that the library still provides (validated)."""
+    def _attached_departments(self, pid, with_library=False):
+        """{id: spec} of the departments attached to this project that the library still provides (validated);
+        with_library: also the whole valid library (for refusing impersonation of unattached departments)."""
         valid, _ = departments.catalog()
-        return {d['id']: valid[d['id']] for d in departments.attached(self.store, pid) if d['id'] in valid}
+        attached = {d['id']: valid[d['id']] for d in departments.attached(self.store, pid) if d['id'] in valid}
+        return (attached, valid) if with_library else attached
 
     def _delegation_refused(self, pid, why):
         self.store.event(pid, 'delegation_refused', reason=why)
@@ -946,9 +950,9 @@ class Engine:
                                   + '; '.join(waiting) + '. Approve: axbranch approve <id> --network yes|no',
                              resume_state='STAFFING')
             return
-        specs = self._attached_departments(pid)
+        specs, library = self._attached_departments(pid, with_library=True)
         for stage in plan['pipeline']:
-            why = departments.check_stage(stage, specs)
+            why = departments.check_stage(stage, specs, library, final=stage is plan['pipeline'][-1])
             if why:
                 return self._delegation_refused(pid, why)
         with self.store.tx():
@@ -959,7 +963,8 @@ class Engine:
                                      version=specs[dep]['version'], agent_role=stage['agent_role'], why=stage.get('why', ''))
                 elif specs:   # departments are attached but none fits: a temporary agent, recorded and shown
                     self.store.event(pid, 'temporary_agent', stage=stage['name'], agent_role=stage['agent_role'],
-                                     why=stage.get('why', ''), attached=sorted(specs))
+                                     why=stage.get('why', ''), attached=sorted(specs),
+                                     tools=stage.get('capabilities', []), web=bool(stage.get('web')))
             staffed = {(a['role'], a['provider']) for a in self.store.agents(pid)}
             for stage in plan['pipeline']:
                 if (stage['agent_role'], stage['provider']) not in staffed:
@@ -1003,9 +1008,9 @@ class Engine:
         if confirmed is not None and confirmed is not latest:
             baseline['owner_confirmed_version'] = {'version': confirmed['iteration'],
                                                    'content': artifacts.text_of(confirmed)}
-        specs = self._attached_departments(pid)
+        specs, library = self._attached_departments(pid, with_library=True)
         for stage in plan['pipeline']:
-            why = departments.check_stage(stage, specs)    # detached since staffing: no new work goes there
+            why = departments.check_stage(stage, specs, library, final=stage is plan['pipeline'][-1])   # detached since staffing: no new work goes there
             if why:
                 return self._delegation_refused(pid, why)
         for idx, stage in enumerate(notes_stages):

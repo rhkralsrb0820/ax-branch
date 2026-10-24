@@ -1,7 +1,7 @@
 # Codex CLI handoff — department harness (kept current by Claude)
 
 Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` (pushed to origin), based on `main`
-11a36bf (0.1.59). Version 0.1.60, commit 608fdca. Nothing from this work is uncommitted.
+11a36bf (0.1.59). Version 0.1.60, final reliability pass committed on this branch (see `git log`). Not merged into main (Owner).
 
 ## Done (0.1.60)
 - Department harness:
@@ -18,6 +18,13 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
   settings.json; the current pipeline node and the hand-off into it are statically emphasised.
 - `AXBranch.exe --open <id>` (view only) and `axbranch result <id>` / `AXBranch.exe result <id>` (= [결과 실행]).
 - Fixes: a duplicate refresh loop from direct refresh() calls; the orb timer is cancelled on destroy.
+- Reliability pass (final 0.1.60):
+  - temporary agents are bound by the attached departments' tools and network and may not take an unattached
+    department's agent role (`check_stage`, CEO rule); `temporary_agent` records its tools and web flag;
+  - a drag drop that lands nowhere (or on a covered spot) says "연결되지 않았습니다" and points to
+    [프로젝트에 추가];
+  - `axbranch department <id> list|attach|detach` (also `AXBranch.exe department …`): the window's rules,
+    mouse-free.
 
 ## Evidence
 - `docs/evidence/2026-10-24-departments.md`: the completion criteria mapped to tests, the real E2E, suites and the
@@ -27,12 +34,17 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
   `C:\Users\HP\Documents\Codex\2026-10-17\referenced-chatgpt-conversation-this-is-an`:
   `work/run_department_e2e.py`, `outputs/department-e2e*`.
 - Tests:
-  - F160b 410/411: the one failure is an intermittent headless-Edge timeout in an unchanged browser test,
-    which passed in 2 targeted reruns;
-  - C160c 151/151 on the final code (affected modules).
-- Package: `C:\Users\HP\Desktop\AX-Branch\demo-2026-11\package-0.1.60\AXBranch\AXBranch.exe` (sha256 519ce462...),
-  README-DEMO.txt beside it.
-  - Verified: `--open` for 2 projects, `result` → the inquiry app's health and classify, no model call.
+  - F160d, final code, hash-matched: 413/414. The one failure is a headless-Edge 90 s timeout in an unchanged
+    browser test; it passed 3/3 when run alone.
+  - F160b's failure was isolated 10× per checkout: branch 8/10, main 9/10, same message.
+  - See `docs/evidence/2026-10-24-F160b-runtime-failure.md`.
+- Enforced versus declared department fields: `docs/evidence/2026-10-24-department-enforcement.md`. There is no
+  OS isolation.
+- Package: `C:\Users\HP\Desktop\AX-Branch\demo-2026-11\package-0.1.60\AXBranch\AXBranch.exe` (sha256
+  77db6aa9…818f), README-DEMO.txt beside it.
+  - Verified: department attach / duplicate / detach / relaunch restore in an isolated root; `--open` for 2 demo
+    projects; `result` → the inquiry app, no model call.
+  - The drag gesture itself was not done on the package (no real mouse).
 
 ## Exact notes carried from 0.1.59
 - Selecting an agent shows its record: role and engine, department, why hired, task/instructions, its stage
@@ -43,7 +55,9 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
 ## Remaining (not done)
 - Merging dev/departments into main (left for the Owner/Codex decision).
 - More departments beyond research and operations.
-- Headless-Edge flakiness on this PC in browser runtime tests (intermittent, pre-existing code).
+- Headless-Edge 90 s timeouts on this PC in browser runtime tests (intermittent, also on main; root cause not
+  investigated, limit not raised).
+- Real-model E2E of a temporary agent / refusal / detach (deterministic tests only).
 - Not verified: another PC, Windows without Python, other display scalings.
 
 ## Reproduce

@@ -47,6 +47,8 @@ def main(argv=None):
     f.add_argument('--confirm', action='store_true'); f.add_argument('--satisfaction', type=int)
     sub.add_parser('upgrade-proposal')
     sub.add_parser('training-env')
+    dp = sub.add_parser('department', help='departments of a project: list / attach / detach (same as the window)')
+    dp.add_argument('id'); dp.add_argument('action', choices=('list', 'attach', 'detach')); dp.add_argument('dep', nargs='?')
     sub.add_parser('result').add_argument('id')      # the verified result, as [결과 실행] / [결과 보기] does        # (re)create the pinned training stack a trained result needs
     ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
     sv = sub.add_parser('supervise'); sv.add_argument('--watch', action='store_true')
@@ -186,6 +188,18 @@ def _dispatch(a):
     elif a.cmd == 'result':
         how, path = engine.open_result(a.id)
         print(f"{'실행함' if how == 'run' else '열었음'}: {path} (검증된 버전)")
+    elif a.cmd == 'department':
+        from . import departments
+        specs, _ = departments.catalog()
+        try:
+            if a.action == 'attach':
+                departments.attach(store, a.id, a.dep, specs)
+            elif a.action == 'detach':
+                departments.detach(store, a.id, a.dep)
+        except departments.Rejected as e:
+            print(f'거부: {e}')
+            return 1
+        print(', '.join(d['id'] for d in departments.attached(store, a.id)) or '(연결된 부서 없음)')
     elif a.cmd == 'training-env':
         from . import training
         env = training.ensure_env(os.getcwd())

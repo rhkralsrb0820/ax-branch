@@ -99,15 +99,34 @@ def summary(spec):
                                                             'network': spec['permissions']['network']}
 
 
-def check_stage(stage, attached_specs):
-    """None if this stage may run as planned; otherwise why it is refused."""
+def check_stage(stage, attached_specs, library=None, final=False):
+    """None if this stage may run as planned; otherwise why it is refused. A temporary agent (department "") is
+    bound by the attached departments too: it cannot use tools or web research none of them grants, nor take
+    the agent role of a library department that is not attached (that would bypass the attachment). The final stage
+    may declare code_generation either way: producing the deliverable is the engine's build contract."""
+    build = {'reasoning', 'code_generation'} if final else {'reasoning'}
     dep = stage.get('department') or ''
     if not dep:
-        return None                                          # a temporary agent (recorded by the engine)
+        if not attached_specs:
+            return None                                      # no departments: the pre-department rules apply
+        name = stage.get('name')
+        allowed = build | {t for s in attached_specs.values() for t in s['tools']}
+        extra = sorted(set(stage.get('capabilities', [])) - allowed)
+        if extra:
+            return (f"temporary agent for stage {name!r} asks {extra}, which no attached department provides; "
+                    'attach a department that provides it')
+        if stage.get('web') and not any(s['permissions']['network'] for s in attached_specs.values()):
+            return f"temporary agent for stage {name!r} needs web access but no attached department has network permission"
+        role = str(stage.get('agent_role', '')).strip().lower()
+        for other, spec in (library or {}).items():
+            if other not in attached_specs and spec['agent']['role'].strip().lower() == role:
+                return (f"temporary agent for stage {name!r} takes the agent role of department {other!r}, "
+                        'which is not attached')
+        return None
     spec = attached_specs.get(dep)
     if spec is None:
         return f"stage {stage.get('name')!r} was delegated to department {dep!r}, which is not attached to this project"
-    extra = sorted(set(stage.get('capabilities', [])) - set(spec['tools']) - {'reasoning'})
+    extra = sorted(set(stage.get('capabilities', [])) - set(spec['tools']) - build)
     if extra:
         return f"stage {stage.get('name')!r} asks {extra} beyond department {dep!r}'s tools {spec['tools']}"
     if stage.get('web') and not spec['permissions']['network']:
