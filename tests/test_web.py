@@ -155,5 +155,31 @@ class WebTests(unittest.TestCase):
             self.call(f"/api/project/{p['id']}/resume", {})                          # reconnect + resume
         self.assertEqual(self.launched, [])
 
+    def test_library_and_develop_use_the_engine_once_per_request(self):
+        made = []
+
+        class FakeEngine:                       # stands in for engine.develop (no model in these tests)
+            def __init__(self, ws):
+                self.store = Store(ws / 'axbranch.sqlite3')
+
+            def develop(self, base, goal):
+                pid = self.store.new_project(goal)
+                made.append((base, goal, pid))
+                return pid
+        self.app.engine_factory = lambda: FakeEngine(self.ws)
+        _, base = self.call('/api/projects', {'goal': 'base', 'request_id': 'req-0007-abcd'})
+        code, lib = self.call('/api/library')
+        self.assertEqual(code, 200)
+        self.assertIn('types', lib)
+        self.launched.clear()
+        body = {'base': base['id'], 'goal': '검색 기능 추가', 'request_id': 'dev-0001-abcd'}
+        code, first = self.call('/api/develop', body)
+        self.assertEqual((code, first['created']), (200, True))
+        _, again = self.call('/api/develop', body)                                   # reload / double click
+        self.assertEqual((again['id'], again['created']), (first['id'], False))
+        self.assertEqual(len(made), 1)
+        self.assertEqual(self.launched, [first['id']])
+        self.assertEqual(self.call('/api/develop', {'base': base['id'], 'goal': ' ', 'request_id': 'dev-0002-abcd'})[0], 400)
+
 if __name__ == '__main__':
     unittest.main()

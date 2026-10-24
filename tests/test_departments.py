@@ -377,5 +377,35 @@ class DepartmentTests(unittest.TestCase):
         self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
         self.assertEqual(self.store.events(pid, {'department_contract'})[0]['detail']['status'], 'format_ok')
 
+    def test_input_ids_are_allowed_but_another_projects_output_is_still_blocked(self):
+        # Regression for the 7884507 fix: allowing ids that are VALUES in this project's inputs must not let a
+        # result cite a real other project's artifacts.
+        other = self.project()                                                       # a real other project
+        spec = SPECS['research']
+        known = {'P-20990101-abcdef'}
+        out = {'output': f'uses projects/{other}/artifacts/report.md and P-20990101-abcdef row 2',
+               'key_points': ['k'], 'evidence': ['e']}
+        problems = D.check_output(spec, out, 'P-20261024-000000', known)
+        self.assertEqual(problems, [f"다른 프로젝트 참조: ['{other}']"])
+        data = self.tmp / 'history2.csv'
+        data.write_text('project,verdict\nP-20990101-abcdef,FAIL\n', encoding='utf-8')
+        script = DepartmentScript()
+        original = DepartmentScript.__call__
+
+        def call(prompt, schema, *a, **kw):
+            result, used, notes = original(script, prompt, schema, *a, **kw)
+            if schema is E.WORK:
+                result = dict(result, output=f'P-20990101-abcdef failed (row 2); see {other} for the old numbers')
+            return result, used, notes
+        pid = self.project('research', 'operations')
+        eng = self.engine(call)
+        eng.attach_inputs(pid, [str(data)])
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'PAUSED')                                       # two failures: Owner pause
+        checks = [e['detail'] for e in self.store.events(pid, {'department_contract'})]
+        self.assertTrue(checks and all(c['status'] == 'fail' for c in checks))
+        self.assertEqual(checks[0]['problems'], [f"다른 프로젝트 참조: ['{other}']"])     # only the real other project
+        self.assertFalse(any(s_ is E.BUILD for s_, _ in script.contexts))            # nothing handed on
+
 if __name__ == '__main__':
     unittest.main()

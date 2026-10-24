@@ -512,15 +512,11 @@ class App(tk.Tk):
         self._develop = dlg
 
     def develop(self, base_pid, goal):
-        engine = self.engine_factory()
         try:
-            pid = engine.develop(base_pid, goal)
+            pid = actions.develop(self.engine_factory, self.store, base_pid, goal, 'app')
         except Exception as e:
             messagebox.showwarning('AX Branch', str(e))
             return None
-        finally:
-            engine.store.close()
-        self.store.event(pid, 'owner_action', action='develop', channel='app')
         self.selected = pid
         self._rows = None
         self._launch(pid)

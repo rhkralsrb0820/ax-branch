@@ -229,6 +229,37 @@
   $('#resume').onclick = () => act('resume').catch(() => {});
   $('#stop').onclick = () => act('stop').catch(() => {});
 
+  // ---- artifact library + 이어서 개발 (engine.develop through the API) ----
+  async function loadLibrary() {
+    const lib = await api('library'), box = $('#libraryList');
+    const when = t => t ? new Date(t * 1000).toLocaleString() : '';
+    box.innerHTML = lib.types.map(type => {
+      const group = lib.entries.filter(e => e.type === type);
+      if (!group.length) return '';
+      return `<h3>${esc(type)} (${group.length})</h3>` + group.map(e => `<div class="item"><h4>${esc(e.title)} <span class="tag">v${esc(e.version)}</span> <span class="tag">검증 ${esc(e.verification)}</span></h4>
+        <div class="kv">업데이트 ${esc(when(e.updated))} · 버전 ${e.versions.map(v => `v${esc(v.version)}`).join(', ')}</div>
+        <div class="row"><button class="ghost" data-open="${esc(e.project)}">${e.type === 'Apps' ? '실행' : '보기'}</button>
+        <button class="primary" data-dev="${esc(e.project)}" data-title="${esc(e.title)}" data-v="${esc(e.version)}">이어서 개발</button>
+        <button class="ghost" data-proj="${esc(e.project)}">관련 프로젝트</button></div></div>`).join('');
+    }).join('') || '<div class="muted">아직 완료된 결과물이 없습니다.</div>';
+    box.querySelectorAll('[data-open]').forEach(b => b.onclick = async () => { S.pid = b.dataset.open; await runResult(); });
+    box.querySelectorAll('[data-proj]').forEach(b => b.onclick = () => openProject(b.dataset.proj));
+    box.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => developDialog(b.dataset.dev, b.dataset.title, b.dataset.v));
+  }
+  function developDialog(base, title, version) {
+    const rid = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+    $('#modalBody').innerHTML = `<h3>이어서 개발 — ${esc(title)} v${esc(version)}</h3>
+      <p class="muted">이 결과물의 현재 버전을 바탕으로 새 프로젝트를 만듭니다. 이어서 할 일만 적어 주세요.</p>
+      <textarea id="devGoal" rows="5"></textarea><div class="row end"><button class="primary" id="devGo">淸月 CEO에게 맡기기</button></div>`;
+    const m = $('#modal'); m.showModal();
+    $('#devGo').onclick = async () => {
+      const goal = $('#devGoal').value.trim(); if (!goal) return;
+      $('#devGo').disabled = true;
+      try { const r = await api('develop', {base, goal, request_id: rid}); m.close(); await refreshOverview(); openProject(r.id); }
+      catch (e) { fail(e); $('#devGo').disabled = false; }
+    };
+  }
+
   // ---- feeds ----
   async function loadFeeds(target) {
     const data = await api('feeds');
@@ -248,10 +279,11 @@
   // ---- views ----
   function show(view) {
     S.view = view.split(':')[0];
-    for (const v of ['home', 'feed', 'project', 'devroom']) $('#view-' + v).hidden = v !== S.view;
+    for (const v of ['home', 'feed', 'project', 'devroom', 'library']) $('#view-' + v).hidden = v !== S.view;
     document.querySelectorAll('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === view));
     if (S.view === 'home') { $('#crumb').textContent = '워크스페이스 / 청월 홈'; loadFeeds().catch(() => {}); orb.wake(); }
     if (S.view === 'feed') { $('#crumb').textContent = '워크스페이스 / ' + view.split(':')[1]; loadFeeds(view.split(':')[1]).catch(fail); }
+    if (S.view === 'library') { $('#crumb').textContent = '워크스페이스 / 결과물 라이브러리'; loadLibrary().catch(fail); }
     if (S.view === 'devroom') { $('#crumb').textContent = '오너 개발실 — AX Branch 자체의 개발 현황 (사용자 업무 프로젝트 아님)'; window.AXDev && window.AXDev.render().catch(fail); }
   }
   document.querySelectorAll('.nav').forEach(b => b.onclick = () => show(b.dataset.view));

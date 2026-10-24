@@ -247,6 +247,9 @@ def route(app, store, method, path, query, body):
             return app.feeds()
         if parts == ['devroom']:
             return app.devroom_data()
+        if parts == ['library']:
+            from . import library
+            return {'types': list(library.TYPES), 'entries': library.entries(store)}
         if len(parts) == 2 and parts[0] == 'project' and PID_RE.fullmatch(parts[1]):
             return app.project(store, parts[1])
         if len(parts) == 3 and parts[0] == 'project' and parts[2] == 'records' and PID_RE.fullmatch(parts[1]):
@@ -256,6 +259,17 @@ def route(app, store, method, path, query, body):
     channel = 'web'
     if parts == ['projects']:
         return create_project(app, store, body, channel)
+    if parts == ['develop']:
+        request_id, base = str(body.get('request_id') or ''), str(body.get('base') or '')
+        if not re.fullmatch(r'[\w-]{8,64}', request_id) or not PID_RE.fullmatch(base):
+            raise Rejected('base 프로젝트와 request_id가 필요합니다.')
+        with app.lock:
+            existing = actions.created_by(store, request_id, 'develop')
+            if existing:
+                return {'id': existing, 'created': False}
+            pid = actions.develop(app.engine_factory, store, base, str(body.get('goal', '')), channel, request_id)
+        actions.launch(app.workspace, store, pid, app.launcher)
+        return {'id': pid, 'created': True}
     if parts == ['settings']:
         current = app.settings()
         current.update({k: bool(body[k]) for k in ('motion_off', 'low_power') if k in body})

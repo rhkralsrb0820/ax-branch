@@ -49,12 +49,30 @@ def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_i
     return pid
 
 
-def created_by(store, request_id):
+def created_by(store, request_id, action='new'):
     for p in store.projects():
         for e in store.events(p['id'], {'owner_action'}):
-            if e['detail'].get('action') == 'new' and e['detail'].get('request_id') == request_id:
+            if e['detail'].get('action') == action and e['detail'].get('request_id') == request_id:
                 return p['id']
     return None
+
+
+def develop(engine_factory, store, base_pid, goal, channel, request_id=None):
+    """Continue a completed artifact with a new goal (engine.develop: a new project from its current version).
+    request_id: the same id again returns the project it already created."""
+    if not (goal or '').strip():
+        raise Rejected('이어서 할 일을 적어 주세요.')
+    if request_id:
+        existing = created_by(store, request_id, 'develop')
+        if existing:
+            return existing
+    engine = engine_factory()
+    try:
+        pid = engine.develop(base_pid, goal.strip())
+    finally:
+        engine.store.close()
+    store.event(pid, 'owner_action', action='develop', channel=channel, **({'request_id': request_id} if request_id else {}))
+    return pid
 
 
 def resume(store, pid, channel):
