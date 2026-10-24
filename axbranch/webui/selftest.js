@@ -58,19 +58,21 @@
       const p = await api('project/' + pid);
       await report('attachment restored after reload', p.attached.map(d => d.id).join() === 'operations', JSON.stringify(p.attached));
       window.AXB.show('devroom');
-      await until(() => document.getElementById('noteAdd'));
-      await report('devroom shows the three questions', /구조 지도/.test(document.body.textContent) && /다음 개발 제안/.test(document.body.textContent) && /검증·문제 기록/.test(document.body.textContent));
+      await until(() => document.getElementById('copyTop'));
+      const dv = document.getElementById('view-devroom').textContent;
+      await report('devroom first screen answers the four questions', /지금 어디까지 됐나/.test(dv) && /지금 무엇을 하고 있나/.test(dv) && /다음에 무엇을 고쳐야 하나/.test(dv) && /내가 지금 해야 할 일/.test(dv));
+      await window.AXDev.setTab('notes'); await until(() => document.getElementById('noteText'));
       document.getElementById('noteText').value = '자가 테스트 메모'; document.getElementById('noteAdd').click();
       await until(() => /자가 테스트 메모/.test(document.getElementById('notes').textContent));
-      const box = document.querySelector('[data-pick^="item:"]'); box.checked = true; box.dispatchEvent(new Event('change'));
-      document.getElementById('copyReq').click(); await sleep(300);
+      document.getElementById('copyTop').click(); await sleep(300);
       const req = document.getElementById('reqText').value;
-      await report('request text has version, item and done criteria', /현재 버전: v/.test(req) && /완료 기준/.test(req), req.slice(0, 200));
+      await report('top request text has version, problem, scope, done criteria, evidence', /현재 버전: v/.test(req) && /문제:/.test(req) && /요청 범위:/.test(req) && /완료 기준/.test(req) && /근거:/.test(req), req.slice(0, 200));
       sessionStorage.setItem('axb-st', '3'); location.reload(); return;
     }
     if (phase === '3') {
       window.AXB.show('devroom');
-      await until(() => document.getElementById('notes'));
+      await until(() => window.AXDev && document.getElementById('copyTop'));
+      await window.AXDev.setTab('notes'); await until(() => document.getElementById('notes'));
       await report('owner memo survives reload', /자가 테스트 메모/.test(document.getElementById('notes').textContent));
       // Performance while animating: frame rate, frame cost and input latency during the motion.
       window.AXB.show('home');

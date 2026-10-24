@@ -131,14 +131,22 @@ class WebTests(unittest.TestCase):
 
     def test_the_shipped_devroom_record_is_well_formed(self):
         status = json.loads(web.DEVROOM.read_text(encoding='utf-8'))
-        for key in ('version', 'branch', 'commit', 'updated_at', 'stage_text', 'summary', 'areas', 'items', 'issues', 'proposals'):
+        for key in ('version', 'branch', 'commit', 'updated_at', 'now', 'current_work', 'next', 'owner_todo', 'recent', 'areas', 'items', 'issues', 'changelog'):
             self.assertIn(key, status)
         impl, verify = {'계획', '개발 중', '구현 완료', '보류'}, {'미검증', '자동 테스트 확인', '실제 E2E 확인', 'Owner 확인'}
         for item in status['items']:
             self.assertIn(item['impl'], impl, item['id'])
             self.assertIn(item['verify'], verify, item['id'])
         self.assertNotRegex(json.dumps(status, ensure_ascii=False), r'\d+\s*%\s*완성')       # no unfounded completion %
-        self.assertTrue({p['source'] for p in status['proposals']} <= {'owner', 'dev'})
+        self.assertTrue({p['source'] for p in status['next']} <= {'owner', 'dev'})
+        self.assertLessEqual(len(status['recent']), 3)
+        cats = {'현재 문제', 'Owner 확인', '해결·과거 기록'}
+        for i in status['issues']:                                                   # every card answers who/what/when
+            self.assertIn(i['category'], cats, i['id'])
+            self.assertIn(i['owner'], {'개발 담당', 'Owner'}, i['id'])
+            for k in ('title', 'impact', 'status', 'priority', 'next', 'checked', 'history'):
+                self.assertTrue(i.get(k), (i['id'], k))
+        self.assertEqual(len({i['id'] for i in status['issues']}), len(status['issues']))   # one record per problem
 
 
     def test_a_running_worker_is_never_started_twice(self):
