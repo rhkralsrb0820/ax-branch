@@ -1111,7 +1111,7 @@ class Engine:
                                       stage['instructions'], stage_context,
                                       WORK, prefer=stage['provider'], web=stage['web'], required=self._agent_caps(pid, stage))
                 if specs:
-                    problems = departments.check_output(spec, out, pid)
+                    problems = departments.check_output(spec, out, pid, self._input_project_ids(pid))
                     contract = (spec or {}).get('contract') or {}
                     self.store.event(pid, 'department_contract', stage=stage['name'], department=stage.get('department') or '',
                                      plan_version=pv, contract_version=contract.get('version', 'universal'),
@@ -1815,6 +1815,17 @@ class Engine:
         entry = plan['artifact_filename'] if artifact['kind'] == 'bundle' else Path(artifact['path']).name
         return {'exe_name': nb.get('exe_name'), 'windowed': bool(nb.get('windowed')), 'entry': entry,
                 'tool': f'pyinstaller {native.PYINSTALLER}'}
+
+    def _input_project_ids(self, pid):
+        """Project ids that appear as VALUES in this project's own input files (e.g. a verification-history CSV):
+        citing them is citing this project's data, not another project's result (E2E P-20261025-1d2aec)."""
+        folder, ids = self.workspace / 'projects' / pid / 'inputs', set()
+        for r in self._input_records(pid):
+            try:
+                ids.update(departments.FOREIGN_PROJECT.findall((folder / r['name']).read_bytes().decode('utf-8', 'ignore')))
+            except OSError:
+                pass
+        return ids
 
     def _input_records(self, pid):
         return [r for e in self.store.events(pid, {'owner_inputs'}) for r in e['detail']['files']]

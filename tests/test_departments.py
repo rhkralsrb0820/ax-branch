@@ -263,6 +263,8 @@ class DepartmentTests(unittest.TestCase):
                                             'evidence': ['e']}, 'P-20261024-000000'))
         self.assertEqual(D.check_output(spec, {'output': 'own project P-20261024-000000 row 3 says 40%',
                                                'key_points': ['k'], 'evidence': ['e']}, 'P-20261024-000000'), [])
+        self.assertEqual(D.check_output(spec, {'output': 'row 3 of the input: P-20990101-abcdef FAIL', 'key_points': ['k'],
+                                               'evidence': ['e']}, 'P-20261024-000000', {'P-20990101-abcdef'}), [])
         self.assertIn('근거 부족 (0개 < 1개)', D.check_output(spec, {'output': 'x' * 30, 'key_points': ['k'], 'evidence': []}, 'P'))
         needs = dict(spec, contract={'version': 1, 'output': {}, 'input': {'require': ['owner_inputs']}})
         self.assertEqual(D.check_input(needs, False, True), ['필수 입력 없음: owner_inputs'])
@@ -355,6 +357,25 @@ class DepartmentTests(unittest.TestCase):
                     self.assertIn('earlier stage re-ran', whys['summarise'])          # dependents re-run
                 if label == 'owner feedback':
                     self.assertIn('Owner feedback', whys['analyse'])
+
+    def test_ids_that_are_values_in_the_projects_own_input_are_not_foreign(self):
+        # E2E P-20261025-1d2aec: the research result cited project ids from the attached CSV's project column.
+        data = self.tmp / 'history.csv'
+        data.write_text('project,verdict\nP-20990101-abcdef,FAIL\n', encoding='utf-8')
+        script = DepartmentScript()
+        original = DepartmentScript.__call__
+
+        def call(prompt, schema, *a, **kw):
+            result, used, notes = original(script, prompt, schema, *a, **kw)
+            if schema is E.WORK:
+                result = dict(result, output='P-20990101-abcdef failed once (input row 2), 1 of 1 rows')
+            return result, used, notes
+        pid = self.project('research', 'operations')
+        eng = self.engine(call)
+        eng.attach_inputs(pid, [str(data)])
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual(self.store.events(pid, {'department_contract'})[0]['detail']['status'], 'format_ok')
 
 if __name__ == '__main__':
     unittest.main()

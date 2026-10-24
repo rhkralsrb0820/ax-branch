@@ -81,7 +81,7 @@ def check_input(spec, has_owner_inputs, has_previous):
     return [f'필수 입력 없음: {k}' for k in need if not have[k]]
 
 
-def check_output(spec, out, pid):
+def check_output(spec, out, pid, known_ids=()):
     """FORMAT problems of a stage result before it may be handed to the next stage ([] = format passed).
     Passing says nothing about whether the content is right: that stays with independent verification."""
     problems = []
@@ -98,7 +98,7 @@ def check_output(spec, out, pid):
     if len(out.get('evidence') or []) < rules.get('min_evidence', 0):
         problems.append(f"근거 부족 ({len(out.get('evidence') or [])}개 < {rules['min_evidence']}개)")
     blob = json.dumps(out, ensure_ascii=False)
-    foreign = sorted(set(FOREIGN_PROJECT.findall(blob)) - {pid})
+    foreign = sorted(set(FOREIGN_PROJECT.findall(blob)) - {pid} - set(known_ids))   # ids in this project's own data are fine
     if foreign:
         problems.append(f'다른 프로젝트 참조: {foreign}')
     return problems
