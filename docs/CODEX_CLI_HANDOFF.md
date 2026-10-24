@@ -26,6 +26,21 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
   - `axbranch department <id> list|attach|detach` (also `AXBranch.exe department …`): the window's rules,
     mouse-free.
 
+## After the reliability pass (2026-10-24, later)
+- Real E2E on the final code: P-20261024-304eb4.
+  - Pinned: commit 9483c1e, package 77db6aa9.
+  - Sequence: research → operations, Codex FAIL then PASS, CEO accepted. 7 calls, 653 s, tokens recorded.
+  - See `docs/evidence/2026-10-24-final-e2e.md`.
+- The `code_generation` exception was traced: it allows writing only; execution runs through the engine's
+  contained verification and the Owner's own launch. See the enforcement doc.
+- Motion:
+  - `axbranch/orb.py` particle sphere wired to real state in the composer;
+  - preview: `python -m axbranch.orb` (상태 시뮬레이션);
+  - see `docs/evidence/2026-10-24-orb-motion.md`.
+- Package rebuilt with the motion: sha256 ef5f8b5a… (replaces 77db6aa9, which the E2E used).
+- Owner checks open: `demo-2026-11/package-0.1.60/OWNER-DRAG-CHECKLIST.txt` (real drag, motion during a real
+  run). None of these items is marked as passed.
+
 ## Evidence
 - `docs/evidence/2026-10-24-departments.md`: the completion criteria mapped to tests, the real E2E, suites and the
   package check.

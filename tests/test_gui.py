@@ -71,26 +71,66 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(orb_state([('PLANNING', 'ACTIVE', None)]), 'planning')
         self.assertEqual(orb_state([('VERIFYING', 'ACTIVE', None)]), 'verifying')
         self.assertEqual(orb_state([('REWORK', 'ACTIVE', None)]), 'rework')
-        self.assertEqual(orb_state([('OWNER_REVIEW', 'WAITING_FOR_OWNER', None)]), 'waiting')
-        self.assertEqual(orb_state([('PAUSED', 'WAITING_FOR_PROVIDER', 'RateLimited: quota')]), 'error')
+        self.assertEqual(orb_state([('OWNER_REVIEW', 'WAITING_FOR_OWNER', None)]), 'done')        # result to review
+        self.assertEqual(orb_state([('PAUSED', 'WAITING_FOR_OWNER', 'Owner approval needed')]), 'waiting')
+        self.assertEqual(orb_state([('PAUSED', 'PAUSED', 'Rejected: 오너가 중단했습니다')]), 'paused')
+        self.assertEqual(orb_state([('PAUSED', 'WAITING_FOR_PROVIDER', 'RateLimited: quota')]), 'limit')
+        self.assertEqual(orb_state([('PAUSED', 'WAITING_FOR_PROVIDER', None)]), 'limit')
+        self.assertEqual(orb_state([('EXECUTING', 'STALLED', None)]), 'error')
         self.assertEqual(orb_state([('CREATED', 'STALLED', None)]), 'idle')         # never started is not an error
-        self.assertEqual(orb_state([('PAUSED', 'WAITING_FOR_PROVIDER', None)]), 'error')    # usage limit
         orb = self.app.orb
-        orb.set_state('idle')
+        self.app.update()
+
+        def settle():                              # let any transition finish, then one frame
+            orb._settle_until, orb._impulse, orb._burst = 0, 0, 0
+            orb._cancel()
+            orb._tick()
+        orb.set_state('idle'); settle()
         self.assertIsNone(orb._job)                                                 # idle: no loop at all
         orb.set_state('verifying')
         self.assertIsNotNone(orb._job)
-        orb.set_state('error')
-        self.assertIsNone(orb._job)                                                 # error/limit: orange and still
-        orb.set_state('planning', motion=False)
-        self.assertIsNone(orb._job)                                                 # motion off: colour only
+        for stopped in ('waiting', 'paused', 'limit', 'error'):
+            orb.set_state(stopped); settle()
+            self.assertIsNone(orb._job, stopped)                                    # stopped states: still
+        orb.set_state('planning', motion=False); settle()
+        self.assertIsNone(orb._job)                                                 # motion off: still frame
         # With no project running, the window's own refresh leaves the orb idle and the loop stopped.
-        self.app.refresh()
+        self.app.refresh(); settle()
         self.assertEqual((orb.state, orb._job), ('idle', None))
         self.assertEqual(self.app.orb_label.cget('text'), '대기')
+        self.assertIn('다음:', self.app.orb_caption.cget('text'))                  # readable state + next action
+        # The goal box reacts (focus/typing) only while no real work is shown; a submitted goal hands over.
+        self.app._goal_input('focus')
+        self.assertEqual(self.app.orb.state, 'focus')
+        self.app.goal.insert('1.0', 'x'); self.app._goal_input('typing')
+        self.assertEqual((self.app.orb.state, self.app.orb_label.cget('text')), ('typing', '목표 입력 중'))
+        self.app.goal.delete('1.0', 'end'); self.app._goal_input(None)
+        self.assertEqual(self.app.orb.state, 'idle')
         self.app.motion_off.set(True)
+        self.app.low_power.set(True)
         self.app._save_motion()
-        self.assertTrue(json.loads((self.ws / 'settings.json').read_text(encoding='utf-8'))['motion_off'])
+        saved = json.loads((self.ws / 'settings.json').read_text(encoding='utf-8'))
+        self.assertEqual((saved['motion_off'], saved['low_power'], orb.low_power), (True, True, True))
+
+    def test_orb_completion_once_and_delegation_links_from_real_events(self):
+        from axbranch import departments
+        pid = self.app.store.new_project('orb events')
+        departments.attach(self.app.store, pid, 'research', self.app.department_specs)
+        self.app.store.event(pid, 'department_delegation', stage='a', department='research', version='1.0.0',
+                             agent_role='Research analyst', why='')
+        self.app._statuses = {pid: 'ACTIVE'}
+        with mock.patch.object(self.app.store, 'projects', return_value=[{'id': pid, 'state': 'EXECUTING'}]):
+            self.app._update_orb()
+        self.assertEqual(self.app.orb.state, 'delegating')
+        self.assertEqual([n for n, _ in self.app.orb.departments], ['리서치'])
+        self.assertIn('리서치', self.app.orb_caption.cget('text'))
+        self.app._statuses = {pid: 'WAITING_FOR_OWNER'}
+        with mock.patch.object(self.app.store, 'projects', return_value=[{'id': pid, 'state': 'OWNER_REVIEW'}]), \
+                mock.patch.object(self.app.orb, 'complete') as complete:
+            self.app._update_orb()
+            self.app._update_orb()                                                 # once, not every refresh
+        self.assertEqual(complete.call_count, 1)
+        self.assertEqual(self.app.orb.state, 'done')
 
     def test_departments_attach_by_drop_or_button_persist_and_detach(self):
         from axbranch import departments

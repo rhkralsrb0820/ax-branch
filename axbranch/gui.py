@@ -15,7 +15,8 @@ from . import WORKSPACE, __version__, departments, library, live, supervisor
 from .library import project_title
 from .engine import open_engine
 from .state import Busy, Store
-from .home import Home, draw_pipeline, configure_theme, RoundedPanel, StatusOrb, ORB_LABELS, orb_state
+from .home import Home, draw_pipeline, configure_theme, RoundedPanel, orb_state
+from .orb import ParticleOrb, STOPPED, TEXT as ORB_TEXT
 
 FONT = ('Malgun Gothic', 10)
 COLUMNS = {'engine': ('엔진', 70), 'task': ('현재 작업', 170), 'status': ('상태', 230), 'last': ('마지막 활동', 90),
@@ -73,14 +74,18 @@ class App(tk.Tk):
         except (OSError, ValueError):
             saved = {}
         self.motion_off = tk.BooleanVar(value=bool(saved.get('motion_off')))
+        self.low_power = tk.BooleanVar(value=bool(saved.get('low_power')))
+        ttk.Checkbutton(header, text='저부하', variable=self.low_power, command=self._save_motion).pack(side='right', padx=(0, 16))
         ttk.Checkbutton(header, text='모션 끄기', variable=self.motion_off, command=self._save_motion).pack(side='right', padx=12)
         panel = RoundedPanel(main)
         panel.pack(fill='x', pady=(0, 16))
         self.composer = panel
         top = panel.content
         orb_box = ttk.Frame(top, style='Card.TFrame'); orb_box.pack(side='left', padx=(0, 20))
-        self.orb = StatusOrb(orb_box); self.orb.pack()
-        self.orb_label = ttk.Label(orb_box, text=ORB_LABELS['idle'], style='Card.TLabel'); self.orb_label.pack()
+        self.orb = ParticleOrb(orb_box, size=140, count=130, low_count=60); self.orb.pack()
+        self.orb.set_low_power(self.low_power.get())
+        self.orb_label = ttk.Label(orb_box, text=ORB_TEXT['idle'][0], style='CardTitle.TLabel'); self.orb_label.pack()
+        self._input_state, self._orb_seen = None, {}   # goal-box reaction; last state per project (completion)
         composer_content = ttk.Frame(top, style='Card.TFrame')
         composer_content.pack(side='left', fill='both', expand=True)
         top = composer_content
@@ -94,6 +99,11 @@ class App(tk.Tk):
         self.composer_chips = ttk.Frame(goal_row, style='Card.TFrame'); self.composer_chips.pack(side='left')
         self.attached = []           # Owner input files for the next Goal (copied read-only when it starts)
         self.attached_label = ttk.Label(goal_row, text='', style='Card.TLabel'); self.attached_label.pack(side='right')
+        self.orb_caption = ttk.Label(top, text='', style='CardMuted.TLabel', wraplength=900, justify='left')
+        self.orb_caption.pack(anchor='w')       # what is happening and what to do next, readable without the motion
+        self.goal.bind('<FocusIn>', lambda _e: self._goal_input('focus'), add='+')
+        self.goal.bind('<KeyRelease>', lambda _e: self._goal_input('typing'), add='+')
+        self.goal.bind('<FocusOut>', lambda _e: self._goal_input(None), add='+')
 
         body = ttk.PanedWindow(main, orient='horizontal'); body.pack(fill='both', expand=True)
         # Project list: short title + one colored status dot (a Listbox can only color whole rows).
@@ -304,7 +314,10 @@ class App(tk.Tk):
             self.attached = []
             self.attached_label.config(text='')
         self.goal.delete('1.0', 'end')
+        self._input_state = 'submitted'
+        self.orb.pulse(1.2)
         self._launch(self.selected)
+        self._update_orb()
 
     def resume(self):
         if not self.selected:
@@ -862,19 +875,60 @@ class App(tk.Tk):
     def _save_motion(self):
         try:
             self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-            self.settings_path.write_text(json.dumps({'motion_off': self.motion_off.get()}), encoding='utf-8')
+            self.settings_path.write_text(json.dumps({'motion_off': self.motion_off.get(),
+                                                      'low_power': self.low_power.get()}), encoding='utf-8')
         except OSError:
             pass                                       # the setting still applies for this session
+        self.orb.set_low_power(self.low_power.get())
+        self._update_orb()
+
+    def _goal_input(self, kind):
+        """The goal box: focus / typing / leaving it. Shown only while no real work state is on the sphere."""
+        if kind is None:
+            if self._input_state in ('focus', 'typing') and not self.goal.get('1.0', 'end').strip():
+                self._input_state = None
+        elif self._input_state != 'submitted':
+            self._input_state = kind
+            if kind == 'typing' and self.orb.state not in STOPPED:
+                self.orb.pulse(.3)
         self._update_orb()
 
     def _update_orb(self):
         statuses = getattr(self, '_statuses', {})
-        state = orb_state([(p['state'], statuses.get(p['id'], ''),
-                            self.store.project(p['id'])['pause_reason'] if p['state'] == 'PAUSED' else None)
-                           for p in self.store.projects()])
-        self.orb.set_state(state, motion=not self.motion_off.get())
-        if self.orb_label.cget('text') != ORB_LABELS[state]:
-            self.orb_label.config(text=ORB_LABELS[state])
+        projects = self.store.projects()
+        rows = [(p['state'], statuses.get(p['id'], ''),
+                 self.store.project(p['id'])['pause_reason'] if p['state'] == 'PAUSED' else None) for p in projects]
+        real = orb_state(rows)
+        if real not in ('idle', 'done') and self._input_state == 'submitted':
+            self._input_state = None              # the submitted goal is now real work
+        state = self._input_state if real in ('idle', 'done') and self._input_state else real
+        motion = not self.motion_off.get()
+        self.orb.set_state(state, motion=motion)
+        detail = None
+        if state == 'delegating':                 # connection effect: the departments this work was delegated to
+            running = next((p['id'] for p in projects if statuses.get(p['id']) in ('ACTIVE', 'RECOVERING')), None)
+            names = []
+            for e in self.store.events(running, {'department_delegation', 'temporary_agent'}) if running else []:
+                spec = self.department_specs.get(e['detail'].get('department', ''))
+                name = spec['name'] if spec else '임시 에이전트'
+                if name not in names:
+                    names.append(name)
+            for name in names:
+                self.orb.delegate(name)
+            if names:
+                detail = f"{'·'.join(names)}에 위임된 단계를 수행합니다."
+        # One completion effect when a project's verified result arrives (enters OWNER_REVIEW while watched).
+        arrived = [p['id'] for p in projects if p['state'] == 'OWNER_REVIEW'
+                   and self._orb_seen.get(p['id']) not in (None, 'OWNER_REVIEW')]
+        self._orb_seen = {p['id']: p['state'] for p in projects}
+        if arrived and motion:
+            self.orb.complete()
+        label, what, nxt = ORB_TEXT[state]
+        if self.orb_label.cget('text') != label:
+            self.orb_label.config(text=label)
+        caption = f"{detail or what}   다음: {nxt}"
+        if self.orb_caption.cget('text') != caption:
+            self.orb_caption.config(text=caption)
 
     def supervise(self):
         """The window is the supervisor while it is open: stalled or failed work is detected and recovered
