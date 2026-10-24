@@ -307,6 +307,9 @@ class DepartmentTests(unittest.TestCase):
                 p = self.engine(call).run(pid)
                 ctx = next(c for s_, c in script.contexts if s_ is E.VERDICT)
                 self.assertEqual(len(ctx['department_acceptance']['criteria']), len(crit))   # sent to the verifier
+                results = ctx['department_acceptance']['stage_results']                     # with what it needs to judge
+                self.assertEqual([(r['stage'], r['department']) for r in results], [('analyse', 'research')])
+                self.assertEqual(results[0]['evidence'], ['inputs row 3'])
                 first = self.store.verifications(pid)[0]
                 acc = self.store.events(pid, {'department_acceptance'})[0]['detail']['results']
                 if final:

@@ -905,6 +905,19 @@ class Engine:
         used = dict.fromkeys(st.get('department') for st in plan.get('pipeline', []) if st.get('department') in specs)
         return [{'department': d, 'criterion': c} for d in used for c in specs[d]['acceptance_criteria']]
 
+    def _recorded_stage_results(self, pid, plan, limit=6000):
+        """The current plan's recorded notes-stage results, so department criteria about earlier stages can be judged
+        (E2E P-20261025-9f78e5: without them they were 'unverifiable' by construction)."""
+        pv, out = self.store.project(pid)['plan_version'], []
+        for idx, stage in enumerate(plan.get('pipeline', [])[:-1]):
+            done = self.store.output(pid, idx, pv)
+            if done:
+                o = done['output']
+                out.append({'stage': stage['name'], 'department': stage.get('department') or '',
+                            'output': str(o.get('output', ''))[:limit], 'key_points': o.get('key_points', [])[:20],
+                            'evidence': o.get('evidence', [])[:30], 'counterpoints': o.get('counterpoints', [])[:10]})
+        return out
+
     def _department_gate(self, pid, p, expected, result):
         """Each department criterion must be judged 'met' by the verifier: unmet, unverifiable, a conflict or no
         judgement at all blocks PASS. Conflicts are recorded with the decision (re-plan), never dropped."""
@@ -1449,9 +1462,11 @@ class Engine:
         if dept_criteria:
             context['department_acceptance'] = {
                 'criteria': dept_criteria,
+                'stage_results': self._recorded_stage_results(pid, plan),
                 'rule': ('Judge EACH department criterion separately from the approved project criteria, in '
                          'department_criteria: met / unmet / unverifiable / conflict (it contradicts an approved '
-                         'project criterion; say which) with evidence from the artifact or recorded stage results. '
+                         'project criterion; say which) with evidence from the artifact or stage_results (the recorded '
+                         'results of the earlier stages). '
                          "A department's own report of success is not evidence.")}
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
