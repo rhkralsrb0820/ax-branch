@@ -67,7 +67,9 @@ VERDICT = S(verdict=ENUM('PASS', 'FAIL'), lenses_applied=ARR(STR),
             claim_checks=ARR(S(claim=STR, source_url=STR, quote=STR,
                                verdict=ENUM('supported', 'contradicted', 'unverifiable'))),
             findings=ARR(S(severity=ENUM('critical', 'major', 'minor'), kind=ENUM(*FINDING_KINDS), criterion=INT,
-                           issue=STR, evidence=STR)))
+                           issue=STR, evidence=STR)),
+            department_criteria=ARR(S(department=STR, criterion=STR,
+                                      status=ENUM('met', 'unmet', 'unverifiable', 'conflict'), evidence=STR)))
 STRATEGY = S(decision=ENUM('continue', 'switch_provider', 'change_pipeline'), rationale=STR, pipeline=ARR(STAGE),
              runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))))
 PROBE_REVIEW = S(disposition=ENUM('HARNESS_REPAIR', 'PRODUCT_DEFECT', 'UNRESOLVED'),
@@ -890,6 +892,36 @@ class Engine:
         attached = {d['id']: valid[d['id']] for d in departments.attached(self.store, pid) if d['id'] in valid}
         return (attached, valid) if with_library else attached
 
+    def _department_criteria(self, pid, plan):
+        """Acceptance criteria of the departments this plan delegated to ([] without departments)."""
+        specs = self._attached_departments(pid)
+        used = dict.fromkeys(st.get('department') for st in plan.get('pipeline', []) if st.get('department') in specs)
+        return [{'department': d, 'criterion': c} for d in used for c in specs[d]['acceptance_criteria']]
+
+    def _department_gate(self, pid, p, expected, result):
+        """Each department criterion must be judged 'met' by the verifier: unmet, unverifiable, a conflict or no
+        judgement at all blocks PASS. Conflicts are recorded with the decision (re-plan), never dropped."""
+        if not expected:
+            return []
+        judged = {(j.get('department'), j.get('criterion')): j for j in result.get('department_criteria') or []}
+        findings, statuses = [], []
+        for e in expected:
+            j = judged.get((e['department'], e['criterion']))
+            status = j['status'] if j else 'unverifiable'
+            statuses.append({**e, 'status': status, 'evidence': (j or {}).get('evidence', 'not judged by the verifier')[:300]})
+            if status == 'met':
+                continue
+            if status == 'conflict':
+                self.store.event(pid, 'criteria_conflict', iteration=p['iteration'], department=e['department'],
+                                 criterion=e['criterion'], evidence=(j or {}).get('evidence', '')[:500],
+                                 decision='kept both; blocks PASS; 淸月 CEO re-plans (or the Owner rules)')
+            findings.append({'severity': 'major', 'kind': 'product' if status in ('unmet', 'conflict') else 'harness',
+                             'criterion': -1, 'deterministic': True,
+                             'issue': f"Department acceptance {status}: [{e['department']}] {e['criterion']}"[:400],
+                             'evidence': (j or {}).get('evidence', 'not judged by the verifier')[:500]})
+        self.store.event(pid, 'department_acceptance', iteration=p['iteration'], results=statuses)
+        return findings
+
     def _contract_paused(self, pid, stage, problems):
         self.store.pause(pid, (f"Owner action needed: department contract failed - stage {stage['name']!r} "
                                f"({stage.get('department') or 'temporary agent'}): {'; '.join(problems)}. "
@@ -1379,6 +1411,14 @@ class Engine:
                                  reused=len(reused), recheck=len(recheck), settled_sources=len(settled))
             context['source_evidence'] = sources.evidence_context(fetched, text, sources.retrieval_claims(history),
                                                                   settled=settled)
+        dept_criteria = self._department_criteria(pid, plan)
+        if dept_criteria:
+            context['department_acceptance'] = {
+                'criteria': dept_criteria,
+                'rule': ('Judge EACH department criterion separately from the approved project criteria, in '
+                         'department_criteria: met / unmet / unverifiable / conflict (it contradicts an approved '
+                         'project criterion; say which) with evidence from the artifact or recorded stage results. '
+                         "A department's own report of success is not evidence.")}
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
@@ -1420,6 +1460,9 @@ class Engine:
                                        'evidence': 'criteria list'})
             blocking.append(result['findings'][-1])
         for finding in self._claim_gate(pid, p, result, fetched):
+            result['findings'].append(finding)
+            blocking.append(finding)
+        for finding in self._department_gate(pid, p, dept_criteria, result):
             result['findings'].append(finding)
             blocking.append(finding)
         passed = checks['ok'] and not blocking and not unmet

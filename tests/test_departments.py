@@ -24,6 +24,7 @@ class DepartmentScript(Script):
             {'name': 'build', 'agent_role': 'Operations designer', 'instructions': 'build the tool', 'provider': 'claude',
              'web': False, 'department': 'operations', 'why': 'operations makes the usable tool'}]
         self.contexts = []
+        self.judge_departments = True        # the verifier judges each department criterion
 
     def __call__(self, prompt, schema, *args, **kw):
         result, used, notes = super().__call__(prompt, schema, *args, **kw)
@@ -34,6 +35,9 @@ class DepartmentScript(Script):
         if schema is E.WORK:
             result = {'output': 'card team has 40% of inquiries (row 3)', 'key_points': ['card 40%'],
                       'evidence': ['inputs row 3'], 'counterpoints': ['small sample']}
+        if schema is E.VERDICT and self.judge_departments and 'department_acceptance' in context:
+            result = dict(result, department_criteria=[dict(c, status='met', evidence='stage results')
+                                                       for c in context['department_acceptance']['criteria']])
         return result, used, notes
 
 
@@ -280,6 +284,39 @@ class DepartmentTests(unittest.TestCase):
         self.engine(script).run(pid)
         reused = [e['detail'] for e in self.store.events(pid, {'stage_reused'})]
         self.assertTrue(reused and reused[0]['stage'] == 'analyse' and 'contract' in reused[0]['why'])
+
+    def test_department_acceptance_is_judged_separately_and_never_passes_unmet(self):
+        crit = SPECS['research']['acceptance_criteria'] + SPECS['operations']['acceptance_criteria']
+        for label, judged, final in (('all met', 'met', 'OWNER_REVIEW'), ('missing', None, None),
+                                     ('unmet', 'unmet', None), ('conflict', 'conflict', None)):
+            with self.subTest(label):
+                script = DepartmentScript()
+                script.judge_departments = False
+                original = DepartmentScript.__call__
+
+                def call(prompt, schema, *a, _j=judged, **kw):
+                    result, used, notes = original(script, prompt, schema, *a, **kw)
+                    if schema is E.VERDICT and _j:
+                        ctx = script.contexts[-1][1]
+                        result = dict(result, department_criteria=[
+                            dict(c, status=_j, evidence='artifact section 2') for c in ctx['department_acceptance']['criteria']])
+                    return result, used, notes
+                pid = self.project('research', 'operations')
+                p = self.engine(call).run(pid)
+                ctx = next(c for s_, c in script.contexts if s_ is E.VERDICT)
+                self.assertEqual(len(ctx['department_acceptance']['criteria']), len(crit))   # sent to the verifier
+                first = self.store.verifications(pid)[0]
+                acc = self.store.events(pid, {'department_acceptance'})[0]['detail']['results']
+                if final:
+                    self.assertEqual((first['verdict'], p['state']), ('PASS', final))
+                    self.assertTrue(all(a['status'] == 'met' for a in acc))
+                else:
+                    self.assertEqual(first['verdict'], 'FAIL')                       # a verifier PASS is not enough
+                    self.assertIn('Department acceptance', ' '.join(f['issue'] for f in first['result']['findings']))
+                    self.assertEqual({a['status'] for a in acc}, {judged or 'unverifiable'})
+                if judged == 'conflict':
+                    self.assertTrue(self.store.events(pid, {'criteria_conflict'}))
+                    self.assertIn('re-plan', self.store.events(pid, {'criteria_conflict'})[0]['detail']['decision'])
 
 if __name__ == '__main__':
     unittest.main()

@@ -159,7 +159,9 @@
         <div class="h">${esc(r.mark)} ${esc(r.title)}</div><div class="muted">${esc(r.engine)} · ${esc(r.detail)}</div></div>`).join('');
     $('#pipeline').querySelectorAll('.stage').forEach(el => el.onclick = () => { S.stageKey = el.dataset.key; loadRecords(); refreshProject(); });
     $('#verifs').innerHTML = (p.verifications.map(v => `<span class="verdict ${esc(v.verdict)}">v${v.iteration} ${esc(v.verdict)} · ${esc(v.provider)}</span>`).join('') || '<span class="muted">검증 기록 없음</span>')
-      + (p.contract.length ? '<div class="muted" style="margin-top:6px">부서 계약 검사</div>' + p.contract.map(c => `<div class="kv">${esc(c.stage || '')} · <b>${esc(c.status || '')}</b> ${esc((c.problems || []).join('; '))}</div>`).join('') : '');
+      + ((p.acceptance.results || []).length ? `<div class="muted" style="margin-top:6px">부서 수용 기준 (독립 검증, v${p.acceptance.iteration})</div>` + p.acceptance.results.map(a => `<div class="kv">[${esc(a.department)}] <b>${esc(a.status)}</b> ${esc(a.criterion)}</div>`).join('') : '')
+      + (p.conflicts.length ? '<div class="muted">기준 충돌</div>' + p.conflicts.map(c => `<div class="kv">[${esc(c.department)}] ${esc(c.criterion)} — <b>${esc(c.decision)}</b></div>`).join('') : '')
+      + (p.contract.length ? '<div class="muted" style="margin-top:6px">부서 계약 검사 (형식만 — 내용 정확성은 독립 검증)</div>' + p.contract.map(c => `<div class="kv">${esc(c.stage || '')} · <b>${esc(c.status || '')}</b> ${esc((c.problems || []).join('; '))}</div>`).join('') : '');
     $('#timeline').innerHTML = p.timeline.slice().reverse().map(t => `<div class="tl"><b>${esc(t.at)} ${esc(t.actor)}</b> ${esc(t.text)}</div>`).join('');
     renderOwner(p);
   }

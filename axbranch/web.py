@@ -94,7 +94,9 @@ class App:
                 'pipeline': view['pipeline'], 'header': view['header'], 'timeline': view['timeline'][-80:],
                 'verifications': [{'iteration': v['iteration'], 'verdict': v['verdict'], 'provider': v['provider'],
                                    'created': v['created']} for v in store.verifications(pid)],
-                'contract': [e['detail'] for e in store.events(pid, {'department_contract'})][-10:]}
+                'contract': [e['detail'] for e in store.events(pid, {'department_contract'})][-10:],
+                'acceptance': ([e['detail'] for e in store.events(pid, {'department_acceptance'})] or [{}])[-1],
+                'conflicts': [e['detail'] for e in store.events(pid, {'criteria_conflict'})][-5:]}
 
     def settings(self):
         try:

@@ -1,11 +1,12 @@
 {
- "updated_at": "2026-10-25 00:50 KST",
+ "updated_at": "2026-10-25 01:30 KST",
  "version": "0.1.61",
  "branch": "dev/web-ui",
- "commit": "4206b40",
+ "commit": "71e4e01",
  "stage_text": "AX Branch는 淸月 CEO가 목표를 계획하고, 연결된 부서와 전문 에이전트(Claude/Codex)에 위임해 만들고, 독립 검증·제한된 재작업을 거쳐 Owner 검토로 넘기는 단계까지 실제로 동작한다. 지금은 화면을 로컬 웹 UI로 옮기는 중이며, 다음은 부서 입출력 계약의 실제 검증이다. main 병합은 Owner 결정 전까지 하지 않는다.",
  "summary": {
   "done": [
+   "엔진 2: 부서 수용 기준을 독립 검증에 연결 — 미충족·판정 없음·충돌은 PASS 불가 (자동 테스트)",
    "엔진 1: 부서 계약(형식) 검증 — 위반 결과는 다음 부서로 전달 안 함, 1회 재작업 후 Owner 일시정지 (자동 테스트)",
    "로컬 웹 UI 1차 (ab6382d): API·보안·중복 방지·headless 자체 테스트 20/20",
    "웹 UI 패키지 package-0.1.61-web (ee85400c…): 격리 루트에서 서버·토큰 거부·종료 확인",
@@ -15,11 +16,11 @@
    "Owner 확인: 기존 창에서 부서를 홈 입력 영역으로 끌어 첨부"
   ],
   "in_progress": [
-   "Owner 확인 대기: 웹 UI 3개 항목 (README-WEB.txt) — 마지막 보고 기준",
-   "엔진 2: 부서 수용 기준 → 독립 검증 — 마지막 보고 기준"
+   "Owner 확인 대기: 웹 UI 3개 항목 — 마지막 보고 기준",
+   "엔진 3: 부분 재작업·재개 안정화 — 마지막 보고 기준"
   ],
   "open_issues": [
-   "부서 수용 기준은 아직 에이전트에게 전달만 되고 판정되지 않음 (입출력 계약은 형식 검사로 구현됨)",
+   "부서 계약·수용 기준은 자동 테스트로만 확인 (실제 모델 E2E 전)",
    "Owner [결과 실행]은 네트워크·파일 제한 없이 실행됨 (검증 실행만 best-effort 차단)",
    "headless Edge 브라우저 검사의 간헐적 90초 시간 초과 (main에서도 재현, 원인 미확인)",
    "실제 마우스 드래그 중 '홈 입력 영역 첨부' 외 항목은 Owner 미확인"
@@ -206,17 +207,21 @@
   {
    "id": "dept-acceptance",
    "title": "부서 수용 기준 → 독립 검증",
-   "impl": "계획",
-   "verify": "미검증",
+   "impl": "구현 완료",
+   "verify": "자동 테스트 확인",
    "solves": "부서 자기 보고만으로 통과하는 위험",
-   "scope": "결정적 기준은 코드로, 의미 기준은 검증 에이전트로; 미충족·검증 불가는 실패",
-   "verified_at": "UNKNOWN",
-   "tests": "-",
-   "evidence": [],
-   "limits": [
-    "현재는 에이전트에게 전달만 함"
+   "scope": "위임된 부서의 수용 기준을 프로젝트 기준과 따로 검증 에이전트에 전달·판정(met/unmet/unverifiable/conflict). met이 아니거나 판정이 없으면 PASS 불가. 충돌은 criteria_conflict로 기록(둘 다 유지, CEO 재계획). 결정적 기준은 엔진 1 계약 검사가 담당",
+   "verified_at": "dev/web-ui (acceptance commit)",
+   "tests": "tests.test_departments 13/13; broad suites 187/187",
+   "evidence": [
+    "axbranch/engine.py _department_gate",
+    "tests/test_departments.py"
    ],
-   "done_when": "프로젝트 기준과 부서 기준이 각각 판정되고 미충족 시 PASS가 안 됨"
+   "limits": [
+    "의미 기준 판정은 검증 에이전트(모델)에 의존",
+    "실제 모델 E2E 미실행"
+   ],
+   "done_when": "작은 실제 E2E에서 department_acceptance 기록 확인"
   },
   {
    "id": "partial-rework",
@@ -341,13 +346,13 @@
   {
    "id": "contract-declared",
    "title": "부서 수용 기준이 선언에 그침 (입출력 계약은 형식 검사 구현)",
-   "status": "미해결",
+   "status": "해결(자동 테스트)",
    "kind": "설계 한계",
    "priority": "상",
    "repro": "부서 결과에 필수 항목이 없어도 다음 부서로 전달됨",
    "impact": "형식 오류·누락이 후속 단계로 전파",
    "seen_at": "82efe44 (코드 추적)",
-   "next": "엔진 2번",
+   "next": "작은 실제 E2E로 확인",
    "evidence": [
     "docs/evidence/2026-10-24-department-enforcement.md"
    ]
