@@ -41,6 +41,42 @@ firewall). Enforcement below is by the engine's own checks and by the provider C
     detected (its tools and network are still bounded as above);
   - a temporary agent gets no department brief (standing instructions, knowledge).
 
+## What the final-stage `code_generation` exception allows (traced in code, 0.1.60)
+1. **Agent turn: writing code only.**
+   - Every build turn gets `code_generation` from the engine anyway (`capabilities.agent_requests(...,
+     coding=True)` for the BUILD/BUILD_EDITS schemas). The exception in `check_stage` only stops a department
+     check from refusing what the engine always grants.
+   - The agent returns code as JSON. Its CLI turn has no shell, no file writes, no MCP, an empty temporary
+     working folder, and web only if the stage has it (`providers.authority`; Claude `--restricted`/tool flags,
+     Codex `--sandbox read-only`).
+   - The agent itself executes nothing.
+2. **The engine writes the files.** They go into `projects/<id>/` through `artifacts.safe_relpath`, which refuses
+   paths outside the project.
+3. **The engine runs the generated code** for verification: the self-test and the deterministic checks
+   (`sandbox.py`), then Runtime Acceptance (`runtime.py`).
+   - Containment:
+     - a clean environment (no API keys or CLI tokens);
+     - a Windows Job Object (at most 8 processes, 1 GB, whole tree killed at the end);
+     - a Python audit hook that refuses non-local connections and name lookups (PermissionError) and logs
+       subprocess, startfile and browser-open events.
+   - Limits (stated in `runtime.AUDIT_NOTE` and DECISIONS D12):
+     - it runs under the SAME Windows account, so it can read the user's files;
+     - it is not an OS firewall: child processes, native code and the asyncio Proactor connect path are not
+       intercepted.
+4. **Delivered-program network use.** It needs an Owner `external_connection` approval at staffing (a new or
+   risky domain pauses the project).
+   - The approval is a planning and review gate: agents are told the recorded decisions, and the verifier
+     reviews the source.
+   - It is NOT enforced while the program runs.
+5. **Owner [결과 실행] (`launch_verified`).** It runs the verified version as the Owner's own action: a fresh copy
+   under `projects/<id>/run/`, with the normal environment and no audit hook or network block. Reaching this
+   step requires a PASS.
+
+So the exception grants code *writing* only. Execution happens through the engine's verification and the
+Owner's own launch. Neither bypasses the existing approvals (network domains are approved before staffing;
+paid tools, credentials and publishing are Owner-only in governance). Both have the containment limits above;
+no new isolation was added in this step.
+
 ## Not implemented (stated plainly)
 - OS-level file or network isolation of agents or generated programs (open risk D-SEC-1).
 - Per-department schema validation of outputs.

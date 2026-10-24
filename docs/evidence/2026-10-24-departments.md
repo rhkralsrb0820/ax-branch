@@ -87,7 +87,8 @@ folder: 62 files):
   - The browser step never finished: "browser did not finish within 90s (1 attempts)", `browser_exit_code` None.
   - The summary lists it under "not_run" because the subtest's failure split the result line; the log shows the
     FAIL.
-  - Same failure class as F160b's: an unchanged browser test (runtime.py, sandbox.py and test_runtime.py are
+  - The same message as F160b's (an intermittent timeout that also reproduces on main; root cause not
+    identified), in an unchanged browser test (runtime.py, sandbox.py and test_runtime.py are
     identical to main).
   - Run alone 3 times afterwards: 3/3 ok (219 s, 121 s, 120 s).
   - Not counted as a pass.
@@ -126,5 +127,6 @@ Demo workspace:
   screen.
 - **A real E2E on the final code.** The real E2E predates the final fixes (see its limits above).
 - **Temporary agent, refusal and detach with real models.** Covered by deterministic tests only.
-- **The Edge timeout's root cause.** It is intermittent, pre-existing and present on main.
+- **The Edge timeout's root cause.** It is an intermittent timeout that also reproduces on main; the root cause
+  is not identified.
 - **Other environments.** Another PC, Windows without Python, and other display scalings.
