@@ -247,6 +247,9 @@ def route(app, store, method, path, query, body):
             return app.feeds()
         if parts == ['devroom']:
             return app.devroom_data()
+        if parts == ['test', 'fixture'] and app.test_mode and os.environ.get('AXB_TEST_FIXTURE'):
+            f = Path(os.environ['AXB_TEST_FIXTURE'])
+            return {'name': f.name, 'text': f.read_text(encoding='utf-8-sig')}
         if parts == ['library']:
             from . import library
             return {'types': list(library.TYPES), 'entries': library.entries(store)}
@@ -298,6 +301,8 @@ def route(app, store, method, path, query, body):
         return {'ok': True}
     if parts and parts[0] == 'test' and app.test_mode:   # in-browser self-test / perf reports (test server only)
         app.reports.append({'kind': parts[1] if len(parts) > 1 else '', **body})
+        with (app.workspace / 'test-reports.jsonl').open('a', encoding='utf-8') as f:   # for out-of-process harnesses
+            f.write(json.dumps(app.reports[-1], ensure_ascii=False) + '\n')
         return {'ok': True}
     if len(parts) == 3 and parts[0] == 'project' and PID_RE.fullmatch(parts[1]):
         return project_action(app, store, parts[1], parts[2], body, channel)
@@ -410,8 +415,8 @@ def stop_running(workspace=WORKSPACE):
     return '웹 서버를 종료했습니다.'
 
 
-def main(port=8765):
-    app, httpd = serve(port=port)
+def main(port=8765, test_mode=False):
+    app, httpd = serve(port=port, test_mode=test_mode)
     print(f'AX Branch web UI: http://127.0.0.1:{port}/  (stop: Ctrl+C or `python -m axbranch web --stop`)', flush=True)
     try:
         httpd.serve_forever()

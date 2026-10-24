@@ -49,6 +49,7 @@ def main(argv=None):
     sub.add_parser('training-env')
     wb = sub.add_parser('web', help='local web UI on 127.0.0.1 (opens no browser)')
     wb.add_argument('--port', type=int, default=8765); wb.add_argument('--stop', action='store_true')
+    wb.add_argument('--test-mode', action='store_true', help=argparse.SUPPRESS)   # browser self-test / E2E only
     dp = sub.add_parser('department', help='departments of a project: list / attach / detach (same as the window)')
     dp.add_argument('id'); dp.add_argument('action', choices=('list', 'attach', 'detach')); dp.add_argument('dep', nargs='?')
     sub.add_parser('result').add_argument('id')      # the verified result, as [결과 실행] / [결과 보기] does        # (re)create the pinned training stack a trained result needs
@@ -101,7 +102,7 @@ def _dispatch(a):
         if a.stop:
             print(web.stop_running())
             return 0
-        return web.main(a.port)
+        return web.main(a.port, test_mode=a.test_mode)
     engine = open_engine(log=lambda m: print('  ·', m, flush=True))
     store = engine.store
     if a.cmd == 'new':

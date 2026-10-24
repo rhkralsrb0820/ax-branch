@@ -20,6 +20,7 @@
   const chip = id => document.querySelector(`#library .chip[data-dep="${id}"]`);
   try {
     await until(() => window.AXB.ov);
+    if (new URLSearchParams(location.search).has('e2e')) return await e2e();
     if (phase === '1') {
       const px = $('#orb').getContext('2d').getImageData(0, 0, 260, 260).data;
       let lit = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 0) lit++;
@@ -100,5 +101,39 @@
   } catch (e) {
     await report('selftest crashed', false, e.stack || e);
     await api('test/selftest', {phase, name: 'done', ok: false, detail: ''});
+  }
+  // Real E2E through the page (test server on an isolated workspace, REAL engine and models): goal + file +
+  // dragged departments -> submit -> wait for the verified result -> open it -> save the Owner's feedback.
+  async function e2e() {
+    const fx = await api('test/fixture');
+    const dt = new DataTransfer(); dt.items.add(new File([fx.text], fx.name, {type: 'text/csv'}));
+    const input = $('#files'); input.files = dt.files; input.dispatchEvent(new Event('change'));
+    await until(() => /첨부 1개/.test($('#fileNames').textContent));
+    $('#goal').value = sessionStorage.getItem('axb-e2e-goal') || new URLSearchParams(location.search).get('goal'); $('#goal').dispatchEvent(new Event('input'));
+    drag(chip('research'), $('#composer')); drag(chip('operations'), $('#composer'));
+    await report('e2e: goal, file and two departments in the composer', /리서치/.test($('#pendingDeps').textContent) && /운영/.test($('#pendingDeps').textContent));
+    $('#submit').click();
+    await until(() => window.AXB.view === 'project' && window.AXB.project, 20000);
+    const pid = window.AXB.pid; await report('e2e: project created from the page', !!pid, pid);
+    const t0 = Date.now(); let p = null;
+    while (Date.now() - t0 < 25 * 60000) {           // the real run; the page only reads
+      p = await api('project/' + pid);
+      if (['OWNER_REVIEW', 'PAUSED', 'CLOSED'].includes(p.state)) break;
+      await sleep(10000);
+    }
+    await report('e2e: reached Owner review', p && p.state === 'OWNER_REVIEW', p && `${p.state} ${p.pause_reason || ''}`);
+    if (p.state === 'OWNER_REVIEW') {
+      await window.AXB.api('project/' + pid).then(() => {}); await sleep(2500);
+      await until(() => document.getElementById('oRun'), 10000);
+      document.getElementById('oRun').click();
+      await until(() => document.getElementById('modal').open && /\S/.test(document.getElementById('modalBody').textContent), 20000);
+      const shown = document.getElementById('modalBody').textContent;
+      await report('e2e: verified result opened in the page', shown.length > 200, shown.slice(0, 160));
+      document.getElementById('modal').close();
+      document.querySelector('input[name=works][value=yes]').checked = true;
+      document.getElementById('oSend').click(); await sleep(3000);
+      await report('e2e: feedback sent', true, 'works=yes');
+    }
+    await api('test/selftest', {phase: 'e2e', name: 'done', ok: true, detail: pid});
   }
 })();
