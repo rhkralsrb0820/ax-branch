@@ -3,6 +3,36 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.61] - 2026-10-25
+
+Local web UI over the same engine, Owner development room, department contract check (branch dev/web-ui).
+
+### Added
+- `axbranch/web.py` + `axbranch/webui/`: local web UI on 127.0.0.1 only (`axbranch web`, `AXBranch.exe web`;
+  stop with `--stop`). Per-start token, Host/Origin checks, no CORS, named Owner actions only.
+  - Home, goal with file/department attach (drag or button), projects, pipeline, agent records, verification,
+    Owner decisions, result, feeds, motion off / low power.
+  - Canvas particle sphere: real state shown separately from input reactions.
+- 오너 개발실: AX Branch's own development status from `docs/devroom/status.json`; Owner memos kept in the
+  workspace; request text copy. Nothing is sent or started automatically.
+- Department `contract` (optional, versioned): format check of notes-stage results in department projects.
+
+### Changed
+- `axbranch/actions.py`: the Owner actions shared by the Tk window and the web API.
+- research / operations packages 1.1.0 with contract v1.
+
+### Fixed
+- A department result that is empty, misses required fields or cites another project is no longer handed on.
+
+### Verification
+- `tests.test_web` 7/7; headless Chrome self-test 20/20 (temporary profile); `tests.test_departments` 12/12.
+- Engine-related suites 146/146.
+
+### Known issues
+- The web server runs no supervision loop, so stalled work is recovered by the window or `axbranch supervise`.
+- The headless CPU figures use software rendering.
+- The Owner has not yet checked the web UI.
+
 ## [0.1.60] - 2026-10-24
 
 Department harness: attach function packages to a project; 淸月 CEO delegates only to them; real state motion.
