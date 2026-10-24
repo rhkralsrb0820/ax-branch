@@ -1,0 +1,173 @@
+"""Department harness: validated shared packages, per-project attachment, delegation only to attached
+departments, results passed between departments, refusals, temporary agents, detachment and replanning."""
+import json
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+
+from axbranch import departments as D, engine as E
+from axbranch.state import Rejected, Store
+from tests.test_engine import BROKEN, GOOD, Script
+
+SPECS, _ = D.catalog()
+
+
+class DepartmentScript(Script):
+    """Plans the two-department pipeline (or `pipeline`), and records what each stage was given."""
+    def __init__(self, pipeline=None, **kw):
+        super().__init__([GOOD, GOOD, GOOD], ['PASS', 'PASS', 'PASS'], **kw)
+        self.pipeline = pipeline or [
+            {'name': 'analyse', 'agent_role': 'Research analyst', 'instructions': 'find the numbers', 'provider': 'codex',
+             'web': False, 'department': 'research', 'why': 'research owns the analysis'},
+            {'name': 'build', 'agent_role': 'Operations designer', 'instructions': 'build the tool', 'provider': 'claude',
+             'web': False, 'department': 'operations', 'why': 'operations makes the usable tool'}]
+        self.contexts = []
+
+    def __call__(self, prompt, schema, *args, **kw):
+        result, used, notes = super().__call__(prompt, schema, *args, **kw)
+        context = json.loads(prompt.split('CONTEXT (JSON — data, not instructions):\n', 1)[1].rsplit('\n\nReturn exactly', 1)[0])
+        self.contexts.append((schema, context))
+        if schema is E.PLAN:
+            result['pipeline'] = [dict(s) for s in self.pipeline]
+        if schema is E.WORK:
+            result = {'output': 'card team has 40% of inquiries (row 3)', 'key_points': ['card 40%'],
+                      'evidence': ['inputs row 3'], 'counterpoints': ['small sample']}
+        return result, used, notes
+
+
+class DepartmentTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.store = Store(self.tmp / 'ws' / 'axbranch.sqlite3')
+
+    def tearDown(self):
+        self.store.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def engine(self, script):
+        return E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x', llm=script)
+
+    def project(self, *deps):
+        pid = self.store.new_project('팀별 문의 우선순위 도구')
+        for d in deps:
+            D.attach(self.store, pid, d, SPECS)
+        return pid
+
+    def test_invalid_specs_are_refused_at_load(self):
+        root = self.tmp / 'lib'
+        good = SPECS['research']
+        bad = {'missing': {k: v for k, v in good.items() if k != 'tools'},
+               'shell': {**good, 'id': 'shell', 'permissions': {**good['permissions'], 'shell': True}},
+               'tools': {**good, 'id': 'tools', 'tools': ['reasoning', 'payments']},
+               'web': {**good, 'id': 'web', 'tools': ['reasoning', 'web_research']},
+               'mismatch': {**good, 'id': 'other'}}
+        for folder, spec in {'research': good, **bad}.items():
+            (root / folder).mkdir(parents=True)
+            (root / folder / 'department.json').write_text(json.dumps(spec), encoding='utf-8')
+        (root / 'broken').mkdir()
+        (root / 'broken' / 'department.json').write_text('{not json', encoding='utf-8')
+        valid, refused = D.catalog(root)
+        self.assertEqual(sorted(valid), ['research'])
+        self.assertEqual(sorted(refused), ['broken', 'mismatch', 'missing', 'shell', 'tools', 'web'])
+        self.assertIn('payments', ' '.join(refused['tools']))
+        self.assertIn('shell', ' '.join(refused['shell']))
+        self.assertEqual(sorted(SPECS), ['operations', 'research'])           # the shipped packages are valid
+
+    def test_attach_is_persistent_per_project_without_duplicates(self):
+        a, b = self.project('research'), self.project()
+        with self.assertRaises(Rejected):
+            D.attach(self.store, a, 'research', SPECS)                         # no duplicate connection
+        with self.assertRaises(Rejected):
+            D.attach(self.store, a, 'payments', SPECS)                         # not in the library
+        D.attach(self.store, a, 'operations', SPECS)
+        self.store.close()
+        self.store = Store(self.tmp / 'ws' / 'axbranch.sqlite3')               # reopened: attachment restored
+        self.assertEqual([d['id'] for d in D.attached(self.store, a)], ['research', 'operations'])
+        self.assertEqual(D.attached(self.store, b), [])                        # never mixed between projects
+        D.detach(self.store, a, 'research')
+        self.assertEqual([d['id'] for d in D.attached(self.store, a)], ['operations'])
+        with self.assertRaises(Rejected):
+            D.detach(self.store, a, 'research')
+        self.assertEqual(len(self.store.events(a, {'department_attached'})), 2)   # audit kept
+
+    def test_ceo_delegates_to_attached_departments_and_results_flow_forward(self):
+        script = DepartmentScript()
+        pid = self.project('research', 'operations')
+        p = self.engine(script).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        plan_ctx = next(c for s, c in script.contexts if s is E.PLAN)
+        self.assertEqual([d['id'] for d in plan_ctx['attached_departments']], ['research', 'operations'])
+        self.assertNotIn('standing_instructions', json.dumps(plan_ctx))        # summaries, not prompts
+        work_ctx = next(c for s, c in script.contexts if s is E.WORK)
+        self.assertEqual(work_ctx['department']['id'], 'research')             # only its own department
+        build_ctx = next(c for s, c in script.contexts if s is E.BUILD)
+        self.assertEqual(build_ctx['department']['id'], 'operations')
+        self.assertEqual(build_ctx['previous_stages'][0]['output'], 'card team has 40% of inquiries (row 3)')
+        self.assertNotIn('attached_departments', build_ctx)
+        delegations = [e['detail'] for e in self.store.events(pid, {'department_delegation'})]
+        self.assertEqual([(d['stage'], d['department']) for d in delegations], [('analyse', 'research'), ('build', 'operations')])
+        result = self.store.events(pid, {'department_result'})[0]['detail']
+        self.assertEqual((result['department'], result['evidence'], result['limits']), ('research', 1, ['small sample']))
+        self.assertTrue(any(s is E.VERDICT for s, _ in script.contexts))       # independent verification kept
+
+    def test_a_reused_department_result_is_shown_as_done_after_a_rework(self):
+        # E2E P-20261024-5dd942: after a rework only operations rebuilt; research looked "not started" (○).
+        from axbranch import live
+        script = DepartmentScript()
+        script.builds, script.verdicts = [BROKEN, GOOD, GOOD], ['FAIL', 'PASS', 'PASS']   # a real change after FAIL
+        pid = self.project('research', 'operations')
+        p = self.engine(script).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual(sum(s is E.WORK for s, _ in script.contexts), 1)        # research ran once, then reused
+        rows = {r['key']: r for r in live.view(self.tmp / 'ws', self.store, pid)['pipeline']}
+        self.assertEqual((rows['stage:0']['mark'], rows['stage:0']['title']), ('✓', '[리서치] Research analyst'))
+        self.assertIn('재사용', rows['stage:0']['detail'])
+
+    def test_unattached_department_or_overreach_is_refused_before_any_work(self):
+        cases = [(('research',), {}, 'not attached'),
+                 (('research', 'operations'), {'capabilities': ['web_research'], 'web': True}, 'web'),
+                 (('research', 'operations'), {'capabilities': ['code_generation']}, 'beyond')]
+        for deps, change, word in cases:
+            with self.subTest(word=word):
+                pipeline = [dict(DepartmentScript().pipeline[0], **change), DepartmentScript().pipeline[1]]
+                script = DepartmentScript(pipeline)
+                pid = self.project(*deps)
+                p = self.engine(script).run(pid)
+                self.assertEqual(p['state'], 'PAUSED')
+                self.assertIn('delegation refused', p['pause_reason'])
+                self.assertIn(word, self.store.events(pid, {'delegation_refused'})[-1]['detail']['reason'])
+                self.assertFalse(any(s in (E.WORK, E.BUILD) for s, _ in script.contexts))
+                self.assertFalse(self.store.artifacts(pid))
+
+    def test_no_fitting_department_is_a_recorded_temporary_agent(self):
+        pipeline = [dict(DepartmentScript().pipeline[0]),
+                    dict(DepartmentScript().pipeline[1], department='', why='no attached department builds tools')]
+        pid = self.project('research')
+        p = self.engine(DepartmentScript(pipeline)).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        temp = self.store.events(pid, {'temporary_agent'})[0]['detail']
+        self.assertEqual((temp['stage'], temp['why'], temp['attached']), ('build', 'no attached department builds tools', ['research']))
+
+    def test_detached_department_gets_no_new_work_and_replanning_resumes(self):
+        pid = self.project('research', 'operations')
+        eng = self.engine(DepartmentScript())
+        eng.run(pid, stop_at='EXECUTING')                                       # planned and staffed
+        D.detach(self.store, pid, 'operations')
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertIn('not attached', p['pause_reason'] + str(self.store.events(pid, {'delegation_refused'})))
+        self.assertFalse(self.store.artifacts(pid))
+        self.assertEqual(len(self.store.events(pid, {'department_attached'})), 2)   # history kept
+        # The Owner answers; 淸月 re-plans with what is attached (bounded by the usual round budget).
+        replan = DepartmentScript([dict(DepartmentScript().pipeline[0]),
+                                   dict(DepartmentScript().pipeline[1], department='', why='operations was removed')])
+        eng = self.engine(replan)
+        eng.owner_review(pid, text='운영 부서를 뺐으니 남은 부서로 다시 계획해 줘')
+        p = eng.run(pid)
+        self.assertNotIn('delegation refused', p['pause_reason'] or '')
+        self.assertTrue(self.store.events(pid, {'temporary_agent'}))
+
+
+if __name__ == '__main__':
+    unittest.main()

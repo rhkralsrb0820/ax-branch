@@ -41,6 +41,20 @@ def _stage_result(store, pid, project, index, count):
     return str((out.get('key_points') or [out.get('output') or ''])[0])[:100]
 
 
+def stage_title(store, pid, stage):
+    """A stage's card title: [department] agent, or [임시 에이전트] agent when departments are attached but none was
+    used; plain agent role for plans made before departments existed."""
+    from . import departments
+    role = stage.get('agent_role', '')
+    dep = stage.get('department') or ''
+    if dep:
+        spec = departments.catalog()[0].get(dep)
+        return f"[{spec['name'] if spec else dep}] {role}"
+    if store.events(pid, {'department_attached'}):
+        return f'[임시 에이전트] {role}'
+    return role
+
+
 def view(workspace, store, pid):
     """Build a display from persisted events and the supervisor's current status."""
     rec = supervisor.status(workspace, store, pid)
@@ -102,10 +116,13 @@ def view(workspace, store, pid):
     calls = [e for e in current if e['kind'] in ('call_start', 'call', 'call_failed')]
     for index, stage in enumerate(stages):
         role = stage.get('agent_role', '')
-        item = row(role, _engine(stage.get('provider')), key=f'stage:{index}', why=stage.get('why') or stage.get('name', ''),
-                   task=stage.get('name', ''))
+        item = row(stage_title(store, pid, stage), _engine(stage.get('provider')), key=f'stage:{index}',
+                   why=stage.get('why') or stage.get('name', ''), task=stage.get('name', ''))
         history = [e for e in calls if e['detail'].get('who') == role]
         if not history:
+            if index < len(stages) - 1 and _output(store, pid, project, index) is not None:
+                # Its output from an earlier round of this plan was reused (no new call): done, not "not started".
+                item.update(mark='✓', detail='완료 · 이전 라운드 결과 재사용')
             continue
         latest = history[-1]
         d = latest['detail']
@@ -232,6 +249,8 @@ def records(store, pid, key):
         stage = stages[index] if index < len(stages) else {}
         o = _output(store, pid, project, index)
         out.append(f"{stage.get('agent_role', '-')} · {_engine(stage.get('provider'))}")
+        title = stage_title(store, pid, stage)
+        out.append('부서: ' + (title[1:title.index(']')] if title.startswith('[') else '없음 (부서 기능 도입 전 계획)'))
         out.append(f"고용 이유 (Why hired): {stage.get('why') or '-'}")
         out.append(f"지시 (Task): {stage.get('instructions', '-')}")
         if o is None:

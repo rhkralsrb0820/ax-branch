@@ -2,6 +2,7 @@
 connection; this window only reads the database on a timer, so it never blocks
 and always shows the persisted truth."""
 import gc
+import json
 import os
 import re
 from pathlib import Path
@@ -10,11 +11,11 @@ import time
 import tkinter as tk
 from tkinter import font as tkfont, messagebox, scrolledtext, ttk
 
-from . import WORKSPACE, __version__, library, live, supervisor
+from . import WORKSPACE, __version__, departments, library, live, supervisor
 from .library import project_title
 from .engine import open_engine
 from .state import Busy, Store
-from .home import Home, draw_pipeline, configure_theme, ceo_symbol, RoundedPanel
+from .home import Home, draw_pipeline, configure_theme, RoundedPanel, StatusOrb, ORB_LABELS, orb_state
 
 FONT = ('Malgun Gothic', 10)
 COLUMNS = {'engine': ('엔진', 70), 'task': ('현재 작업', 170), 'status': ('상태', 230), 'last': ('마지막 활동', 90),
@@ -33,7 +34,7 @@ class RecordText(scrolledtext.ScrolledText):
 
 
 class App(tk.Tk):
-    def __init__(self, workspace=WORKSPACE, engine_factory=None, goal=None, resume=None):
+    def __init__(self, workspace=WORKSPACE, engine_factory=None, goal=None, resume=None, open_id=None):
         """engine_factory: callable returning a fresh Engine (own SQLite connection) — tests
         inject one; goal: pre-filled and submitted once the window is up (`--goal`)."""
         super().__init__()
@@ -66,11 +67,20 @@ class App(tk.Tk):
         self.page_title.pack(side='left')
         ttk.Button(header, text='+ 새 업무', command=self.go_home).pack(side='right', padx=(12, 0))
         ttk.Label(header, text=f'로컬 워크스페이스   ·   v{__version__}', style='Muted.TLabel').pack(side='right')
+        self.settings_path = workspace / 'settings.json'
+        try:
+            saved = json.loads(self.settings_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            saved = {}
+        self.motion_off = tk.BooleanVar(value=bool(saved.get('motion_off')))
+        ttk.Checkbutton(header, text='모션 끄기', variable=self.motion_off, command=self._save_motion).pack(side='right', padx=12)
         panel = RoundedPanel(main)
         panel.pack(fill='x', pady=(0, 16))
         self.composer = panel
         top = panel.content
-        ceo_symbol(top).pack(side='left', padx=(0, 20))
+        orb_box = ttk.Frame(top, style='Card.TFrame'); orb_box.pack(side='left', padx=(0, 20))
+        self.orb = StatusOrb(orb_box); self.orb.pack()
+        self.orb_label = ttk.Label(orb_box, text=ORB_LABELS['idle'], style='Card.TLabel'); self.orb_label.pack()
         composer_content = ttk.Frame(top, style='Card.TFrame')
         composer_content.pack(side='left', fill='both', expand=True)
         top = composer_content
@@ -79,6 +89,9 @@ class App(tk.Tk):
         goal_row = ttk.Frame(top, style='Card.TFrame'); goal_row.pack(fill='x', pady=4)
         ttk.Button(goal_row, text='淸月 CEO에게 맡기기', style='Primary.TButton', command=self.start).pack(side='right')
         ttk.Button(goal_row, text='파일 첨부', command=self.attach).pack(side='right', padx=6)
+        ttk.Button(goal_row, text='부서 첨부', command=self.department_menu).pack(side='right')
+        self.pending_departments = []          # department ids for the next goal (attached when it starts)
+        self.composer_chips = ttk.Frame(goal_row, style='Card.TFrame'); self.composer_chips.pack(side='left')
         self.attached = []           # Owner input files for the next Goal (copied read-only when it starts)
         self.attached_label = ttk.Label(goal_row, text='', style='Card.TLabel'); self.attached_label.pack(side='right')
 
@@ -103,11 +116,26 @@ class App(tk.Tk):
         self.list.bind('<Motion>', self._tip)
         self.list.bind('<Leave>', lambda _e: self._tip(None))
         ttk.Button(holder, text='▣   결과물 라이브러리', style='Nav.TButton', command=self.library_window).pack(side='bottom', fill='x', padx=12, pady=16, before=self.list)
+        self.department_specs, self.department_refused = departments.catalog()
+        library_box = ttk.Frame(holder, style='Sidebar.TFrame')
+        library_box.pack(side='bottom', fill='x', padx=12, before=self.list)
+        ttk.Label(library_box, text='부서 라이브러리 · 끌어서 연결', style='Side.TLabel').pack(anchor='w', padx=6, pady=(8, 4))
+        self.library_chips = {}
+        for dep_id, spec in self.department_specs.items():
+            chip = self._chip(library_box, spec, drag=True)
+            chip.pack(anchor='w', padx=6, pady=3)
+            self.library_chips[dep_id] = chip
+        if self.department_refused:
+            ttk.Label(library_box, text=f'명세 오류로 제외: {", ".join(self.department_refused)}', style='Side.TLabel',
+                      wraplength=190).pack(anchor='w', padx=6)
         self.ids, self._rows, self._titles, self._tipwin = [], None, [], None
         self._labels = {}
         view = ttk.Frame(body)              # project view: status banner + panes
         self.banner = tk.Label(view, font=('Malgun Gothic', 11, 'bold'), anchor='w', justify='left', padx=10, pady=6)
         self.banner.pack(fill='x')
+        self.project_departments = ttk.Frame(view)
+        self.project_departments.pack(fill='x', pady=(4, 2))
+        self._departments_shown = None
         # Wrap to the current width: fixed wraplengths cut the banner and the Owner note in narrow windows.
         view.bind('<Configure>', lambda e: (self.banner.config(wraplength=max(300, e.width - 24)),
                                             self.owner_note.config(wraplength=max(300, e.width - 40))))
@@ -200,6 +228,9 @@ class App(tk.Tk):
             self.selected = resume
             self.open_project()
             self.after(500, self.resume)
+        elif open_id:                    # only shows that project's view; never runs or resumes it
+            self.selected = open_id
+            self.open_project()
 
     # ---- project workers
     def _launch(self, pid):
@@ -257,6 +288,10 @@ class App(tk.Tk):
                 return
         self.selected = self.store.new_project(goal)
         self._owner_action('new')
+        for dep_id in self.pending_departments:      # function connections only; Owner approvals are unchanged
+            departments.attach(self.store, self.selected, dep_id, self.department_specs)
+        self.pending_departments = []
+        self._render_composer_departments()
         if self.attached:
             engine = self.engine_factory()
             try:
@@ -618,6 +653,113 @@ class App(tk.Tk):
         if target.exists():
             os.startfile(target)
 
+    # ---- departments: library chips, drag/drop or [프로젝트에 추가], attached chips (persisted as project events)
+    def _chip(self, parent, spec, drag=False, remove=None):
+        frame = tk.Frame(parent, bg='#ddd5f3', padx=8, pady=3, cursor='hand2' if drag else 'arrow')
+        label = tk.Label(frame, text=f"▣ {spec['name']}", bg='#ddd5f3', fg='#3f3863', font=('Malgun Gothic', 9, 'bold'))
+        label.pack(side='left')
+        if remove is not None:
+            tk.Button(frame, text='✕', bd=0, bg='#ddd5f3', fg='#6b6290', activebackground='#cfc5ec',
+                      command=remove, cursor='hand2').pack(side='left', padx=(6, 0))
+        if drag:
+            for w in (frame, label):
+                w.bind('<ButtonPress-1>', lambda e, d=spec['id']: setattr(self, '_drag', (d, e.x_root, e.y_root)))
+                w.bind('<ButtonRelease-1>', lambda e: self._drop(e.x_root, e.y_root))
+        frame.department = spec['id']
+        return frame
+
+    def _drop(self, x, y):
+        """Release of a library chip: dropped on the composer -> pending for the next goal; on the project view ->
+        attached to that project; a click without moving opens the department's details."""
+        dep_id, x0, y0 = getattr(self, '_drag', (None, x, y))
+        self._drag = None
+        if dep_id is None:
+            return
+        if abs(x - x0) < 6 and abs(y - y0) < 6:
+            return self.department_detail(dep_id)
+        target = self.winfo_containing(x, y)
+        while target is not None and target not in (self.composer, self.view):
+            target = target.master
+        if target is self.composer:
+            self.add_department(dep_id, to_project=False)
+        elif target is self.view and not self.home_mode:
+            self.add_department(dep_id, to_project=True)
+
+    def department_menu(self):
+        menu = tk.Menu(self, tearoff=False)
+        for dep_id, spec in self.department_specs.items():
+            menu.add_command(label=f"{spec['name']} — {', '.join(spec['provides'][:2])}",
+                             command=lambda d=dep_id: self.add_department(d, to_project=False))
+        menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
+
+    def add_department(self, dep_id, to_project):
+        if to_project:
+            if not self.selected:
+                return
+            try:
+                departments.attach(self.store, self.selected, dep_id, self.department_specs)
+            except departments.Rejected as e:
+                messagebox.showinfo('AX Branch', str(e))
+            self._departments_shown = None
+            self.show()
+        elif dep_id in self.pending_departments:
+            messagebox.showinfo('AX Branch', f"이미 첨부한 부서입니다: {self.department_specs[dep_id]['name']}")
+        else:
+            self.pending_departments.append(dep_id)
+            self._render_composer_departments()
+
+    def remove_department(self, dep_id, from_project):
+        if from_project and self.selected:
+            departments.detach(self.store, self.selected, dep_id)
+            self._notice[0] = '부서 해제: 다음 위임부터 적용 (실행 중인 단계는 끝까지 진행, 기록은 보존)'
+            self._departments_shown = None
+            self.show()
+        else:
+            self.pending_departments.remove(dep_id)
+            self._render_composer_departments()
+
+    def _render_composer_departments(self):
+        for w in self.composer_chips.winfo_children():
+            w.destroy()
+        for dep_id in self.pending_departments:
+            self._chip(self.composer_chips, self.department_specs[dep_id],
+                       remove=lambda d=dep_id: self.remove_department(d, False)).pack(side='left', padx=(0, 6))
+
+    def _render_project_departments(self):
+        ids = [d['id'] for d in departments.attached(self.store, self.selected)] if self.selected else []
+        if ids == self._departments_shown:
+            return
+        self._departments_shown = ids
+        for w in self.project_departments.winfo_children():
+            w.destroy()
+        ttk.Label(self.project_departments, text='연결된 부서' if ids else
+                  '연결된 부서 없음 · 라이브러리에서 끌어 놓으면 연결됩니다 (기능 연결일 뿐, 결제·게시 등 승인은 그대로)',
+                  style='Muted.TLabel').pack(side='left', padx=(2, 10))
+        for dep_id in ids:
+            spec = self.department_specs.get(dep_id) or {'id': dep_id, 'name': f'{dep_id} (라이브러리에 없음)'}
+            self._chip(self.project_departments, spec,
+                       remove=lambda d=dep_id: self.remove_department(d, True)).pack(side='left', padx=(0, 6))
+
+    def department_detail(self, dep_id):
+        spec = self.department_specs[dep_id]
+        win = tk.Toplevel(self); win.title(f"부서 — {spec['name']}")
+        text = scrolledtext.ScrolledText(win, width=70, height=18, font=FONT, wrap='word')
+        text.pack(fill='both', expand=True, padx=10, pady=10)
+        perm = spec['permissions']
+        text.insert('1.0', '\n'.join([
+            f"{spec['name']}  (id {spec['id']}, v{spec['version']})", '', f"역할: {spec['role']}",
+            f"제공 기능: {', '.join(spec['provides'])}", f"담당 에이전트: {spec['agent']['role']}",
+            f"사용 도구: {', '.join(spec['tools'])}", f"입력: {', '.join(spec['inputs'])}",
+            f"결과: {', '.join(spec['outputs'])}", f"참조 자료: {', '.join(spec['knowledge'])}",
+            f"권한: 읽기 {perm['read']} · 쓰기 {perm['write']} · 네트워크 {'예' if perm['network'] else '아니오'} · shell 아니오",
+            '검수 기준:', *[f'  - {c}' for c in spec['acceptance_criteria']], '',
+            '연결은 기능 연결입니다. 결제·credential·외부 게시·고객 연락 등은 별도 Owner 승인이 필요합니다.']))
+        text.configure(state='disabled')
+        row = ttk.Frame(win, padding=8); row.pack(fill='x')
+        ttk.Button(row, text='프로젝트에 추가', command=lambda: (self.add_department(dep_id, not self.home_mode),
+                                                         win.destroy())).pack(side='right')
+        win.department = dep_id                     # reachable by tests
+
     # ---- display
     def go_home(self, category='청월 홈'):
         for name, button in self.nav_buttons.items():
@@ -662,6 +804,7 @@ class App(tk.Tk):
         projects = self.store.projects()
         watch = supervisor.candidates(self.store)
         labels = {p['id']: supervisor.status(self.workspace, self.store, p['id'])['status'] for p in projects}
+        self._statuses = labels
         if self.selected is None and watch:                  # open on the work in progress
             self.selected = next((pid for pid in watch if labels[pid] == 'ACTIVE'), watch[0])
         rows = [(p['id'], project_title(self.store.project(p['id'])), indicator(p['state'], labels[p['id']]))
@@ -702,12 +845,32 @@ class App(tk.Tk):
 
     def refresh(self):
         self.refresh_list()
+        self._update_orb()
         self.show()
         self.status.config(text=self._notice[0] or f'실행 중 {len(self.running)}건')
         if time.monotonic() - self._last_supervision > 30:
             self._last_supervision = time.monotonic()
             self.supervise()
+        if getattr(self, '_tick', None):         # one refresh loop only: a direct refresh() call never adds a second
+            self.after_cancel(self._tick)
         self._tick = self.after(1500, self.refresh)
+
+    def _save_motion(self):
+        try:
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            self.settings_path.write_text(json.dumps({'motion_off': self.motion_off.get()}), encoding='utf-8')
+        except OSError:
+            pass                                       # the setting still applies for this session
+        self._update_orb()
+
+    def _update_orb(self):
+        statuses = getattr(self, '_statuses', {})
+        state = orb_state([(p['state'], statuses.get(p['id'], ''),
+                            self.store.project(p['id'])['pause_reason'] if p['state'] == 'PAUSED' else None)
+                           for p in self.store.projects()])
+        self.orb.set_state(state, motion=not self.motion_off.get())
+        if self.orb_label.cget('text') != ORB_LABELS[state]:
+            self.orb_label.config(text=ORB_LABELS[state])
 
     def supervise(self):
         """The window is the supervisor while it is open: stalled or failed work is detected and recovered
@@ -741,6 +904,7 @@ class App(tk.Tk):
                  f"Goal: {h['goal']}", f"다음: {h['next_action']}"]
         lines.append('')
         view = live.view(self.workspace, self.store, self.selected)
+        self._render_project_departments()
         status = dict(view['header'])['상태'].split(' — ')[0]
         text, color = banner(p['state'], status, p['pause_reason'] or '')
         if self.banner.cget('text') != text:
@@ -867,6 +1031,6 @@ def _put(widget, text):
         widget.yview_moveto(top)
 
 
-def main(goal=None, resume=None):
-    App(goal=goal, resume=resume).mainloop()
+def main(goal=None, resume=None, open_id=None):
+    App(goal=goal, resume=resume, open_id=open_id).mainloop()
 

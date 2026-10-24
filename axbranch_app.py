@@ -3,6 +3,8 @@
     AXBranch.exe                    open the window
     AXBranch.exe --goal "..."       open it with the goal filled in and submitted
     AXBranch.exe --resume <id>      open it and continue/resume that project
+    AXBranch.exe --open <id>        open it on that project's view (nothing is run or resumed)
+    AXBranch.exe result <id>        [결과 실행] / [결과 보기] of that project's verified result
 """
 import sys
 
@@ -10,7 +12,7 @@ from axbranch.gui import main
 
 if __name__ == '__main__':
     args = sys.argv[1:]
-    if args and args[0] == 'run':                 # background project worker started by the window
+    if args and args[0] in ('run', 'result'):     # background worker, or the verified result (결과 실행)
         # A windowed exe shows a modal dialog on an uncaught exception; a hidden worker would wait on it
         # forever. Log the error and exit instead (the supervisor sees the stopped worker).
         try:
@@ -27,4 +29,4 @@ if __name__ == '__main__':
 
     def opt(name):
         return args[args.index(name) + 1] if name in args[:-1] else None
-    main(goal=opt('--goal'), resume=opt('--resume'))
+    main(goal=opt('--goal'), resume=opt('--resume'), open_id=opt('--open'))

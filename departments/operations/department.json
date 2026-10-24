@@ -1,0 +1,17 @@
+{
+  "id": "operations",
+  "version": "1.0.0",
+  "name": "운영",
+  "role": "앞 단계의 근거를 바탕으로 실제 업무에 쓰는 운영 문서나 작은 도구를 만듭니다.",
+  "provides": ["업무 절차·우선순위 설계", "운영 문서 작성", "작은 업무 도구 제작"],
+  "agent": {
+    "role": "Operations designer",
+    "instructions": "Build the deliverable from the previous stages' findings; cite which finding each recommendation uses. Keep it directly usable by the team. Do not add facts that no previous stage or input supports."
+  },
+  "tools": ["reasoning", "code_generation"],
+  "inputs": ["이전 단계(리서치)의 발견 사항과 근거", "Owner 목표"],
+  "outputs": ["운영 문서 또는 도구", "각 권고가 사용한 근거", "한계"],
+  "knowledge": ["이전 단계 결과", "Owner 입력"],
+  "permissions": {"read": ["project inputs", "previous stage outputs"], "write": ["project deliverable"], "network": false, "shell": false},
+  "acceptance_criteria": ["각 권고가 앞 단계 근거를 인용한다", "바로 쓸 수 있는 형태다", "근거 없는 사실을 추가하지 않는다"]
+}

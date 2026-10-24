@@ -1,5 +1,6 @@
 """Owner window end to end: goal -> build/verify loop -> report shown -> SAVE & CLOSE,
 driven through the real Tk widgets (scripted provider, temp workspace)."""
+import json
 import shutil
 import tempfile
 import time
@@ -9,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 from tkinter import ttk
 
-from axbranch import engine as E
+from axbranch import engine as E, live
 from axbranch.gui import App
 from axbranch.state import Store
 from tests.test_engine import BROKEN, GOOD, LAUNCHABLE, Script
@@ -62,6 +63,101 @@ class GuiTests(unittest.TestCase):
         self.app.update_idletasks()
         self.assertEqual(self.app.composer.winfo_manager(), 'pack')
         self.assertEqual(self.app.store.project(pid)['state'], 'CREATED')
+
+    def test_orb_motion_follows_real_state_and_stops_when_idle_or_turned_off(self):
+        from axbranch.home import orb_state
+        self.assertEqual(orb_state([]), 'idle')
+        self.assertEqual(orb_state([('EXECUTING', 'ACTIVE', None), ('OWNER_REVIEW', 'WAITING_FOR_OWNER', None)]), 'delegating')
+        self.assertEqual(orb_state([('PLANNING', 'ACTIVE', None)]), 'planning')
+        self.assertEqual(orb_state([('VERIFYING', 'ACTIVE', None)]), 'verifying')
+        self.assertEqual(orb_state([('REWORK', 'ACTIVE', None)]), 'rework')
+        self.assertEqual(orb_state([('OWNER_REVIEW', 'WAITING_FOR_OWNER', None)]), 'waiting')
+        self.assertEqual(orb_state([('PAUSED', 'WAITING_FOR_PROVIDER', 'RateLimited: quota')]), 'error')
+        self.assertEqual(orb_state([('CREATED', 'STALLED', None)]), 'idle')         # never started is not an error
+        self.assertEqual(orb_state([('PAUSED', 'WAITING_FOR_PROVIDER', None)]), 'error')    # usage limit
+        orb = self.app.orb
+        orb.set_state('idle')
+        self.assertIsNone(orb._job)                                                 # idle: no loop at all
+        orb.set_state('verifying')
+        self.assertIsNotNone(orb._job)
+        orb.set_state('error')
+        self.assertIsNone(orb._job)                                                 # error/limit: orange and still
+        orb.set_state('planning', motion=False)
+        self.assertIsNone(orb._job)                                                 # motion off: colour only
+        # With no project running, the window's own refresh leaves the orb idle and the loop stopped.
+        self.app.refresh()
+        self.assertEqual((orb.state, orb._job), ('idle', None))
+        self.assertEqual(self.app.orb_label.cget('text'), '대기')
+        self.app.motion_off.set(True)
+        self.app._save_motion()
+        self.assertTrue(json.loads((self.ws / 'settings.json').read_text(encoding='utf-8'))['motion_off'])
+
+    def test_departments_attach_by_drop_or_button_persist_and_detach(self):
+        from axbranch import departments
+        from axbranch.gui import App as Window
+        pid = self.app.store.new_project('department wiring')
+        self.app.selected = pid
+        self.app.open_project()
+        # Drag a library chip and release it over the project's department row. The screen hit test is given
+        # (another application's window on the Owner's desktop would make the real one environment-dependent).
+        self.app._drag = ('research', 10, 10)
+        with mock.patch.object(self.app, 'winfo_containing', return_value=self.app.project_departments):
+            self.app._drop(200, 200)
+        self.assertEqual([d['id'] for d in departments.attached(self.app.store, pid)], ['research'])
+        with mock.patch('axbranch.gui.messagebox.showinfo') as info:            # duplicate refused, said once
+            self.app.add_department('research', to_project=True)
+        self.assertIn('이미 연결된 부서', info.call_args.args[1])
+        self.app.department_detail('operations')                                 # details -> [프로젝트에 추가]
+        detail = next(w for w in self.app.winfo_children() if getattr(w, 'department', None) == 'operations')
+        _press(detail, '프로젝트에 추가')
+        self.app.update()
+        chips = [w.department for w in self.app.project_departments.winfo_children() if hasattr(w, 'department')]
+        self.assertEqual(chips, ['research', 'operations'])
+        # Reopened app: the connection is restored from the project's own records, not recreated.
+        with mock.patch.object(Window, 'supervise', lambda self: None):     # reopening must not run anything
+            again = Window(workspace=self.ws, engine_factory=lambda: None)
+        try:
+            again.withdraw()
+            again.selected = pid
+            again.open_project()
+            again.update()
+            self.assertEqual([w.department for w in again.project_departments.winfo_children()
+                              if hasattr(w, 'department')], ['research', 'operations'])
+        finally:
+            again.destroy()
+        self.app.remove_department('research', from_project=True)
+        self.assertIn('다음 위임부터', self.app._notice[0])
+        self.assertEqual([d['id'] for d in departments.attached(self.app.store, pid)], ['operations'])
+
+    def test_open_flag_shows_a_project_without_running_it(self):
+        from axbranch.gui import App as Window
+        pid = self.app.store.new_project('open only')
+        with mock.patch.object(Window, 'supervise', lambda self: None), \
+                mock.patch.object(Window, '_launch', side_effect=AssertionError('must not run')):
+            again = Window(workspace=self.ws, engine_factory=lambda: None, open_id=pid)
+        try:
+            again.withdraw()
+            again.update()
+            self.assertEqual((again.selected, again.home_mode), (pid, False))
+            self.assertEqual(again.store.project(pid)['state'], 'CREATED')
+        finally:
+            again.destroy()
+
+    def test_pending_departments_attach_when_the_goal_starts_and_pipeline_names_them(self):
+        from axbranch import departments
+        self.app.add_department('research', to_project=False)
+        with mock.patch('axbranch.gui.messagebox.showinfo'):
+            self.app.add_department('research', to_project=False)              # no duplicate chip
+        self.assertEqual(self.app.pending_departments, ['research'])
+        self.app.goal.insert('1.0', 'make an add tool')
+        self.app.start()
+        pid = self.app.selected
+        self.assertEqual([d['id'] for d in departments.attached(self.app.store, pid)], ['research'])
+        self.assertEqual(self.app.pending_departments, [])
+        self.pump_until(lambda: self.app.store.project(pid)['state'] in ('OWNER_REVIEW', 'PAUSED') and not self.app.running)
+        # The scripted plan names no department although one is attached: shown as a temporary agent.
+        rows = live.view(self.ws, self.app.store, pid)['pipeline']
+        self.assertTrue(any(r['title'].startswith('[임시 에이전트]') for r in rows), [r['title'] for r in rows])
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

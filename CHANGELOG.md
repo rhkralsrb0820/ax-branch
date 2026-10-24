@@ -3,6 +3,62 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.60] - 2026-10-24
+
+Department harness: attach function packages to a project; 淸月 CEO delegates only to them; real state motion.
+
+### Added
+- `departments/<id>/department.json` packages (first: research, operations), loaded by `axbranch/departments.py`.
+  - Each package has an id, version, role, provided functions, its agent and tools, inputs/outputs, knowledge,
+    permissions (network, read/write; shell is always false) and acceptance criteria.
+  - Invalid specs are refused at load.
+- Per-project attach/detach recorded as events: persisted, auditable, never mixed between projects.
+  Attaching connects functions only; Owner approvals stay as they were.
+- Window:
+  - a sidebar "부서 라이브러리" whose chips can be dragged onto the composer or a project, or clicked for details
+    with [프로젝트에 추가];
+  - [부서 첨부] next to [파일 첨부];
+  - the project's "연결된 부서" row with detach ("다음 위임부터 적용");
+  - pipeline titles `[부서] agent` / `[임시 에이전트] agent`.
+- `StatusOrb`: the CEO sphere moves only on real running state (planning / delegating / verifying / rework, a ~2 s
+  blink while the Owner is awaited). Idle, error/limit (orange) and done are still, with no timer. A "모션 끄기"
+  setting is kept in workspace settings.json. The pipeline statically emphasises the current node and the
+  hand-off into it.
+- `AXBranch.exe --open <id>` opens a project's view without running it. `axbranch result <id>` (also on the exe)
+  runs or shows the verified result exactly as [결과 실행] / [결과 보기] does.
+
+### Changed
+- STAGE has `department`. Planning, strategy and diagnosis see only the attached departments (summaries).
+  Staffing refuses a stage delegated to an unattached department, or one using tools or network beyond its
+  department, and records `department_delegation`, or `temporary_agent` when no attached department fits.
+  Execution re-checks before running, so a detached department gets no new work. Each stage receives only its
+  own department brief, and `department_result` records the evidence and limits. Independent verification is
+  unchanged.
+
+### Fixed
+- Nothing was routed by function before: every stage was an ad-hoc agent.
+- A direct `refresh()` call added a second refresh loop that could fire into a destroyed window; the orb's
+  animation timer is cancelled on destroy (found by the full suite's Tk 'invalid command name' output).
+- A stage whose output was reused in a rework round showed as not started (○) in the pipeline; it now shows
+  ✓ '완료 · 이전 라운드 결과 재사용' (seen on the packaged exe with the real E2E project).
+
+### Verification
+- tests: test_departments (validation, attach/duplicate/detach/persistence, per-project separation, delegation and
+  hand-off, refusals, temporary agent, detach + replan); test_gui (drop / button / detail, reopen restores,
+  pending chips, orb states and stopped loop, motion off, --open).
+- Real E2E in the demo workspace (P-20261024-5dd942, research -> operations, existing CSV): delegation as planned;
+  the research findings were used by operations; Codex FAILED v1 for real defects and PASSED v2 after a rebuild of
+  operations only; the CEO accepted. Evidence: docs/evidence/2026-10-24-departments.md.
+- Full suite F160b (before the reused-stage display fix): 410/411; the one failure is an intermittent headless-Edge
+  timeout in an unchanged browser test, which passed in 2 targeted reruns. After the fix: audited batches of the
+  affected modules (C160c) and the package check, see docs/evidence/2026-10-24-departments.md.
+
+### Known issues
+- Only two departments exist; department permissions for read/write paths are declared, not OS-enforced (agents
+  have no file or shell access anyway).
+- Drop detection uses Tk's screen hit test; another app's window over the drop point prevents the drop
+  ([프로젝트에 추가] always works).
+
 ## [0.1.59] - 2026-10-24
 
 ### Added

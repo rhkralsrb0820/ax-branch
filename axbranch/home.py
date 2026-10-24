@@ -139,16 +139,84 @@ def rounded(canvas, x1, y1, x2, y2, radius=16, **kw):
                                  x1,y2,x1,y2-radius,x1,y1+radius,x1,y1, smooth=True, **kw)
 
 
-def ceo_symbol(parent):
-    """A static identity mark, not a microphone or an activity indicator."""
-    c = tk.Canvas(parent, width=76, height=76, bg='white', highlightthickness=0)
-    for radius in range(32, 2, -1):
-        t = (32-radius)/30
-        color = '#%02x%02x%02x' % (int(81+64*t), int(108+46*t), int(204+30*t))
-        c.create_oval(38-radius, 38-radius, 38+radius, 38+radius, fill=color, outline='')
-    c.create_arc(12, 12, 64, 64, start=35, extent=150, style='arc', outline='#a9f0f2', width=2)
-    c.create_oval(29, 23, 35, 29, fill='#e5f6ff', outline='')
-    return c
+ORB_LABELS = {'idle': '대기', 'planning': '계획 중', 'delegating': '부서·에이전트에 위임 중', 'verifying': '독립 검증 중',
+              'rework': '재작업 중', 'waiting': 'Owner 확인 대기', 'error': '오류·사용량 한도', 'done': '완료'}
+ANIMATED = {'planning', 'delegating', 'verifying', 'rework', 'waiting'}
+
+
+def orb_state(projects):
+    """The CEO orb from REAL stored state only: projects = [(state, supervisor status, pause_reason)].
+    Running work wins; then errors/limits; then Owner waits; otherwise idle (no motion at all)."""
+    running = [st for st, status, _ in projects if status in ('ACTIVE', 'RECOVERING')]
+    if running:
+        return {'PLANNING': 'planning', 'CREATED': 'planning', 'STAFFING': 'delegating', 'EXECUTING': 'delegating',
+                'VERIFYING': 'verifying', 'REWORK': 'rework'}.get(running[0], 'planning')
+    if any((status in ('STALLED', 'FAILED') and st != 'CREATED') or status == 'WAITING_FOR_PROVIDER'
+           or str(reason or '').startswith('RateLimited')
+           for st, status, reason in projects):
+        return 'error'
+    if any(status == 'WAITING_FOR_OWNER' for _, status, _ in projects):
+        return 'waiting'
+    if projects and all(st == 'CLOSED' for st, _, _ in projects):
+        return 'done'
+    return 'idle'
+
+
+class StatusOrb(tk.Canvas):
+    """淸月's sphere. Moves only while real work runs (or a ~2 s blink while the Owner is awaited); idle, error and
+    done are completely still: no timer is scheduled. With motion off it shows colour only."""
+    def __init__(self, parent):
+        super().__init__(parent, width=76, height=76, bg='white', highlightthickness=0)
+        self.state, self.motion, self._job, self._phase = None, True, None, 0
+        self.set_state('idle')
+
+    def set_state(self, state, motion=True):
+        if (state, motion) == (self.state, self.motion):
+            return
+        self.state, self.motion = state, motion
+        if self._job is not None:
+            self.after_cancel(self._job)
+            self._job = None
+        self._phase = 0
+        self._draw()
+        if motion and state in ANIMATED:
+            self._job = self.after(1000 if state == 'waiting' else 60, self._tick)
+
+    def destroy(self):
+        if self._job is not None:                  # no animation callback firing into a destroyed window
+            self.after_cancel(self._job)
+            self._job = None
+        super().destroy()
+
+    def _tick(self):
+        self._phase += 1
+        self._draw()
+        self._job = self.after(1000 if self.state == 'waiting' else 60, self._tick)
+
+    def _draw(self):
+        self.delete('all')
+        orange = self.state == 'error'
+        for radius in range(32, 2, -1):
+            t = (32 - radius) / 30
+            color = ('#%02x%02x%02x' % (int(222 + 25 * t), int(132 + 60 * t), int(58 + 60 * t)) if orange else
+                     '#%02x%02x%02x' % (int(81 + 64 * t), int(108 + 46 * t), int(204 + 30 * t)))
+            self.create_oval(38 - radius, 38 - radius, 38 + radius, 38 + radius, fill=color, outline='')
+        self.create_oval(29, 23, 35, 29, fill='#e5f6ff', outline='')
+        p, s = self._phase, self.state
+        if not self.motion or s not in ANIMATED:
+            return
+        if s in ('planning', 'rework'):
+            step = 3 if s == 'planning' else -4
+            self.create_arc(5, 5, 71, 71, start=(p * step) % 360, extent=110, style='arc',
+                            outline='#a9f0f2' if s == 'planning' else '#f2c46b', width=3)
+        elif s == 'verifying':
+            self.create_arc(5, 5, 71, 71, start=(p * 4) % 360, extent=90, style='arc', outline='#a9f0f2', width=3)
+            self.create_arc(11, 11, 65, 65, start=(-p * 4) % 360, extent=90, style='arc', outline='#d7ceeb', width=3)
+        elif s == 'delegating':
+            x = 38 + (p * 2) % 34                        # light travels from the sphere toward the departments
+            self.create_oval(x - 4, 34, x + 4, 42, fill='#ffffff', outline='')
+        elif s == 'waiting' and p % 2 == 0:              # one soft beat per ~2 s
+            self.create_oval(4, 4, 72, 72, outline='#c9bdf0', width=2)
 
 
 class RoundedPanel(tk.Canvas):
@@ -355,9 +423,12 @@ def draw_pipeline(canvas, rows, on_select):
     x = 15
     for row in rows:
         tag = 'node_' + row['key']
-        if x > 15:
-            canvas.create_line(x - 24, 48, x - 4, 48, arrow='last', fill='#60728b')
-        rounded(canvas, x, 10, x + 205, 94, fill=colors.get(row['mark'], '#f3f4f8'), outline='', tags=tag)
+        current = row['mark'] == '●'                    # the node working or waiting now, from the engine record
+        if x > 15:   # the hand-off into the current node is the only emphasised arrow; no moving decoration
+            canvas.create_line(x - 24, 48, x - 4, 48, arrow='last', fill='#7964db' if current else '#60728b',
+                               width=3 if current else 1)
+        rounded(canvas, x, 10, x + 205, 94, fill=colors.get(row['mark'], '#f3f4f8'),
+                outline='#7964db' if current else '', width=2 if current else 1, tags=tag)
         canvas.create_text(x + 10, 28, text=f'{row["mark"]} {row["title"]}', anchor='w', width=190, font=('Malgun Gothic', 10, 'bold'), tags=tag)
         canvas.create_text(x + 10, 69, text=f'{row["engine"]} · {row["detail"][:42]}', anchor='w', width=190, tags=tag)
         canvas.tag_bind(tag, '<Button-1>', lambda _e, key=row['key']: on_select(key))

@@ -18,7 +18,7 @@ import traceback
 from pathlib import Path
 
 from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, kindex, knowledge, library, metrics, native,
-               permissions, providers, runtime, sandbox, sources, supervisor, training)
+               departments, permissions, providers, runtime, sandbox, sources, supervisor, training)
 from . import __version__
 from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
 
@@ -38,7 +38,7 @@ def ENUM(*values):
     return {'type': 'string', 'enum': list(values)}
 
 
-STAGE = S(name=STR, agent_role=STR, why=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL,
+STAGE = S(name=STR, agent_role=STR, why=STR, instructions=STR, provider=ENUM(*gov.PROVIDERS), web=BOOL, department=STR,
           capabilities=ARR(STR))
 NATIVE = S(tool=ENUM('none', 'pyinstaller'), exe_name=STR, windowed=BOOL)
 PLAN = S(title=STR, interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
@@ -181,6 +181,10 @@ Rules:
 - Each stage declares capabilities from capability_inventory: reasoning, code_generation, web_research.
   Analyze the task's capability gaps before choosing specialists. Use only necessary capabilities. Declaring
   web_research enables the existing public research adapter; it never authorizes delivered-program connections.
+- attached_departments are the function packages the Owner connected to THIS project. Delegate a stage to one by
+  setting department=<its id>; use its agent_role and only its tools. Never name a department that is not attached
+  (the engine refuses it). Use department="" (a temporary agent) only when no attached department fits, and say why
+  in the stage's why. Departments pass results forward: a later stage receives the earlier stages' outputs.
   Model weight training (LoRA of small public models): declare model_training on the stage that needs it; the
   engine tries free options with a real small run and records the decision (Owner approval if none works).
   When attached, the deliverable is a bundle with train.py: the engine runs it ONCE per version in a pinned CPU stack
@@ -802,7 +806,7 @@ class Engine:
     def _planning(self, pid):
         goal = self.store.project(pid)['goal']
         tools = [t for t in TOOL_CANDIDATES if shutil.which(t)]
-        context = {'goal': goal, 'available_providers': providers.available() or list(gov.PROVIDERS),
+        context = {'goal': goal, 'available_providers': providers.available() or list(gov.PROVIDERS), **self._department_context(pid),
                    'available_tools': tools,
                    'prior_knowledge': self._snap(knowledge.retrieve(self.vault, goal), 'K0:knowledge.retrieve',
                                                  goal, 'planning', 'CEO'),
@@ -872,6 +876,21 @@ class Engine:
                                 else {'tool': 'none', 'exe_name': '', 'windowed': False})
         return plan
 
+    def _department_context(self, pid):
+        """{'attached_departments': [...]} for 淸月's planning calls; nothing when none is attached."""
+        specs = self._attached_departments(pid)
+        return {'attached_departments': [departments.summary(s) for s in specs.values()]} if specs else {}
+
+    def _attached_departments(self, pid):
+        """{id: spec} of the departments attached to this project that the library still provides (validated)."""
+        valid, _ = departments.catalog()
+        return {d['id']: valid[d['id']] for d in departments.attached(self.store, pid) if d['id'] in valid}
+
+    def _delegation_refused(self, pid, why):
+        self.store.event(pid, 'delegation_refused', reason=why)
+        self.store.pause(pid, f'Owner action needed: department delegation refused - {why}. '
+                              '연결된 부서를 확인한 뒤 [수정 요청 / 계속]으로 다시 계획하게 하세요.'[:400])
+
     def _agent_caps(self, pid, stage):
         """A stage's agent capabilities; a resolved harness capability (e.g. model_training) is run by the engine,
         never leased to the agent."""
@@ -927,13 +946,36 @@ class Engine:
                                   + '; '.join(waiting) + '. Approve: axbranch approve <id> --network yes|no',
                              resume_state='STAFFING')
             return
+        specs = self._attached_departments(pid)
+        for stage in plan['pipeline']:
+            why = departments.check_stage(stage, specs)
+            if why:
+                return self._delegation_refused(pid, why)
         with self.store.tx():
+            for stage in plan['pipeline']:
+                dep = stage.get('department') or ''
+                if dep:
+                    self.store.event(pid, 'department_delegation', stage=stage['name'], department=dep,
+                                     version=specs[dep]['version'], agent_role=stage['agent_role'], why=stage.get('why', ''))
+                elif specs:   # departments are attached but none fits: a temporary agent, recorded and shown
+                    self.store.event(pid, 'temporary_agent', stage=stage['name'], agent_role=stage['agent_role'],
+                                     why=stage.get('why', ''), attached=sorted(specs))
             staffed = {(a['role'], a['provider']) for a in self.store.agents(pid)}
             for stage in plan['pipeline']:
                 if (stage['agent_role'], stage['provider']) not in staffed:
                     self.store.add_agent(pid, stage['agent_role'], stage['provider'])
                     staffed.add((stage['agent_role'], stage['provider']))
             self.store.set_state(pid, 'EXECUTING')
+
+    @staticmethod
+    def _department_brief(stage, specs):
+        """Only THIS stage's department (its role, standing instructions, outputs, acceptance): never the library."""
+        spec = specs.get(stage.get('department') or '')
+        if spec is None:
+            return {}
+        return {'department': {'id': spec['id'], 'name': spec['name'], 'role': spec['role'],
+                               'standing_instructions': spec['agent']['instructions'], 'outputs': spec['outputs'],
+                               'acceptance_criteria': spec['acceptance_criteria'], 'knowledge': spec['knowledge']}}
 
     def _agent(self, pid, stage):
         return next(a['id'] for a in self.store.agents(pid)
@@ -961,12 +1003,17 @@ class Engine:
         if confirmed is not None and confirmed is not latest:
             baseline['owner_confirmed_version'] = {'version': confirmed['iteration'],
                                                    'content': artifacts.text_of(confirmed)}
+        specs = self._attached_departments(pid)
+        for stage in plan['pipeline']:
+            why = departments.check_stage(stage, specs)    # detached since staffing: no new work goes there
+            if why:
+                return self._delegation_refused(pid, why)
         for idx, stage in enumerate(notes_stages):
             done = self.store.output(pid, idx, pv)      # reused across rework rounds of the same plan
             if done is None:
                 stage_context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
                                  'stage': stage['name'], 'previous_stages': upstream, **self._connections(pid),
-                                 **self._owner_inputs(pid)}
+                                 **self._owner_inputs(pid), **self._department_brief(stage, specs)}
                 stage_context.update(baseline)
                 if plan.get('owner_rework'):
                     stage_context['owner_rework'] = plan['owner_rework']
@@ -974,6 +1021,10 @@ class Engine:
                                       stage['instructions'], stage_context,
                                       WORK, prefer=stage['provider'], web=stage['web'], required=self._agent_caps(pid, stage))
                 self.store.save_output(pid, it, pv, idx, self._agent(pid, stage), used, out)
+                if stage.get('department'):
+                    self.store.event(pid, 'department_result', stage=stage['name'], department=stage['department'],
+                                     provider=used, evidence=len(out.get('evidence') or []),
+                                     limits=(out.get('counterpoints') or [])[:5])
                 done = {'output': out}
             upstream.append({'stage': stage['name'], 'agent': stage['agent_role'], **done['output']})
 
@@ -995,7 +1046,7 @@ class Engine:
                    'no_change_rule': 'Use outcome=NO_CHANGE only with explicit no_change_evidence and empty content/files/edits when the existing artifact needs no change. Otherwise outcome=CHANGED and deliver the product.',
                    'execution_check': (EXEC_CONTRACT.replace('<file>', plan['artifact_filename'])
                                        if plan['artifact_kind'] != 'markdown' else 'document must be substantive'),
-                   'runtime_acceptance': runtime.normalize(plan.get('runtime'))[0]}
+                   'runtime_acceptance': runtime.normalize(plan.get('runtime'))[0], **self._department_brief(final, specs)}
         system = WORKER_SYSTEM.format(role=final['agent_role'])
         history = self.store.verifications(pid)
         if plan.get('owner_rework'):
@@ -1842,7 +1893,7 @@ class Engine:
                    'relevant_knowledge': self._replan_knowledge(pid, 'strategy', ' '.join(
                        f['issue'] for v in [v for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'][-1:]
                        for f in actionable(v['result'].get('findings', [])) if f['severity'] in ('critical', 'major'))[:900]),
-                   'available_providers': providers.available() or list(gov.PROVIDERS),
+                   'available_providers': providers.available() or list(gov.PROVIDERS), **self._department_context(pid),
                    'provider_track_record': metrics.provider_record(self.store)}
         schema = STRATEGY
         if forbid_continue:
@@ -2243,7 +2294,7 @@ class Engine:
                    'verification_history': [{'round': v['iteration'], 'verdict': v['verdict'],
                                              'findings': actionable(v['result']['findings'])}
                                             for v in self.store.verifications(pid)],
-                   'available_providers': providers.available() or list(gov.PROVIDERS),
+                   'available_providers': providers.available() or list(gov.PROVIDERS), **self._department_context(pid),
                    'provider_track_record': metrics.provider_record(self.store)}
         d, used = self._ask(pid, 'CEO', DIAGNOSE_SYSTEM, 'Diagnose the Owner feedback and revise this project.',
                             context, DIAGNOSIS, prefer='claude')
