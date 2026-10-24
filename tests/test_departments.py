@@ -318,5 +318,43 @@ class DepartmentTests(unittest.TestCase):
                     self.assertTrue(self.store.events(pid, {'criteria_conflict'}))
                     self.assertIn('re-plan', self.store.events(pid, {'criteria_conflict'})[0]['detail']['decision'])
 
+    def test_replan_reuses_unchanged_stages_and_reruns_dependents_with_reasons(self):
+        three = [dict(DepartmentScript().pipeline[0]),
+                 dict(DepartmentScript().pipeline[0], name='summarise', instructions='summarise the numbers'),
+                 dict(DepartmentScript().pipeline[1])]
+        for label, change, owner_rework, ran, reused, discarded in (
+                ('second changed', {1: 'summarise differently'}, None, ['summarise'], ['analyse'], ['summarise']),
+                ('first changed', {0: 'find other numbers'}, None, ['analyse', 'summarise'], [], ['analyse', 'summarise']),
+                ('owner feedback', {}, '더 짧게', ['analyse', 'summarise'], [], ['analyse', 'summarise'])):
+            with self.subTest(label):
+                script = DepartmentScript([dict(x) for x in three])
+                pid = self.project('research', 'operations')
+                eng = self.engine(script)
+                self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+                p = self.store.project(pid)
+                plan = dict(p['plan'], pipeline=[dict(st) for st in p['plan']['pipeline']])
+                for i, text in change.items():
+                    plan['pipeline'][i]['instructions'] = text
+                if owner_rework:
+                    plan['owner_rework'] = owner_rework
+                self.store.update(pid, plan=plan, plan_version=p['plan_version'] + 1)
+                for state in ('REWORK', 'STAFFING'):
+                    self.store.set_state(pid, state)
+                before = len(script.contexts)
+                self.engine(script).run(pid)
+                works = [c['stage'] for s_, c in script.contexts[before:] if s_ is E.WORK]
+                self.assertEqual(works, ran)
+                pv = p['plan_version'] + 1
+                rs = [e['detail'] for e in self.store.events(pid, {'stage_reused'}) if e['detail'].get('from_plan_version')]
+                ds = [e['detail'] for e in self.store.events(pid, {'stage_discarded'})]
+                self.assertEqual([r['stage'] for r in rs if r['plan_version'] == pv], reused)
+                self.assertEqual([d['stage'] for d in ds if d['plan_version'] == pv], discarded)
+                whys = {d['stage']: d['why'] for d in ds if d['plan_version'] == pv}
+                if label == 'first changed':
+                    self.assertIn('definition changed', whys['analyse'])
+                    self.assertIn('earlier stage re-ran', whys['summarise'])          # dependents re-run
+                if label == 'owner feedback':
+                    self.assertIn('Owner feedback', whys['analyse'])
+
 if __name__ == '__main__':
     unittest.main()

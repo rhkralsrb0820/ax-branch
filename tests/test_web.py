@@ -141,5 +141,19 @@ class WebTests(unittest.TestCase):
         self.assertTrue({p['source'] for p in status['proposals']} <= {'owner', 'dev'})
 
 
+    def test_a_running_worker_is_never_started_twice(self):
+        from unittest import mock
+        from axbranch import actions
+        _, p = self.call('/api/projects', {'goal': 'g', 'request_id': 'req-0006-abcd'})
+        self.launched.clear()
+        with mock.patch('axbranch.supervisor.status', return_value={'status': 'ACTIVE'}):
+            s = Store(self.ws / 'axbranch.sqlite3')
+            try:
+                self.assertFalse(actions.launch(self.ws, s, p['id'], lambda ws, pid: self.launched.append(pid)))
+            finally:
+                s.close()
+            self.call(f"/api/project/{p['id']}/resume", {})                          # reconnect + resume
+        self.assertEqual(self.launched, [])
+
 if __name__ == '__main__':
     unittest.main()

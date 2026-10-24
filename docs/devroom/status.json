@@ -1,11 +1,12 @@
 {
- "updated_at": "2026-10-25 01:30 KST",
+ "updated_at": "2026-10-25 02:10 KST",
  "version": "0.1.61",
  "branch": "dev/web-ui",
- "commit": "71e4e01",
+ "commit": "5075785",
  "stage_text": "AX Branch는 淸月 CEO가 목표를 계획하고, 연결된 부서와 전문 에이전트(Claude/Codex)에 위임해 만들고, 독립 검증·제한된 재작업을 거쳐 Owner 검토로 넘기는 단계까지 실제로 동작한다. 지금은 화면을 로컬 웹 UI로 옮기는 중이며, 다음은 부서 입출력 계약의 실제 검증이다. main 병합은 Owner 결정 전까지 하지 않는다.",
  "summary": {
   "done": [
+   "엔진 3: 재계획 후 변경 없는 선행 결과 재사용·의존 단계 재실행·근거 기록, 중복 실행 방지 (자동 테스트)",
    "엔진 2: 부서 수용 기준을 독립 검증에 연결 — 미충족·판정 없음·충돌은 PASS 불가 (자동 테스트)",
    "엔진 1: 부서 계약(형식) 검증 — 위반 결과는 다음 부서로 전달 안 함, 1회 재작업 후 Owner 일시정지 (자동 테스트)",
    "로컬 웹 UI 1차 (ab6382d): API·보안·중복 방지·headless 자체 테스트 20/20",
@@ -17,7 +18,7 @@
   ],
   "in_progress": [
    "Owner 확인 대기: 웹 UI 3개 항목 — 마지막 보고 기준",
-   "엔진 3: 부분 재작업·재개 안정화 — 마지막 보고 기준"
+   "엔진 4: 생성 프로그램 실행 권한 통제 조사 — 마지막 보고 기준"
   ],
   "open_issues": [
    "부서 계약·수용 기준은 자동 테스트로만 확인 (실제 모델 E2E 전)",
@@ -226,19 +227,23 @@
   {
    "id": "partial-rework",
    "title": "부분 재작업·재개 안정화",
-   "impl": "개발 중",
+   "impl": "구현 완료",
    "verify": "자동 테스트 확인",
    "solves": "실패한 부서만 고치고 의존 결과를 다시 검사, 중단·재접속 후 중복 실행 방지",
-   "scope": "현재: 같은 계획 버전의 선행 결과 재사용, 실행 중 worker 중복 방지. 미구현: 재사용/폐기 근거 기록, 의존 재검사 규칙",
-   "verified_at": "9483c1e",
-   "tests": "test_a_reused_department_result_is_shown_as_done_after_a_rework",
+   "scope": "재계획 후 정의가 같고 선행 단계도 재사용된 단계 결과만 재사용(stage_reused), 그 외 폐기(stage_discarded, 이유 기록). 한 단계가 다시 실행되면 이후 단계 모두 재실행. 새 Owner 피드백이 있으면 재사용 안 함. 실행 중 worker 중복 시작 방지, 계약 실패 같은 방식 반복 차단",
+   "verified_at": "dev/web-ui (reuse commit)",
+   "tests": "tests.test_departments 14/14, tests.test_web 8/8, broad suites 173/173",
    "evidence": [
-    "docs/evidence/2026-10-24-final-e2e.md"
+    "axbranch/engine.py _carry_over",
+    "tests/test_departments.py",
+    "tests/test_web.py"
    ],
    "limits": [
-    "재사용/폐기 근거가 이벤트로 남지 않음"
+    "최종 산출 단계는 기존 재작업 경로(진단·편집) 사용",
+    "부서가 없는 레거시 프로젝트는 기존 동작",
+    "실제 모델 E2E 미실행"
    ],
-   "done_when": "선행 결과 변경 시 후속 재실행, 재사용 근거 기록, 같은 실패 반복 차단을 테스트로 확인"
+   "done_when": "작은 실제 E2E에서 재사용/폐기 기록 확인"
   },
   {
    "id": "exec-permission",

@@ -430,6 +430,13 @@ def preserve_runtime(before, proposed, *, equivalent=False):
     return result, notes
 
 
+def _stage_signature(stage):
+    """What a stage's result depends on in its plan: who does what, with which department and tools."""
+    keys = ('name', 'department', 'agent_role', 'instructions', 'capabilities', 'web', 'provider')
+    return hashlib.sha256(json.dumps({k: stage.get(k) for k in keys}, sort_keys=True, ensure_ascii=False)
+                          .encode('utf-8')).hexdigest()[:16]
+
+
 def gating(f, n=None):
     """A finding that counts for the gate: a deterministic-check failure, or one about an approved criterion
     (index 0..n-1; legacy findings without an index count). Anything else is a recommendation."""
@@ -922,6 +929,27 @@ class Engine:
         self.store.event(pid, 'department_acceptance', iteration=p['iteration'], results=statuses)
         return findings
 
+    def _carry_over(self, pid, plan, idx, stage, pv, it, chain):
+        """After a re-plan, reuse the previous plan version's result of an UNCHANGED stage whose upstream was reused
+        too; otherwise discard it (recorded either way). Returns (output or None, chain still intact)."""
+        prev = next((e['detail'] for e in reversed(self.store.events(pid, {'stage_output'}))
+                     if e['detail'].get('index') == idx and e['detail'].get('plan_version') == pv - 1), None)
+        old = self.store.output(pid, idx, pv - 1) if prev else None
+        if old is None:
+            return None, False
+        same = prev['signature'] == _stage_signature(stage)
+        why = ('new Owner feedback in this plan' if plan.get('owner_rework') else
+               'an earlier stage re-ran, so its input may have changed' if not chain else
+               'the stage definition changed in the new plan' if not same else '')
+        if why:
+            self.store.event(pid, 'stage_discarded', stage=stage['name'], from_plan_version=pv - 1, plan_version=pv, why=why)
+            return None, False
+        self.store.save_output(pid, it, pv, idx, old['agent_id'], old['provider'], old['output'])
+        self.store.event(pid, 'stage_output', stage=stage['name'], index=idx, plan_version=pv, signature=prev['signature'])
+        self.store.event(pid, 'stage_reused', stage=stage['name'], from_plan_version=pv - 1, plan_version=pv,
+                         why='unchanged stage definition and unchanged upstream; result passed the contract check')
+        return {'output': old['output']}, True
+
     def _contract_paused(self, pid, stage, problems):
         self.store.pause(pid, (f"Owner action needed: department contract failed - stage {stage['name']!r} "
                                f"({stage.get('department') or 'temporary agent'}): {'; '.join(problems)}. "
@@ -1050,11 +1078,14 @@ class Engine:
             why = departments.check_stage(stage, specs, library, final=stage is plan['pipeline'][-1])   # detached since staffing: no new work goes there
             if why:
                 return self._delegation_refused(pid, why)
+        chain = True                                    # False once a stage re-runs: everything after it re-runs too
         for idx, stage in enumerate(notes_stages):
             done = self.store.output(pid, idx, pv)      # reused across rework rounds of the same plan
             if done is not None and specs:
                 self.store.event(pid, 'stage_reused', stage=stage['name'], plan_version=pv,
                                  why='same plan version; its result passed the contract check when produced')
+            if done is None and specs and pv > 1:
+                done, chain = self._carry_over(pid, plan, idx, stage, pv, it, chain)
             if done is None:
                 stage_context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
                                  'stage': stage['name'], 'previous_stages': upstream, **self._connections(pid),
@@ -1091,6 +1122,9 @@ class Engine:
                             return self._contract_paused(pid, stage, problems)
                         return self._executing(pid)        # one bounded rework of this department only
                 self.store.save_output(pid, it, pv, idx, self._agent(pid, stage), used, out)
+                if specs:
+                    self.store.event(pid, 'stage_output', stage=stage['name'], index=idx, plan_version=pv,
+                                     signature=_stage_signature(stage))
                 if stage.get('department'):
                     self.store.event(pid, 'department_result', stage=stage['name'], department=stage['department'],
                                      provider=used, evidence=len(out.get('evidence') or []),
