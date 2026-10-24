@@ -1,26 +1,19 @@
 {
- "updated_at": "2026-10-25 03:20 KST",
+ "updated_at": "2026-10-25 02:40 KST",
  "version": "0.1.61",
  "branch": "dev/web-ui",
- "commit": "6061e9d",
- "stage_text": "AX Branch는 淸月 CEO가 목표를 계획하고, 연결된 부서와 전문 에이전트(Claude/Codex)에 위임해 만들고, 독립 검증·제한된 재작업을 거쳐 Owner 검토로 넘기는 단계까지 실제로 동작한다. 지금은 화면을 로컬 웹 UI로 옮기는 중이며, 다음은 부서 입출력 계약의 실제 검증이다. main 병합은 Owner 결정 전까지 하지 않는다.",
+ "commit": "7884507",
+ "stage_text": "AX Branch는 淸月 CEO가 목표를 계획하고, 연결된 부서와 전문 에이전트(Claude/Codex)에 위임해 만들고, 부서 결과의 형식 계약과 부서 수용 기준을 포함한 독립 검증·제한된 재작업을 거쳐 Owner 검토로 넘기는 단계까지 실제로 동작한다. 화면은 기존 Tk 창과 로컬 웹 UI(같은 엔진) 두 가지이며, 웹 UI는 Owner 확인을 기다린다. main 병합은 Owner 결정 전까지 하지 않는다.",
  "summary": {
   "done": [
-   "엔진 4: Owner 결과 실행 네트워크 허용 목록(Python audit hook, best-effort) + 선언/사전 승인/강제 표",
-   "엔진 5: 브라우저 검사 단계별 시간 기록(시간 초과 위치 추적용)",
-   "엔진 3: 재계획 후 변경 없는 선행 결과 재사용·의존 단계 재실행·근거 기록, 중복 실행 방지 (자동 테스트)",
-   "엔진 2: 부서 수용 기준을 독립 검증에 연결 — 미충족·판정 없음·충돌은 PASS 불가 (자동 테스트)",
-   "엔진 1: 부서 계약(형식) 검증 — 위반 결과는 다음 부서로 전달 안 함, 1회 재작업 후 Owner 일시정지 (자동 테스트)",
-   "로컬 웹 UI 1차 (ab6382d): API·보안·중복 방지·headless 자체 테스트 20/20",
-   "웹 UI 패키지 package-0.1.61-web (ee85400c…): 격리 루트에서 서버·토큰 거부·종료 확인",
-   "부서 하네스 0.1.60: 연결·중복 방지·해제·저장/복원, 연결된 부서에만 위임, 임시 에이전트 정책",
-   "최종 코드 실제 E2E P-20261024-304eb4: 리서치→운영, 검증 FAIL→운영만 재작업→PASS (7호출)",
-   "Tk 창의 입자 구체 모션(실제 상태 연동, 모션 끄기·저부하, 숨김 시 중단)",
-   "Owner 확인: 기존 창에서 부서를 홈 입력 영역으로 끌어 첨부"
+   "최종 회귀 F161: 439/439 (7884507, 해시 일치, 50 배치)",
+   "실제 부서 E2E P-20261025-1d2aec (0.1.61 패키지 5a38799c): 계약 FAIL→1회 재작업→형식 통과, 부서 수용 기준 전부 met, 재사용 기록, PASS→Owner 검토 (10호출)",
+   "E2E가 찾은 결함 수정: 입력 자료 안의 프로젝트 ID를 다른 프로젝트 참조로 잘못 판정 (7884507)",
+   "엔진 1~5: 계약 형식 검사, 부서 수용 기준 검증 관문, 재계획 후 재사용·의존 재실행, Owner 결과 실행 네트워크 허용 목록, 브라우저 단계 기록",
+   "로컬 웹 UI + 오너 개발실 (패키지 package-0.1.61-web)"
   ],
   "in_progress": [
-   "Owner 확인 대기: 웹 UI 3개 항목 — 마지막 보고 기준",
-   "작은 실제 부서 E2E(계약·수용 기준·재사용 확인) — 마지막 보고 기준"
+   "Owner 확인 대기: 웹 UI 3개 항목 (README-WEB.txt) — 마지막 보고 기준"
   ],
   "open_issues": [
    "부서 계약·수용 기준·재사용은 자동 테스트로만 확인 (실제 모델 E2E 전)",
@@ -191,19 +184,20 @@
    "id": "dept-contract",
    "title": "부서 입력·출력 계약 검증",
    "impl": "구현 완료",
-   "verify": "자동 테스트 확인",
+   "verify": "실제 E2E 확인",
    "solves": "결과물 없음·형식 오류·다른 프로젝트 참조가 다음 부서로 넘어가는 문제",
    "scope": "선택적 contract v1(필수 입력·필수 항목·최소 근거/길이·다른 프로젝트 참조 금지), 실패 시 전달 안 함 → 같은 부서 1회 재작업 → Owner 일시정지",
-   "verified_at": "dev/web-ui (contract commit)",
+   "verified_at": "90bb049 E2E P-20261025-1d2aec + 7884507 F161 439/439",
    "tests": "tests.test_departments 12/12; engine-related suites 146/146",
    "evidence": [
     "docs/evidence/2026-10-24-department-enforcement.md",
-    "tests/test_departments.py"
+    "tests/test_departments.py",
+    "docs/evidence/2026-10-25-e2e-161.md"
    ],
    "limits": [
     "형식 검사일 뿐 내용 정확성은 독립 검증 몫",
-    "최종 산출 단계에는 적용 안 함(기존 검사·검증 경로)",
-    "실제 모델 E2E 미실행"
+    "최종 산출 단계에는 적용 안 함",
+    "E2E에서 오탐 1건 발견·수정(입력 자료의 프로젝트 ID)"
    ],
    "done_when": "작은 실제 부서 E2E에서 계약 이벤트가 기록되고 위반 시 전달되지 않음을 확인"
   },
@@ -211,18 +205,19 @@
    "id": "dept-acceptance",
    "title": "부서 수용 기준 → 독립 검증",
    "impl": "구현 완료",
-   "verify": "자동 테스트 확인",
+   "verify": "실제 E2E 확인",
    "solves": "부서 자기 보고만으로 통과하는 위험",
    "scope": "위임된 부서의 수용 기준을 프로젝트 기준과 따로 검증 에이전트에 전달·판정(met/unmet/unverifiable/conflict). met이 아니거나 판정이 없으면 PASS 불가. 충돌은 criteria_conflict로 기록(둘 다 유지, CEO 재계획). 결정적 기준은 엔진 1 계약 검사가 담당",
-   "verified_at": "dev/web-ui (acceptance commit)",
+   "verified_at": "90bb049 E2E P-20261025-1d2aec + 7884507 F161 439/439",
    "tests": "tests.test_departments 13/13; broad suites 187/187",
    "evidence": [
     "axbranch/engine.py _department_gate",
-    "tests/test_departments.py"
+    "tests/test_departments.py",
+    "docs/evidence/2026-10-25-e2e-161.md"
    ],
    "limits": [
     "의미 기준 판정은 검증 에이전트(모델)에 의존",
-    "실제 모델 E2E 미실행"
+    "미충족·충돌 경로는 자동 테스트로만 확인"
    ],
    "done_when": "작은 실제 E2E에서 department_acceptance 기록 확인"
   },
@@ -233,7 +228,7 @@
    "verify": "자동 테스트 확인",
    "solves": "실패한 부서만 고치고 의존 결과를 다시 검사, 중단·재접속 후 중복 실행 방지",
    "scope": "재계획 후 정의가 같고 선행 단계도 재사용된 단계 결과만 재사용(stage_reused), 그 외 폐기(stage_discarded, 이유 기록). 한 단계가 다시 실행되면 이후 단계 모두 재실행. 새 Owner 피드백이 있으면 재사용 안 함. 실행 중 worker 중복 시작 방지, 계약 실패 같은 방식 반복 차단",
-   "verified_at": "dev/web-ui (reuse commit)",
+   "verified_at": "7884507 (F161 439/439)",
    "tests": "tests.test_departments 14/14, tests.test_web 8/8, broad suites 173/173",
    "evidence": [
     "axbranch/engine.py _carry_over",
@@ -254,7 +249,7 @@
    "verify": "자동 테스트 확인",
    "solves": "검증 실행과 Owner 결과 실행의 제한이 다른 문제",
    "scope": "Owner [결과 실행] Python 결과: audit hook 실행기로 loopback + 승인 도메인만 허용, 시도 기록. 검증 실행: 비로컬 전부 차단. 선언/사전 승인/실제 강제 표 작성",
-   "verified_at": "dev/web-ui (exec commit)",
+   "verified_at": "7884507 (F161 439/439)",
    "tests": "tests.test_owner_run 4/4 (실제 자식 프로세스), affected suites 177/178 (1건 = 알려진 Edge 시간 초과)",
    "evidence": [
     "docs/evidence/2026-10-24-department-enforcement.md",
@@ -275,12 +270,13 @@
    "verify": "자동 테스트 확인",
    "solves": "Owner 화면을 웹으로 옮겨 품질 높은 모션과 사용성을 얻음 (기존 EXE 유지)",
    "scope": "홈·목표·파일/부서 첨부, 현황·동향, 부서 라이브러리(드래그·버튼·해제), 파이프라인·기록·검증, 승인·피드백·중단·재개·결과 실행, 오너 개발실",
-   "verified_at": "ab6382d",
+   "verified_at": "7884507 (F161 439/439)",
    "tests": "tests.test_web 7/7, headless Chrome 자체 테스트 20/20",
    "evidence": [
     "axbranch/web.py",
     "axbranch/webui/",
-    "docs/evidence/2026-10-24-web-selftest.json"
+    "docs/evidence/2026-10-24-web-selftest.json",
+    "demo-2026-11/package-0.1.61-web/README-WEB.txt"
    ],
    "limits": [
     "결과물 라이브러리·Develop 화면 없음",
@@ -313,7 +309,7 @@
    "verify": "자동 테스트 확인",
    "solves": "headless Edge 간헐 시간 초과",
    "scope": "브라우저 단계별 시간(첫 페이지 요청·마지막 앱 요청·종료/시간 제한)과 멈춘 단계를 step.phases에 기록",
-   "verified_at": "dev/web-ui (exec commit)",
+   "verified_at": "7884507 (F161 439/439)",
    "tests": "단계 기록 단위 테스트; 실패 테스트 10회 재실행 10/10 통과(시간 초과 재현 안 됨)",
    "evidence": [
     "docs/evidence/2026-10-24-F160b-runtime-failure.md"
@@ -335,7 +331,7 @@
    "priority": "중",
    "repro": "tests.test_runtime 브라우저 테스트를 반복 실행: branch 8/10, main 9/10 통과",
    "impact": "전체 회귀에서 간헐 실패 1건",
-   "seen_at": "9483c1e; dev/web-ui 영향 스위트에서 1회 재발(단계 기록 전 코드)",
+   "seen_at": "9483c1e (F160b, F160d), dev/web-ui 영향 스위트 1회; F161에서는 재발 없음(439/439)",
    "next": "단계 기록 추가됨(phases). 다음 발생 시 stalled_at으로 지연 단계 확인",
    "evidence": [
     "docs/evidence/2026-10-24-F160b-runtime-failure.md"
@@ -383,16 +379,30 @@
   },
   {
    "id": "e2e-package-overwritten",
-   "title": "E2E에 쓴 패키지(77db6aa9)는 모션 빌드로 교체됨",
+   "title": "E2E 패키지 해시와 최종 패키지 해시가 다름",
    "status": "기록",
    "kind": "기록",
    "priority": "하",
    "repro": "package-0.1.60 재빌드",
-   "impact": "E2E 패키지 해시는 문서에만 남음",
-   "seen_at": "ef5f8b5a",
-   "next": "다음 E2E는 고정한 패키지를 별도 폴더에 보존",
+   "impact": "0.1.61 E2E는 5a38799c(90bb049), 최종 패키지는 오탐 수정 포함 빌드",
+   "seen_at": "7884507",
+   "next": "최종 패키지 해시는 handoff·README-WEB에 기록",
    "evidence": [
     "docs/evidence/2026-10-24-final-e2e.md"
+   ]
+  },
+  {
+   "id": "contract-false-positive",
+   "title": "계약 검사 오탐: 입력 자료 안의 프로젝트 ID",
+   "status": "해결",
+   "kind": "실제 모델 E2E",
+   "priority": "중",
+   "repro": "P-20261025-1d2aec: 검증 이력 CSV의 project 열 값을 인용한 결과가 다른 프로젝트 참조로 거부",
+   "impact": "정상 자료 인용이 제거된 채 재작업됨",
+   "seen_at": "90bb049",
+   "next": "수정됨(7884507): 입력 파일의 ID는 허용",
+   "evidence": [
+    "docs/evidence/2026-10-25-e2e-161.md"
    ]
   }
  ],
@@ -410,66 +420,6 @@
    "approval": "불필요 (로컬 전용)"
   },
   {
-   "id": "contract",
-   "title": "엔진 1: 부서 입력·출력 계약 검증",
-   "source": "owner",
-   "priority": 2,
-   "why": "형식 오류·누락·다른 프로젝트 참조의 전파 차단",
-   "depends": "",
-   "scope": "호환 가능한 contract 필드, 결과 구조·필수 항목·참조 검사, 실패 시 담당 부서 제한 재작업",
-   "done_when": "계약 위반이 다음 부서로 가지 않음을 테스트로 확인",
-   "verify": "모델 없는 테스트 후 작은 실제 E2E",
-   "approval": "불필요"
-  },
-  {
-   "id": "acceptance",
-   "title": "엔진 2: 부서 수용 기준을 독립 검증에 연결",
-   "source": "owner",
-   "priority": 3,
-   "why": "자기 보고로 통과 방지",
-   "depends": "엔진 1",
-   "scope": "결정적 기준 코드 검사 + 의미 기준 검증 에이전트 판정",
-   "done_when": "미충족·검증 불가가 PASS가 되지 않음",
-   "verify": "모델 없는 테스트",
-   "approval": "불필요"
-  },
-  {
-   "id": "rework",
-   "title": "엔진 3: 부분 재작업·재개 안정화",
-   "source": "owner",
-   "priority": 4,
-   "why": "의존 결과 재검사와 중복 실행 방지",
-   "depends": "엔진 1",
-   "scope": "재사용/폐기 근거 기록, 의존 재실행, 같은 실패 반복 차단",
-   "done_when": "테스트로 확인",
-   "verify": "모델 없는 테스트",
-   "approval": "불필요"
-  },
-  {
-   "id": "exec",
-   "title": "엔진 4: 생성 프로그램 실행 권한 통제",
-   "source": "owner",
-   "priority": 5,
-   "why": "Owner 결과 실행의 무제한 실행",
-   "depends": "",
-   "scope": "선언/사전 승인/실제 강제 구분, 최소 강제 구현",
-   "done_when": "강제 범위를 증거로 확인",
-   "verify": "실제 차단 테스트",
-   "approval": "OS 설정 변경·방화벽 규칙이 필요하면 그 단계에서 Owner 승인"
-  },
-  {
-   "id": "browser",
-   "title": "엔진 5: 브라우저 검사 안정화",
-   "source": "owner",
-   "priority": 6,
-   "why": "Edge 간헐 시간 초과",
-   "depends": "",
-   "scope": "단계별 지연 기록, 원인 조사",
-   "done_when": "지연 단계 근거 확보",
-   "verify": "반복 측정(성공할 때까지 반복 아님)",
-   "approval": "불필요"
-  },
-  {
    "id": "web-library",
    "title": "웹 UI 결과물 라이브러리·Develop 화면",
    "source": "dev",
@@ -480,6 +430,54 @@
    "done_when": "창과 같은 동작",
    "verify": "자동 테스트",
    "approval": "불필요"
+  },
+  {
+   "id": "owner-web-check",
+   "title": "웹 UI Owner 확인 3개 항목",
+   "source": "owner",
+   "priority": 1,
+   "why": "Owner 확인 전에는 통과로 표시하지 않음",
+   "depends": "",
+   "scope": "시각 품질, 실제 드래그 사용감, 목표→결과 사용성",
+   "done_when": "Owner 회신",
+   "verify": "README-WEB.txt 체크리스트",
+   "approval": "불필요"
+  },
+  {
+   "id": "os-isolation",
+   "title": "결과 실행의 OS 수준 격리 (선택)",
+   "source": "dev",
+   "priority": 3,
+   "why": "현재 네트워크는 Python 수준 best-effort, 파일·네이티브 exe 제한 없음",
+   "depends": "",
+   "scope": "방화벽 규칙 또는 저권한 계정으로 실행",
+   "done_when": "실제 차단을 증거로 확인",
+   "verify": "차단 테스트",
+   "approval": "필요: 관리자 권한·OS 설정 변경 (Owner 승인)"
+  },
+  {
+   "id": "edge-cause",
+   "title": "Edge 시간 초과 원인 조사",
+   "source": "dev",
+   "priority": 4,
+   "why": "간헐 재발 시 단계 기록(phases.stalled_at)으로 원인 확인",
+   "depends": "",
+   "scope": "다음 발생 기록 분석",
+   "done_when": "멈춘 단계와 원인 근거 확보",
+   "verify": "기록 분석",
+   "approval": "불필요"
+  },
+  {
+   "id": "replan-e2e",
+   "title": "재계획·미충족 기준 경로의 실제 모델 확인",
+   "source": "dev",
+   "priority": 5,
+   "why": "재사용/폐기·미충족·계약 일시정지는 자동 테스트로만 확인",
+   "depends": "",
+   "scope": "작은 실제 E2E 1회",
+   "done_when": "이벤트 기록 확인",
+   "verify": "실제 E2E",
+   "approval": "불필요 (구독 CLI 호출)"
   }
  ]
 }

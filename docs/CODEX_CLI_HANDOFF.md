@@ -1,41 +1,29 @@
 # Codex CLI handoff — AX Branch (kept current by Claude)
 
-## CURRENT (2026-10-25): branch `dev/web-ui` (from dev/departments 82efe44), version 0.1.61, NOT merged into main
+## CURRENT (2026-10-25 02:40): branch `dev/web-ui`, version 0.1.61, final code 7884507, NOT merged into main
 - The single structured status record is `docs/devroom/status.json`, shown in the web UI's 오너 개발실. Update it
-  at each work unit: implementation status, verification level, verified commit, evidence, limits, next work.
-  Never mark code as verified without evidence.
-- Done on this branch:
-  - `axbranch/actions.py`: shared Owner actions (the Tk window and the web API both use them).
-  - `axbranch/web.py` + `axbranch/webui/`: local web UI.
-    - Security: 127.0.0.1 only, per-start token, Host and Origin checks, no CORS.
-    - Projects are created idempotently by request_id; GET never launches; no supervision loop.
-    - Tests: `tests/test_web.py` (7); `tests/browser_web_selftest.py` runs headless Chrome with a temporary profile,
-      20/20.
-  - Engine 1: department `contract` format check (`departments.check_input` / `check_output`, engine notes-stage
-    loop). Tests: `tests/test_departments.py` (12).
-- Packages:
-  - `demo-2026-11/package-0.1.61-web` (web, sha256 c02a2b8c…), with README-WEB.txt;
-  - `demo-2026-11/package-0.1.60` (Tk, kept for comparison and recovery).
-- **Running process started by Claude:** the web server `package-0.1.61-web\AXBranch\AXBranch.exe web` on the demo
-  workspace, http://127.0.0.1:8765/, PID 47464. Stop it with `AXBranch.exe web --stop`. One Chrome tab was opened
-  for the Owner.
-- Owner confirmed (old Tk window): dragging a department into the HOME GOAL AREA attaches it. Nothing else about
-  dragging is confirmed. Owner checks still open: README-WEB.txt items 1–3.
-- **Next (Owner order, in sequence):**
-  1. Engine 2: department acceptance criteria → independent verification. Deterministic criteria are checked in
-     code; semantic ones go to the verifier; unmet or unverifiable is never PASS; conflicts are recorded with a
-     replan decision.
-  2. Engine 3: partial rework and resume. Re-run dependents of a changed stage; reuse or discard with recorded
-     reasons (`stage_reused` exists); no duplicate runs; bounded retries.
-  3. Engine 4: execution permissions. Separate declared / pre-approved / enforced at run time for the Owner's
-     [결과 실행] versus verification; the smallest boundary that can be proven on this PC; ask the Owner before
-     any OS change or new permission.
-  4. Engine 5: per-phase timing of browser checks (launch / page ready / actions / selectors / exit). Track the
-     Edge timeout as its own defect; do not raise limits.
-  5. Then a small real department E2E (calls, tokens, time, interventions) and a final regression with hashes.
-- Rules as before: no paid API, credentials or sensitive permissions without approval; never weaken tests; do not
-  open or close the Owner's Chrome/Edge windows or use their profile, mouse or keyboard during development
-  (headless with a temporary profile only); no main merge.
+  at each work unit; never mark code as verified without evidence.
+- Done (all tested on 7884507; F161 439/439, hash list in the Codex evidence folder `tested-code-161.sha256`):
+  - shared Owner actions (`axbranch/actions.py`);
+  - local web UI (`axbranch/web.py`, `axbranch/webui/`) and 오너 개발실;
+  - engine 1: contract format check;
+  - engine 2: department acceptance gate;
+  - engine 3: cross-version reuse, dependents re-run, reasons recorded;
+  - engine 4: Owner-run network allowlist — Python audit hook, best effort, not OS isolation;
+  - engine 5: browser phase timing.
+- Real E2E P-20261025-1d2aec on package 5a38799c (commit 90bb049): `docs/evidence/2026-10-25-e2e-161.md`. It
+  found a contract false positive, fixed in 7884507.
+- Final package: `demo-2026-11/package-0.1.61-web` (rebuilt from 7884507 plus this status record; its hash is in
+  README-WEB.txt). The old Tk package `package-0.1.60` is kept.
+- **Running processes:**
+  - the web server `package-0.1.61-web\AXBranch\AXBranch.exe web` on the demo workspace, http://127.0.0.1:8765/,
+    started by Claude. Stop it with `AXBranch.exe web --stop`;
+  - the Owner's own Tk window (`package-0.1.60`): not started by Claude, left untouched.
+- Owner checks open: README-WEB.txt items 1–3. Confirmed by the Owner: only the old Tk window's drag into the home
+  goal area.
+- Next: see the proposals in status.json. OS isolation needs Owner approval (admin rights).
+- Rules: no paid API, credentials or sensitive permissions without approval; never weaken tests; do not touch the
+  Owner's browser windows, profile, mouse or keyboard (headless with a temporary profile only); no main merge.
 
 # Codex CLI handoff — department harness (kept current by Claude)
 
