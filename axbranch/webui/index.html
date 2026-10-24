@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="axb-token" content="__AXB_TOKEN__">
+<title>AX Branch — 淸月 AI CEO</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand">◒ AX Branch</div>
+    <div class="brand-sub">청월 AI 워크스페이스 · 로컬 웹</div>
+    <nav>
+      <button class="nav" data-view="home">⌂ 청월 홈</button>
+      <button class="nav" data-view="feed:AI 동향">◈ AI 동향</button>
+      <button class="nav" data-view="feed:AI 취업">▤ AI 취업</button>
+      <button class="nav" data-view="devroom">⚙ 오너 개발실</button>
+    </nav>
+    <div class="side-title">나의 프로젝트</div>
+    <div id="projects" class="projects"></div>
+    <div class="side-title">부서 라이브러리 · 끌어서 연결</div>
+    <div id="library" class="library"></div>
+    <div id="refused" class="side-note"></div>
+  </aside>
+  <main>
+    <header class="top">
+      <div id="crumb" class="crumb">워크스페이스 / 청월 홈</div>
+      <div class="top-right">
+        <label><input type="checkbox" id="motionOff"> 모션 끄기</label>
+        <label><input type="checkbox" id="lowPower"> 저부하</label>
+        <span id="version" class="muted"></span>
+        <button id="newWork" class="ghost">+ 새 업무</button>
+      </div>
+    </header>
+    <div id="notice" class="notice" hidden></div>
+
+    <section id="view-home" class="view">
+      <div class="card composer" id="composer">
+        <div class="orb-box">
+          <canvas id="orb" width="260" height="260" aria-hidden="true"></canvas>
+          <div id="orbLabel" class="orb-label">대기</div>
+          <div id="orbInput" class="orb-input" hidden>입력 반응</div>
+        </div>
+        <div class="composer-main">
+          <h2>청월에게 어떤 일을 맡길까요?</h2>
+          <textarea id="goal" rows="3" placeholder="목표를 적어 주세요. 부서를 이 칸으로 끌어 놓으면 이번 업무에 첨부됩니다."></textarea>
+          <div class="chips" id="pendingDeps"></div>
+          <div class="row">
+            <select id="depMenu"><option value="">부서 첨부…</option></select>
+            <label class="ghost file">파일 첨부<input type="file" id="files" multiple hidden></label>
+            <span id="fileNames" class="muted"></span>
+            <span class="grow"></span>
+            <button id="submit" class="primary">淸月 CEO에게 맡기기</button>
+          </div>
+          <div id="orbCaption" class="caption"></div>
+        </div>
+      </div>
+      <h1 class="hello">좋은 하루예요. 청월입니다.</h1>
+      <div class="muted">목표를 맡기고, 진행 과정과 결과를 한곳에서 확인하세요. 화면은 저장된 실제 상태만 보여 줍니다.</div>
+      <div id="groups" class="groups"></div>
+      <div class="feeds-head"><h2>둘러보기</h2><button id="refreshFeeds" class="ghost">공개 정보 새로 수집</button></div>
+      <div class="muted">공개 출처의 실제 자료만 표시합니다. 수집 시 AI 호출 없음.</div>
+      <div class="feeds"><div class="card" id="feed-AI 동향"></div><div class="card" id="feed-AI 취업"></div></div>
+    </section>
+
+    <section id="view-feed" class="view" hidden><div class="card" id="feedFull"></div></section>
+
+    <section id="view-project" class="view" hidden>
+      <div id="banner" class="banner"></div>
+      <div class="deps-row drop" id="projectDeps"><span class="muted">연결된 부서</span><span class="chips" id="projectChips"></span></div>
+      <div id="owner" class="card owner" hidden></div>
+      <div class="card">
+        <div class="row"><b id="pTitle"></b><span class="grow"></span>
+          <button id="resume" class="ghost">계속 실행 / 재개</button><button id="stop" class="ghost">중단</button></div>
+        <div id="pState" class="muted"></div>
+      </div>
+      <div id="pipeline" class="pipeline"></div>
+      <div class="split">
+        <div class="card"><h3>Agent 기록</h3><div id="records" class="records muted">Agent를 선택하면 그 Agent의 주장 · 근거 · 반론 · 결정 · 검증 기록이 표시됩니다.</div></div>
+        <div class="card"><h3>검증 · 계약</h3><div id="verifs"></div><h3>타임라인</h3><div id="timeline" class="timeline"></div></div>
+      </div>
+    </section>
+
+    <section id="view-devroom" class="view" hidden></section>
+  </main>
+</div>
+<dialog id="modal"><div id="modalBody"></div><div class="row end"><button id="modalClose" class="ghost">닫기</button></div></dialog>
+<script src="/orb.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

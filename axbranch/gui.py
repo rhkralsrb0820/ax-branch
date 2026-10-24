@@ -11,7 +11,7 @@ import time
 import tkinter as tk
 from tkinter import font as tkfont, messagebox, scrolledtext, ttk
 
-from . import WORKSPACE, __version__, departments, library, live, supervisor
+from . import WORKSPACE, __version__, actions, departments, library, live, supervisor
 from .library import project_title
 from .engine import open_engine
 from .state import Busy, Store
@@ -250,9 +250,7 @@ class App(tk.Tk):
             self.open_project()       # one path for start / resume / develop / rework: the project the Owner acts on
         if self.injected:
             return self._launch_thread(pid)
-        if supervisor.status(self.workspace, self.store, pid)['status'] == 'ACTIVE':
-            return                                       # already running somewhere: never a second worker
-        supervisor.launch_detached(self.workspace, pid)
+        actions.launch(self.workspace, self.store, pid)   # never a second worker
 
     def _launch_thread(self, pid):
         if pid in self.running:
@@ -289,28 +287,17 @@ class App(tk.Tk):
         goal = self.goal.get('1.0', 'end').strip()
         if not goal:
             return
-        if self.attached:      # check the files before a project exists, so a bad file never leaves a half project
-            from .artifacts import validate_inputs
-            try:
-                validate_inputs(self.attached)
-            except ValueError as e:
-                messagebox.showerror('AX Branch', str(e))
-                return
-        self.selected = self.store.new_project(goal)
-        self._owner_action('new')
-        for dep_id in self.pending_departments:      # function connections only; Owner approvals are unchanged
-            departments.attach(self.store, self.selected, dep_id, self.department_specs)
+        try:
+            self.selected = actions.start(self.store, self.engine_factory, goal, self.pending_departments,
+                                          self.department_specs, self.attached, 'app')
+        except (ValueError, departments.Rejected) as e:
+            if getattr(e, 'pid', None):
+                self.selected = e.pid
+            messagebox.showerror('AX Branch', str(e))
+            return
         self.pending_departments = []
         self._render_composer_departments()
         if self.attached:
-            engine = self.engine_factory()
-            try:
-                engine.attach_inputs(self.selected, self.attached)
-            except (ValueError, OSError) as e:      # e.g. a file changed after it was checked: do not run without it
-                messagebox.showerror('AX Branch', f'첨부 실패 — 프로젝트를 실행하지 않았습니다: {e}')
-                return
-            finally:
-                engine.store.close()
             self.attached = []
             self.attached_label.config(text='')
         self.goal.delete('1.0', 'end')
@@ -322,16 +309,8 @@ class App(tk.Tk):
     def resume(self):
         if not self.selected:
             return
-        p = self.store.project(self.selected)
-        if p['state'] == 'PAUSED':
-            if p['resume_state'] in ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL'):
-                self.store.resume(self.selected)          # back to waiting for the Owner: no engine work, no worker
-                self._owner_action('resume')
-                return
-            extra = 3 if 'not lowered' in (p['pause_reason'] or '') else 0
-            self.store.resume(self.selected, extra)
-        self._owner_action('resume')
-        self._launch(self.selected)
+        if actions.resume(self.store, self.selected, 'app'):
+            self._launch(self.selected)
 
     def stop(self):
         """Owner stop: end the worker's whole process tree and PAUSE (checkpointed; the supervisor never
@@ -341,16 +320,7 @@ class App(tk.Tk):
         if self.selected in self.running:
             self.running[self.selected].set()
             return
-        rec = supervisor.status(self.workspace, self.store, self.selected)
-        if rec.get('worker_pid') and supervisor._held(self.workspace, self.selected):
-            supervisor.stop_worker(rec['worker_pid'], pid=self.selected)    # also one waiting for a provider slot
-        p = self.store.project(self.selected)
-        reason = f'{supervisor.OWNER_STOP} (window). Resume continues from here.'
-        if p['state'] == 'PAUSED':
-            self.store.update(self.selected, pause_reason=reason)          # an Owner stop, not a failure
-        elif p['state'] != 'CLOSED':                       # incl. a project waiting for the Owner (0.1.23: no-op)
-            self.store.pause(self.selected, reason)
-        self._owner_action('stop')
+        actions.stop(self.workspace, self.store, self.selected, 'app')
 
     def review_dialog(self):
         """Two separate questions: does it work? / what do you want next (plain language) or finish."""
@@ -382,28 +352,17 @@ class App(tk.Tk):
     def network(self, approve):
         if not self.selected:
             return
-        engine = self.engine_factory()
         try:
-            engine.decide_network(self.selected, approve)
-            self._owner_action('approve')
+            actions.decide_network(self.engine_factory, self.selected, approve, 'app')
         except Exception as e:
             messagebox.showwarning('AX Branch', str(e))
             return
-        finally:
-            engine.store.close()
         self.resume()
 
     def _owner_panel(self, p, status):
         """Show the decision panel only while this project waits for the Owner; never require a CLI."""
         reason = p['pause_reason'] or ''
-        if status != 'WAITING_FOR_OWNER' or p['state'] in ('ARCHIVE_PENDING_APPROVAL',):
-            mode = None
-        elif 'approval needed' in reason:
-            mode = 'approval'
-        elif p['state'] == 'OWNER_REVIEW':
-            mode = 'review'
-        else:
-            mode = 'decision'
+        mode, _ = actions.owner_mode(p, status)
         if mode != self._owner_mode:
             for w in (self.works_row, self.feedback, self.decide_row, self.approve_row):
                 w.pack_forget()
@@ -612,16 +571,12 @@ class App(tk.Tk):
         """Record the Owner's review; anything that needs work reopens the same project and rebuilds it."""
         if not self.selected:
             return False
-        engine = self.engine_factory()
         try:
-            p = engine.owner_review(self.selected, works, text, finish)
-            self._owner_action('review')
+            _, needs_worker = actions.review(self.engine_factory, self.selected, works, text, finish, 'app')
         except Exception as e:
             messagebox.showwarning('AX Branch', str(e))
             return False
-        finally:
-            engine.store.close()
-        if p['state'] not in ('OWNER_REVIEW', 'PENDING_CLOSE', 'PAUSED', 'CLOSED', 'ARCHIVE_PENDING_APPROVAL'):
+        if needs_worker:
             self._launch(self.selected)                  # REWORK / resumed: the same project runs again
         return True
 

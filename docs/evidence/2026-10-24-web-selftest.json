@@ -1,0 +1,156 @@
+{
+ "summary": {
+  "passed": 20,
+  "total": 20,
+  "launched": [
+   "P-20261024-f47838"
+  ],
+  "chrome_cpu_pct_one_core_while_animating": {
+   "normal": 66.6,
+   "low": 27.2
+  },
+  "finished": true
+ },
+ "checks": [
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "orb draws particles",
+   "ok": true,
+   "detail": "47980 lit pixels"
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "real state shown separately from input",
+   "ok": true,
+   "detail": "실제 상태: 대기 — 맡길 업무를 입력하면 淸月 CEO가 계획을 세웁니다.다음: 목표 입력창에 업무를 적어 주세요."
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "input reaction is labelled as input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "drop on goal area attaches",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "duplicate on goal area refused",
+   "ok": true,
+   "detail": "이미 첨부한 부서입니다: 리서치"
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "missed drop says not connected",
+   "ok": true,
+   "detail": "연결되지 않았습니다: 운영 — 놓은 곳이 목표 입력 영역이나 프로젝트의 '연결된 부서' 칸이 아니었습니다. 부서를 클릭해 상세 화면의 버튼을 사용하세요."
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "double submit creates one project",
+   "ok": true,
+   "detail": "0 -> 1"
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "goal departments attached at start",
+   "ok": true,
+   "detail": "[{\"id\":\"research\",\"version\":\"1.0.0\"}]"
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "project view shows banner and pipeline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "drop on project attaches",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "duplicate on project refused",
+   "ok": true,
+   "detail": "이미 연결된 부서입니다: 운영"
+  },
+  {
+   "kind": "selftest",
+   "phase": "1",
+   "name": "detach via ×",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "2",
+   "name": "reload creates no project",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "2",
+   "name": "attachment restored after reload",
+   "ok": true,
+   "detail": "[{\"id\":\"operations\",\"version\":\"1.0.0\"}]"
+  },
+  {
+   "kind": "selftest",
+   "phase": "2",
+   "name": "devroom shows the three questions",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "2",
+   "name": "request text has version, item and done criteria",
+   "ok": true,
+   "detail": "[AX Branch 다음 개발 요청]\n현재 버전: v0.1.60 · dev/web-ui · 커밋 82efe44 (현황 갱신 2026-10-24 23:30 KST)\n\n■ 개발 현황: 부서 하네스 (연결·위임·결과 전달) [구현 완료 / 실제 E2E 확인]\n- 문제/한계: 임시 에이전트·거부·해제는 실제 모델로 확인 안 함 / 역할 위장은 역할 이름으로만 판별"
+  },
+  {
+   "kind": "selftest",
+   "phase": "3",
+   "name": "owner memo survives reload",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "kind": "selftest",
+   "phase": "3",
+   "name": "perf normal",
+   "ok": true,
+   "detail": "{\"fps\":61,\"frameMs\":1.77,\"particles\":480,\"inputToFrameMedianMs\":15.3,\"inputToFrameP95Ms\":16.3}"
+  },
+  {
+   "kind": "selftest",
+   "phase": "3",
+   "name": "perf low",
+   "ok": true,
+   "detail": "{\"fps\":31,\"frameMs\":1.05,\"particles\":260,\"inputToFrameMedianMs\":10.1,\"inputToFrameP95Ms\":17.1}"
+  },
+  {
+   "kind": "selftest",
+   "phase": "3",
+   "name": "motion off stops the loop",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}
