@@ -2240,7 +2240,9 @@ class Engine:
                            'the Python source is not run in its place.')
         if exe is not None:                  # the Owner runs the built program, exactly what was verified
             shutil.copyfile(exe, run / exe.name)
-            self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(run / exe.name))
+            self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(run / exe.name),
+                             network={'enforced_by': 'none: a native executable is not covered by the audit hook'},
+                             files='not restricted (same Windows account)')
             return run / exe.name, popen([str(run / exe.name)], cwd=str(run),
                                          creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
         if artifact['kind'] not in ('python', 'bundle'):
@@ -2258,11 +2260,27 @@ class Engine:
         if not python:
             raise Rejected('No Python interpreter found to run the result.')
         flags = subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0
-        cmd = [python, entry.name]
+        # Network at run time: the audit-hook launcher allows loopback and the Owner-approved domains only
+        # (best effort inside Python, NOT an OS firewall: child processes and native code are not covered).
+        # Files are not restricted (same Windows account).
+        (run / '_axb_launch.py').write_text(runtime.AUDIT, encoding='utf-8')
+        allowed = self._approved_domains(pid)
+        cmd = [python, '_axb_launch.py', entry.name]
         if os.name == 'nt' and (p['plan'].get('runtime') or {}).get('mode', 'cli') in ('cli', 'none'):
             cmd = ['cmd', '/k', *cmd]                       # keep the output on screen after the program ends
-        self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(entry))
-        return entry, popen(cmd, cwd=str(entry.parent), creationflags=flags)
+        self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(entry),
+                         network={'enforced_by': 'python audit hook (best effort, not an OS firewall)',
+                                  'allowed': ['loopback', *allowed], 'log': str(run / 'network-audit.jsonl')},
+                         files='not restricted (same Windows account)')
+        env = {**os.environ, 'AXB_AUDIT_LOG': str(run / 'network-audit.jsonl'), 'AXB_ALLOW_HOSTS': ','.join(allowed)}
+        return entry, popen(cmd, cwd=str(entry.parent), creationflags=flags, env=env)
+
+    def _approved_domains(self, pid):
+        """Domains of the delivered program the Owner approved (or reusable public read-only approvals)."""
+        planned = (self.store.project(pid)['plan'] or {}).get('network_access') or []
+        approved = {a['subject'] for a in self.store.approvals(pid) if a['status'] == 'approved'}
+        reused = {e['domain'] for e in permissions.evaluate(self.store, planned)['reused']}
+        return sorted({e['domain'] for e in planned if e['domain'] in approved | reused})
 
     def _python(self):
         return sys.executable if not getattr(sys, 'frozen', False) else (shutil.which('python') or shutil.which('py'))

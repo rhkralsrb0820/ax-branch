@@ -1,11 +1,13 @@
 {
- "updated_at": "2026-10-25 02:10 KST",
+ "updated_at": "2026-10-25 03:20 KST",
  "version": "0.1.61",
  "branch": "dev/web-ui",
- "commit": "5075785",
+ "commit": "6061e9d",
  "stage_text": "AX Branch는 淸月 CEO가 목표를 계획하고, 연결된 부서와 전문 에이전트(Claude/Codex)에 위임해 만들고, 독립 검증·제한된 재작업을 거쳐 Owner 검토로 넘기는 단계까지 실제로 동작한다. 지금은 화면을 로컬 웹 UI로 옮기는 중이며, 다음은 부서 입출력 계약의 실제 검증이다. main 병합은 Owner 결정 전까지 하지 않는다.",
  "summary": {
   "done": [
+   "엔진 4: Owner 결과 실행 네트워크 허용 목록(Python audit hook, best-effort) + 선언/사전 승인/강제 표",
+   "엔진 5: 브라우저 검사 단계별 시간 기록(시간 초과 위치 추적용)",
    "엔진 3: 재계획 후 변경 없는 선행 결과 재사용·의존 단계 재실행·근거 기록, 중복 실행 방지 (자동 테스트)",
    "엔진 2: 부서 수용 기준을 독립 검증에 연결 — 미충족·판정 없음·충돌은 PASS 불가 (자동 테스트)",
    "엔진 1: 부서 계약(형식) 검증 — 위반 결과는 다음 부서로 전달 안 함, 1회 재작업 후 Owner 일시정지 (자동 테스트)",
@@ -18,13 +20,13 @@
   ],
   "in_progress": [
    "Owner 확인 대기: 웹 UI 3개 항목 — 마지막 보고 기준",
-   "엔진 4: 생성 프로그램 실행 권한 통제 조사 — 마지막 보고 기준"
+   "작은 실제 부서 E2E(계약·수용 기준·재사용 확인) — 마지막 보고 기준"
   ],
   "open_issues": [
-   "부서 계약·수용 기준은 자동 테스트로만 확인 (실제 모델 E2E 전)",
-   "Owner [결과 실행]은 네트워크·파일 제한 없이 실행됨 (검증 실행만 best-effort 차단)",
-   "headless Edge 브라우저 검사의 간헐적 90초 시간 초과 (main에서도 재현, 원인 미확인)",
-   "실제 마우스 드래그 중 '홈 입력 영역 첨부' 외 항목은 Owner 미확인"
+   "부서 계약·수용 기준·재사용은 자동 테스트로만 확인 (실제 모델 E2E 전)",
+   "Owner 결과 실행: 파일 접근·네이티브 exe는 제한 없음, 네트워크는 Python 수준 best-effort",
+   "headless Edge 간헐 시간 초과 (main에서도 재현, 원인 미확인; 단계 기록 추가)",
+   "웹 UI는 Owner 확인 전 (기존 창: 홈 입력 영역 드래그 첨부만 Owner 확인)"
   ]
  },
  "areas": [
@@ -248,20 +250,23 @@
   {
    "id": "exec-permission",
    "title": "생성 프로그램 실행 권한 통제",
-   "impl": "계획",
-   "verify": "미검증",
+   "impl": "구현 완료",
+   "verify": "자동 테스트 확인",
    "solves": "검증 실행과 Owner 결과 실행의 제한이 다른 문제",
-   "scope": "선언·사전 승인·실제 강제를 구분하고, 이 PC에서 가능한 최소 강제 범위를 증거로 확인",
-   "verified_at": "UNKNOWN",
-   "tests": "-",
+   "scope": "Owner [결과 실행] Python 결과: audit hook 실행기로 loopback + 승인 도메인만 허용, 시도 기록. 검증 실행: 비로컬 전부 차단. 선언/사전 승인/실제 강제 표 작성",
+   "verified_at": "dev/web-ui (exec commit)",
+   "tests": "tests.test_owner_run 4/4 (실제 자식 프로세스), affected suites 177/178 (1건 = 알려진 Edge 시간 초과)",
    "evidence": [
-    "docs/evidence/2026-10-24-department-enforcement.md"
+    "docs/evidence/2026-10-24-department-enforcement.md",
+    "tests/test_owner_run.py"
    ],
    "limits": [
-    "Owner 결과 실행은 제한 없음",
-    "검증 실행의 네트워크 차단은 Python audit hook(best-effort, OS 격리 아님)"
+    "Python 수준 best-effort (OS 방화벽 아님)",
+    "네이티브 .exe 결과·자식 프로세스는 미적용",
+    "파일 접근 제한 없음(같은 Windows 계정)",
+    "더 강한 격리(방화벽 규칙·저권한 계정)는 관리자 권한·Owner 승인 필요"
    ],
-   "done_when": "실제로 강제되는 범위를 테스트로 증명하고 강제 불가 조건은 그대로 표시"
+   "done_when": "OS 수준 강제가 필요하면 Owner 승인 후 별도 단계"
   },
   {
    "id": "web-ui",
@@ -304,19 +309,21 @@
   {
    "id": "browser-check",
    "title": "브라우저 실행 검사 안정화",
-   "impl": "계획",
-   "verify": "미검증",
+   "impl": "개발 중",
+   "verify": "자동 테스트 확인",
    "solves": "headless Edge 간헐 시간 초과",
-   "scope": "시작·페이지 준비·동작·선택자·종료 단계별 지연 기록",
-   "verified_at": "UNKNOWN",
-   "tests": "-",
+   "scope": "브라우저 단계별 시간(첫 페이지 요청·마지막 앱 요청·종료/시간 제한)과 멈춘 단계를 step.phases에 기록",
+   "verified_at": "dev/web-ui (exec commit)",
+   "tests": "단계 기록 단위 테스트; 실패 테스트 10회 재실행 10/10 통과(시간 초과 재현 안 됨)",
    "evidence": [
     "docs/evidence/2026-10-24-F160b-runtime-failure.md"
    ],
    "limits": [
-    "원인 미확인"
+    "시간 초과가 재현되지 않아 멈춤 위치는 아직 미확보",
+    "원인 미확인",
+    "시간 제한 연장·반복 없음"
    ],
-   "done_when": "지연 단계가 기록되고 원인 또는 대응이 근거로 확인됨"
+   "done_when": "다음 시간 초과에서 phases.stalled_at으로 멈춘 단계를 확인하고 원인 조사"
   }
  ],
  "issues": [
@@ -328,22 +335,22 @@
    "priority": "중",
    "repro": "tests.test_runtime 브라우저 테스트를 반복 실행: branch 8/10, main 9/10 통과",
    "impact": "전체 회귀에서 간헐 실패 1건",
-   "seen_at": "9483c1e (F160b, F160d)",
-   "next": "브라우저 단계별 지연 기록 후 원인 조사 (시간 제한 연장·반복 금지)",
+   "seen_at": "9483c1e; dev/web-ui 영향 스위트에서 1회 재발(단계 기록 전 코드)",
+   "next": "단계 기록 추가됨(phases). 다음 발생 시 stalled_at으로 지연 단계 확인",
    "evidence": [
     "docs/evidence/2026-10-24-F160b-runtime-failure.md"
    ]
   },
   {
    "id": "owner-run-unrestricted",
-   "title": "Owner 결과 실행은 네트워크·파일 제한 없음",
-   "status": "미해결",
+   "title": "Owner 결과 실행: 네트워크는 Python 수준 허용 목록, 파일·네이티브 exe는 제한 없음",
+   "status": "일부 해결",
    "kind": "설계 한계",
    "priority": "상",
    "repro": "검증 통과 프로그램을 [결과 실행]하면 일반 환경에서 실행",
    "impact": "승인된 도메인 외 접속을 실행 시점에 막지 못함",
    "seen_at": "82efe44 (코드 추적)",
-   "next": "엔진 4번: 이 PC에서 가능한 최소 강제 조사",
+   "next": "OS 수준 강제는 Owner 승인 필요(방화벽 규칙·저권한 계정)",
    "evidence": [
     "docs/evidence/2026-10-24-department-enforcement.md"
    ]

@@ -78,6 +78,28 @@ Owner's own launch. Neither bypasses the existing approvals (network domains are
 paid tools, credentials and publishing are Owner-only in governance). Both have the containment limits above;
 no new isolation was added in this step.
 
+## Generated-program permissions: declared / pre-approved / enforced at run time (0.1.61)
+| Permission | Declared | Pre-approved (before it runs) | Enforced while it runs: verification | Enforced while it runs: Owner [결과 실행] |
+|---|---|---|---|---|
+| Network (Python result) | plan `network_access` | Owner `external_connection` approval at staffing (a new or risky domain pauses) | audit hook refuses every non-local connection or name lookup | audit hook allows loopback plus the approved domains only (`AXB_ALLOW_HOSTS`); attempts logged to `run/vN/network-audit.jsonl` |
+| Network (native .exe result) | same | same | not covered by the hook | **not enforced** (recorded in the `owner_run` event) |
+| Network (child processes, native code, asyncio Proactor connect) | — | — | not intercepted | not intercepted |
+| Files | `permissions.read/write` (department, declared only) | — | clean environment and Job Object (processes, memory), same Windows account | **not restricted** (same Windows account) |
+| Processes | — | — | Job Object: at most 8 processes, 1 GB, tree killed at the end | normal process, its own console |
+
+**Evidence** (`tests/test_owner_run.py`, real child processes):
+- verification refuses `example.com` and an unapproved domain with PermissionError, allows loopback, and logs the
+  attempt;
+- the Owner's run with `example.com` approved is not refused for it, still refuses the unapproved domain, and
+  allows loopback;
+- `launch_verified` starts the result through the launcher, passes the approved domains and records the
+  enforcement in `owner_run`.
+
+The audit hook is a Python-level, best-effort boundary, not operating-system isolation. Stronger options were
+not taken, because each needs administrator rights or Owner setup, which the Owner must approve at that step:
+- Windows Firewall per-program rules;
+- a separate low-privilege Windows account (DECISIONS D12).
+
 ## Not implemented (stated plainly)
 - OS-level file or network isolation of agents or generated programs (open risk D-SEC-1).
 - Per-department schema validation of outputs.

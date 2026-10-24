@@ -82,8 +82,28 @@ SETTLE_MS, CLICK_WAIT_MS = 10000, 500   # after each BROWSER click: the page's r
 # outside itself (connections, name lookups, subprocesses, browser opens) to AXB_AUDIT_LOG, then the
 # entry file runs as __main__ exactly as `python <entry> args` would. Evidence for "zero external
 # connections" (P-bbad3c v31: no outbound log existed at all).
-AUDIT = r'''import ipaddress, json, os, runpy, sys, time
+AUDIT = r'''import ipaddress, json, os, runpy, socket, sys, time
 _log = os.environ.get('AXB_AUDIT_LOG')
+_allow = {h.strip().lower().rstrip('.') for h in os.environ.get('AXB_ALLOW_HOSTS', '').split(',') if h.strip()}
+_allowed_ips, _resolving = set(), []
+def _approved(host):
+    """An approved domain (or its subdomain), or an address one of them resolved to in this process."""
+    if host is None:
+        return False
+    h = (host.decode() if isinstance(host, bytes) else str(host)).lower().rstrip('.')
+    if h in _allowed_ips:
+        return True
+    if any(h == a or h.endswith('.' + a) for a in _allow):
+        if not _resolving:                     # learn its addresses so the following connect() is allowed
+            _resolving.append(1)
+            try:
+                _allowed_ips.update(i[4][0] for i in socket.getaddrinfo(h, None))
+            except OSError:
+                pass
+            finally:
+                _resolving.pop()
+        return True
+    return False
 def _local(host):
     if host is None or host in ('', b''):
         return True
@@ -115,7 +135,7 @@ def _hook(event, args):
         host = args[0]
     elif event == 'socket.getnameinfo':
         host = args[0][0] if args and isinstance(args[0], tuple) else None
-    blocked = event.startswith('socket.') and not _local(host)
+    blocked = event.startswith('socket.') and not _local(host) and not _approved(host)
     if _log:
         try:
             line = json.dumps({'t': time.time(), 'pid': os.getpid(), 'event': event, 'args': _clip(args),
@@ -124,8 +144,9 @@ def _hook(event, args):
                 f.write(line + '\n')
         except Exception:
             pass
-    if blocked:      # verification never reaches the internet: the program sees a refused connection
-        raise PermissionError(f'AX Branch verification: external network refused ({host})')
+    if blocked:      # verification never reaches the internet; the Owner's run only approved domains
+        raise PermissionError(f'AX Branch: external network refused ({host}): not an approved domain'
+                              if _allow else f'AX Branch verification: external network refused ({host})')
 sys.addaudithook(_hook)
 # As `python <entry> args`: argv[0] as given, the script's folder first on sys.path, absolute __file__.
 sys.argv = sys.argv[1:]
@@ -792,7 +813,7 @@ finish();
               'SETTLE_MS': str(SETTLE_MS), 'CLICK_WAIT_MS': str(CLICK_WAIT_MS)}
     script = re.sub('ORDER_NEEDLES|SELECTORS|NEEDLES|BUDGET_MS|SETTLE_MS|CLICK_WAIT_MS', lambda m: values[m.group()],
                     script).encode('ascii')
-    requests = []
+    requests, times = [], []
 
     class Proxy(http.server.BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -831,6 +852,7 @@ finish();
                 response = con.getresponse()
                 body = response.read()
                 requests.append(f'{self.command} {self.path} -> {response.status}')
+                times.append(time.monotonic())
                 content_type = response.getheader('Content-Type', '').lower()
                 inject = (self.command == 'GET' and self.path == path
                           and ('text/html' in content_type or (not content_type and body.lstrip().startswith(b'<'))))
@@ -871,7 +893,7 @@ finish();
             raise AttributeError(name)
 
     proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
-    proxy.requests = requests
+    proxy.requests, proxy.times = requests, times
     thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     thread.start()
     return proxy, thread
@@ -886,6 +908,7 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
     try:
         budget = max(10000, len(selectors) * (5000 + SETTLE_MS + CLICK_WAIT_MS + 100) + 2000)
         proxy, thread = _click_proxy(port, path, selectors, needles, budget, order)
+        started = time.monotonic()
         proc = sandbox.start([exe, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
                               '--disable-logging', '--log-level=3',
                               f'--user-data-dir={profile}', f'--virtual-time-budget={budget}', '--dump-dom',
@@ -896,6 +919,7 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
         record['timeout_s'] = max(BROWSER_TIMEOUT, budget // 1000 + 30)
         record['browser_exit_code'] = proc.wait(record['timeout_s'])
         finished = record['browser_exit_code'] is not None
+        record['phases'] = phases(started, list(proxy.times), time.monotonic(), finished, len(selectors))
         dom, err = proc.streams()
         record.update(browser_requests=list(proxy.requests), browser_stderr_tail=err[-600:])
         return dom if finished else None
@@ -907,6 +931,20 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
             proxy.shutdown()
             proxy.server_close()
             thread.join()
+
+
+def phases(started, request_times, ended, finished, actions):
+    """Where a headless-browser load spent its time (ms from launch): first page request (browser start +
+    navigation), last app request (page scripts and actions), end (exit or the time limit), and where it stalled."""
+    ms = lambda t: round((t - started) * 1000)
+    first = ms(request_times[0]) if request_times else None
+    last = ms(request_times[-1]) if request_times else None
+    stalled = None
+    if not finished:
+        stalled = ('browser start / navigation: no page request reached the app' if first is None else
+                   'page scripts / actions / virtual-time budget: requests seen, the browser never exited')
+    return {'first_request_ms': first, 'last_request_ms': last, 'end_ms': ms(ended), 'requests': len(request_times),
+            'actions': actions, 'outcome': 'exited' if finished else 'time limit', 'stalled_at': stalled}
 
 
 def _rendered(port, probe):
