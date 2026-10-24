@@ -1,150 +1,467 @@
 {
- "updated_at": "2026-10-24 23:30 KST",
+ "updated_at": "2026-10-25 00:30 KST",
  "version": "0.1.60",
  "branch": "dev/web-ui",
- "commit": "82efe44",
+ "commit": "ab6382d",
  "stage_text": "AX Branch는 淸月 CEO가 목표를 계획하고, 연결된 부서와 전문 에이전트(Claude/Codex)에 위임해 만들고, 독립 검증·제한된 재작업을 거쳐 Owner 검토로 넘기는 단계까지 실제로 동작한다. 지금은 화면을 로컬 웹 UI로 옮기는 중이며, 다음은 부서 입출력 계약의 실제 검증이다. main 병합은 Owner 결정 전까지 하지 않는다.",
  "summary": {
   "done": [
+   "엔진 1: 부서 계약(형식) 검증 — 위반 결과는 다음 부서로 전달 안 함, 1회 재작업 후 Owner 일시정지 (자동 테스트)",
+   "로컬 웹 UI 1차 (ab6382d): API·보안·중복 방지·headless 자체 테스트 20/20",
    "부서 하네스 0.1.60: 연결·중복 방지·해제·저장/복원, 연결된 부서에만 위임, 임시 에이전트 정책",
    "최종 코드 실제 E2E P-20261024-304eb4: 리서치→운영, 검증 FAIL→운영만 재작업→PASS (7호출)",
    "Tk 창의 입자 구체 모션(실제 상태 연동, 모션 끄기·저부하, 숨김 시 중단)",
    "Owner 확인: 기존 창에서 부서를 홈 입력 영역으로 끌어 첨부"
   ],
   "in_progress": [
-   "로컬 웹 UI 전환 (dev/web-ui) — 마지막 보고 기준",
-   "오너 개발실 화면 — 마지막 보고 기준"
+   "웹 UI 패키지·Chrome 확인 준비 — 마지막 보고 기준",
+   "엔진 2: 부서 수용 기준 → 독립 검증 — 마지막 보고 기준"
   ],
   "open_issues": [
-   "부서 inputs/outputs·수용 기준은 아직 선언만 되고 기계적으로 검증되지 않음",
+   "부서 수용 기준은 아직 에이전트에게 전달만 되고 판정되지 않음 (입출력 계약은 형식 검사로 구현됨)",
    "Owner [결과 실행]은 네트워크·파일 제한 없이 실행됨 (검증 실행만 best-effort 차단)",
    "headless Edge 브라우저 검사의 간헐적 90초 시간 초과 (main에서도 재현, 원인 미확인)",
    "실제 마우스 드래그 중 '홈 입력 영역 첨부' 외 항목은 Owner 미확인"
   ]
  },
  "areas": [
-  {"id": "owner", "level": 1, "name": "Owner / 화면 (Tk 창 · 로컬 웹 UI)",
+  {
+   "id": "owner",
+   "level": 1,
+   "name": "Owner / 화면 (Tk 창 · 로컬 웹 UI)",
    "role": "Owner가 목표를 맡기고, 진행·결과·검증 근거를 보고, 승인·피드백·중단·재개·결과 실행을 하는 곳.",
-   "implemented": ["Tk 창(기존 EXE): 홈·목표·파일/부서 첨부·파이프라인·기록·승인·피드백·결과 실행", "공유 Owner 동작 모듈 axbranch/actions.py (창·웹 공통)", "로컬 웹 UI 서버(127.0.0.1 전용, 세션 토큰·Host/Origin 검사)"],
-   "missing": ["웹 UI의 결과물 라이브러리·Develop 화면", "웹 UI 실제 드래그 Owner 확인"],
-   "evidence": ["axbranch/gui.py", "axbranch/web.py", "axbranch/actions.py", "tests/test_gui.py", "tests/test_web.py"]},
-  {"id": "ceo", "level": 2, "name": "淸月 CEO · 계획·재계획",
+   "implemented": [
+    "Tk 창(기존 EXE): 홈·목표·파일/부서 첨부·파이프라인·기록·승인·피드백·결과 실행",
+    "공유 Owner 동작 모듈 axbranch/actions.py (창·웹 공통)",
+    "로컬 웹 UI 서버(127.0.0.1 전용, 세션 토큰·Host/Origin 검사)"
+   ],
+   "missing": [
+    "웹 UI의 결과물 라이브러리·Develop 화면",
+    "웹 UI 실제 드래그 Owner 확인"
+   ],
+   "evidence": [
+    "axbranch/gui.py",
+    "axbranch/web.py",
+    "axbranch/actions.py",
+    "tests/test_gui.py",
+    "tests/test_web.py"
+   ]
+  },
+  {
+   "id": "ceo",
+   "level": 2,
+   "name": "淸月 CEO · 계획·재계획",
    "role": "목표 해석, 단계·담당 부서 결정, 검증 실패 진단과 재계획, 최종 수락.",
-   "implemented": ["계획/전략/진단 호출", "제한된 재작업 라운드", "부서 요약만 받아 계획"],
-   "missing": ["기준 충돌 시 재계획 결정의 구조화된 기록(엔진 2번 과제)"],
-   "evidence": ["axbranch/engine.py", "docs/evidence/2026-10-24-final-e2e.md"]},
-  {"id": "departments", "level": 2, "name": "부서 라이브러리 · 프로젝트 연결",
+   "implemented": [
+    "계획/전략/진단 호출",
+    "제한된 재작업 라운드",
+    "부서 요약만 받아 계획"
+   ],
+   "missing": [
+    "기준 충돌 시 재계획 결정의 구조화된 기록(엔진 2번 과제)"
+   ],
+   "evidence": [
+    "axbranch/engine.py",
+    "docs/evidence/2026-10-24-final-e2e.md"
+   ]
+  },
+  {
+   "id": "departments",
+   "level": 2,
+   "name": "부서 라이브러리 · 프로젝트 연결",
    "role": "버전이 있는 기능 패키지(departments/<id>/department.json)를 프로젝트에 연결.",
-   "implemented": ["명세 검증(알 수 없는 도구·셸·네트워크 거부)", "프로젝트별 연결/해제 이벤트", "연결된 부서에만 위임, 도구·네트워크 범위 강제", "임시 에이전트 정책"],
-   "missing": ["inputs/outputs 계약의 기계적 검증", "부서 수용 기준의 검증 관문 연결"],
-   "evidence": ["axbranch/departments.py", "docs/evidence/2026-10-24-department-enforcement.md", "tests/test_departments.py"]},
-  {"id": "agents", "level": 3, "name": "전문 에이전트 · Claude/Codex 실행",
+   "implemented": [
+    "명세 검증(알 수 없는 도구·셸·네트워크 거부)",
+    "프로젝트별 연결/해제 이벤트",
+    "연결된 부서에만 위임, 도구·네트워크 범위 강제",
+    "임시 에이전트 정책"
+   ],
+   "missing": [
+    "inputs/outputs 계약의 기계적 검증",
+    "부서 수용 기준의 검증 관문 연결"
+   ],
+   "evidence": [
+    "axbranch/departments.py",
+    "docs/evidence/2026-10-24-department-enforcement.md",
+    "tests/test_departments.py"
+   ]
+  },
+  {
+   "id": "agents",
+   "level": 3,
+   "name": "전문 에이전트 · Claude/Codex 실행",
    "role": "단계마다 필요한 데이터만 받아 결과를 JSON으로 반환. 셸·파일 쓰기 없음.",
-   "implemented": ["provider 어댑터의 CLI 플래그 강제(셸·파일 쓰기·MCP 없음, 웹은 단계별)", "사용량 한도 시 대체 provider", "호출별 토큰 기록"],
-   "missing": ["운영체제 수준 격리 없음"],
-   "evidence": ["axbranch/providers.py"]},
-  {"id": "capabilities", "level": 3, "name": "기능·권한 관리",
+   "implemented": [
+    "provider 어댑터의 CLI 플래그 강제(셸·파일 쓰기·MCP 없음, 웹은 단계별)",
+    "사용량 한도 시 대체 provider",
+    "호출별 토큰 기록"
+   ],
+   "missing": [
+    "운영체제 수준 격리 없음"
+   ],
+   "evidence": [
+    "axbranch/providers.py"
+   ]
+  },
+  {
+   "id": "capabilities",
+   "level": 3,
+   "name": "기능·권한 관리",
    "role": "기능 임대(lease), 기능 공백 처리, 외부 연결 승인, Owner 전용 승인(결제·인증정보·게시·연락).",
-   "implemented": ["capability lease/gap/resolver", "external_connection 사전 승인", "governance Owner 전용 동작"],
-   "missing": ["Owner 결과 실행 시 네트워크·파일 권한의 실제 강제(엔진 4번 과제)"],
-   "evidence": ["axbranch/capabilities.py", "axbranch/governance.py", "axbranch/permissions.py"]},
-  {"id": "verification", "level": 2, "name": "산출물 · 실행 검사 · 독립 검증",
+   "implemented": [
+    "capability lease/gap/resolver",
+    "external_connection 사전 승인",
+    "governance Owner 전용 동작"
+   ],
+   "missing": [
+    "Owner 결과 실행 시 네트워크·파일 권한의 실제 강제(엔진 4번 과제)"
+   ],
+   "evidence": [
+    "axbranch/capabilities.py",
+    "axbranch/governance.py",
+    "axbranch/permissions.py"
+   ]
+  },
+  {
+   "id": "verification",
+   "level": 2,
+   "name": "산출물 · 실행 검사 · 독립 검증",
    "role": "산출물 기록, 결정적 검사, Runtime Acceptance(실행 검사), 다른 provider의 독립 검증.",
-   "implemented": ["self-test·결정적 검사(Job Object, 깨끗한 환경)", "Runtime Acceptance(CLI/웹/GUI 시작, audit hook 네트워크 차단 best-effort)", "독립 검증 verdict와 기준별 근거"],
-   "missing": ["브라우저 검사 단계별 지연 기록(엔진 5번 과제)", "부서 수용 기준의 별도 판정"],
-   "evidence": ["axbranch/sandbox.py", "axbranch/runtime.py", "docs/evidence/2026-10-24-F160b-runtime-failure.md"]},
-  {"id": "state", "level": 1, "name": "상태 저장 · 재개 · 기억 · 감사 기록",
+   "implemented": [
+    "self-test·결정적 검사(Job Object, 깨끗한 환경)",
+    "Runtime Acceptance(CLI/웹/GUI 시작, audit hook 네트워크 차단 best-effort)",
+    "독립 검증 verdict와 기준별 근거"
+   ],
+   "missing": [
+    "브라우저 검사 단계별 지연 기록(엔진 5번 과제)",
+    "부서 수용 기준의 별도 판정"
+   ],
+   "evidence": [
+    "axbranch/sandbox.py",
+    "axbranch/runtime.py",
+    "docs/evidence/2026-10-24-F160b-runtime-failure.md"
+   ]
+  },
+  {
+   "id": "state",
+   "level": 1,
+   "name": "상태 저장 · 재개 · 기억 · 감사 기록",
    "role": "SQLite 단일 진실 원천, 이벤트 감사 기록, supervisor 복구, 지식/기억.",
-   "implemented": ["상태 전이 표와 이벤트", "supervisor 상태 분류·제한된 복구", "작업 단계 결과 재사용(stage outputs)"],
-   "missing": ["재사용/폐기 근거의 명시적 기록(엔진 3번 과제)", "웹 서버는 supervisor를 돌리지 않음(보기만으로 재개하지 않기 위해)"],
-   "evidence": ["axbranch/state.py", "axbranch/supervisor.py"]}
+   "implemented": [
+    "상태 전이 표와 이벤트",
+    "supervisor 상태 분류·제한된 복구",
+    "작업 단계 결과 재사용(stage outputs)"
+   ],
+   "missing": [
+    "재사용/폐기 근거의 명시적 기록(엔진 3번 과제)",
+    "웹 서버는 supervisor를 돌리지 않음(보기만으로 재개하지 않기 위해)"
+   ],
+   "evidence": [
+    "axbranch/state.py",
+    "axbranch/supervisor.py"
+   ]
+  }
  ],
  "items": [
-  {"id": "dept-harness", "title": "부서 하네스 (연결·위임·결과 전달)", "impl": "구현 완료", "verify": "실제 E2E 확인",
+  {
+   "id": "dept-harness",
+   "title": "부서 하네스 (연결·위임·결과 전달)",
+   "impl": "구현 완료",
+   "verify": "실제 E2E 확인",
    "solves": "업무를 기능 패키지(부서)로 나눠 연결된 부서에만 맡기고 결과를 다음 부서로 넘김",
    "scope": "연결/해제/중복 방지/복원, 연결 부서에만 위임, 도구·네트워크 범위, 임시 에이전트 정책, 결과 전달",
-   "verified_at": "9483c1e (F160d 413/414, 실제 E2E P-20261024-304eb4)", "tests": "tests.test_departments 9/9",
-   "evidence": ["docs/evidence/2026-10-24-departments.md", "docs/evidence/2026-10-24-final-e2e.md"],
-   "limits": ["임시 에이전트·거부·해제는 실제 모델로 확인 안 함", "역할 위장은 역할 이름으로만 판별"],
-   "done_when": "부서 계약 검증(엔진 1번)까지 포함해 실제 E2E로 확인"},
-  {"id": "dept-contract", "title": "부서 입력·출력 계약 검증", "impl": "계획", "verify": "미검증",
+   "verified_at": "9483c1e (F160d 413/414, 실제 E2E P-20261024-304eb4)",
+   "tests": "tests.test_departments 9/9",
+   "evidence": [
+    "docs/evidence/2026-10-24-departments.md",
+    "docs/evidence/2026-10-24-final-e2e.md"
+   ],
+   "limits": [
+    "임시 에이전트·거부·해제는 실제 모델로 확인 안 함",
+    "역할 위장은 역할 이름으로만 판별"
+   ],
+   "done_when": "부서 계약 검증(엔진 1번)까지 포함해 실제 E2E로 확인"
+  },
+  {
+   "id": "dept-contract",
+   "title": "부서 입력·출력 계약 검증",
+   "impl": "구현 완료",
+   "verify": "자동 테스트 확인",
    "solves": "결과물 없음·형식 오류·다른 프로젝트 참조가 다음 부서로 넘어가는 문제",
-   "scope": "필수 입력, 결과 구조, 산출물 참조 검사 → 실패 시 담당 부서에 제한된 재작업",
-   "verified_at": "UNKNOWN", "tests": "-", "evidence": [],
-   "limits": ["현재 inputs/outputs는 계획용 설명뿐"],
-   "done_when": "계약 위반이 전달되지 않고 재작업으로 이어짐을 자동 테스트와 작은 실제 E2E로 확인"},
-  {"id": "dept-acceptance", "title": "부서 수용 기준 → 독립 검증", "impl": "계획", "verify": "미검증",
-   "solves": "부서 자기 보고만으로 통과하는 위험", "scope": "결정적 기준은 코드로, 의미 기준은 검증 에이전트로; 미충족·검증 불가는 실패",
-   "verified_at": "UNKNOWN", "tests": "-", "evidence": [], "limits": ["현재는 에이전트에게 전달만 함"],
-   "done_when": "프로젝트 기준과 부서 기준이 각각 판정되고 미충족 시 PASS가 안 됨"},
-  {"id": "partial-rework", "title": "부분 재작업·재개 안정화", "impl": "개발 중", "verify": "자동 테스트 확인",
+   "scope": "선택적 contract v1(필수 입력·필수 항목·최소 근거/길이·다른 프로젝트 참조 금지), 실패 시 전달 안 함 → 같은 부서 1회 재작업 → Owner 일시정지",
+   "verified_at": "dev/web-ui (contract commit)",
+   "tests": "tests.test_departments 12/12; engine-related suites 146/146",
+   "evidence": [
+    "docs/evidence/2026-10-24-department-enforcement.md",
+    "tests/test_departments.py"
+   ],
+   "limits": [
+    "형식 검사일 뿐 내용 정확성은 독립 검증 몫",
+    "최종 산출 단계에는 적용 안 함(기존 검사·검증 경로)",
+    "실제 모델 E2E 미실행"
+   ],
+   "done_when": "작은 실제 부서 E2E에서 계약 이벤트가 기록되고 위반 시 전달되지 않음을 확인"
+  },
+  {
+   "id": "dept-acceptance",
+   "title": "부서 수용 기준 → 독립 검증",
+   "impl": "계획",
+   "verify": "미검증",
+   "solves": "부서 자기 보고만으로 통과하는 위험",
+   "scope": "결정적 기준은 코드로, 의미 기준은 검증 에이전트로; 미충족·검증 불가는 실패",
+   "verified_at": "UNKNOWN",
+   "tests": "-",
+   "evidence": [],
+   "limits": [
+    "현재는 에이전트에게 전달만 함"
+   ],
+   "done_when": "프로젝트 기준과 부서 기준이 각각 판정되고 미충족 시 PASS가 안 됨"
+  },
+  {
+   "id": "partial-rework",
+   "title": "부분 재작업·재개 안정화",
+   "impl": "개발 중",
+   "verify": "자동 테스트 확인",
    "solves": "실패한 부서만 고치고 의존 결과를 다시 검사, 중단·재접속 후 중복 실행 방지",
    "scope": "현재: 같은 계획 버전의 선행 결과 재사용, 실행 중 worker 중복 방지. 미구현: 재사용/폐기 근거 기록, 의존 재검사 규칙",
-   "verified_at": "9483c1e", "tests": "test_a_reused_department_result_is_shown_as_done_after_a_rework",
-   "evidence": ["docs/evidence/2026-10-24-final-e2e.md"], "limits": ["재사용/폐기 근거가 이벤트로 남지 않음"],
-   "done_when": "선행 결과 변경 시 후속 재실행, 재사용 근거 기록, 같은 실패 반복 차단을 테스트로 확인"},
-  {"id": "exec-permission", "title": "생성 프로그램 실행 권한 통제", "impl": "계획", "verify": "미검증",
+   "verified_at": "9483c1e",
+   "tests": "test_a_reused_department_result_is_shown_as_done_after_a_rework",
+   "evidence": [
+    "docs/evidence/2026-10-24-final-e2e.md"
+   ],
+   "limits": [
+    "재사용/폐기 근거가 이벤트로 남지 않음"
+   ],
+   "done_when": "선행 결과 변경 시 후속 재실행, 재사용 근거 기록, 같은 실패 반복 차단을 테스트로 확인"
+  },
+  {
+   "id": "exec-permission",
+   "title": "생성 프로그램 실행 권한 통제",
+   "impl": "계획",
+   "verify": "미검증",
    "solves": "검증 실행과 Owner 결과 실행의 제한이 다른 문제",
    "scope": "선언·사전 승인·실제 강제를 구분하고, 이 PC에서 가능한 최소 강제 범위를 증거로 확인",
-   "verified_at": "UNKNOWN", "tests": "-", "evidence": ["docs/evidence/2026-10-24-department-enforcement.md"],
-   "limits": ["Owner 결과 실행은 제한 없음", "검증 실행의 네트워크 차단은 Python audit hook(best-effort, OS 격리 아님)"],
-   "done_when": "실제로 강제되는 범위를 테스트로 증명하고 강제 불가 조건은 그대로 표시"},
-  {"id": "web-ui", "title": "로컬 웹 UI", "impl": "개발 중", "verify": "자동 테스트 확인",
+   "verified_at": "UNKNOWN",
+   "tests": "-",
+   "evidence": [
+    "docs/evidence/2026-10-24-department-enforcement.md"
+   ],
+   "limits": [
+    "Owner 결과 실행은 제한 없음",
+    "검증 실행의 네트워크 차단은 Python audit hook(best-effort, OS 격리 아님)"
+   ],
+   "done_when": "실제로 강제되는 범위를 테스트로 증명하고 강제 불가 조건은 그대로 표시"
+  },
+  {
+   "id": "web-ui",
+   "title": "로컬 웹 UI",
+   "impl": "개발 중",
+   "verify": "자동 테스트 확인",
    "solves": "Owner 화면을 웹으로 옮겨 품질 높은 모션과 사용성을 얻음 (기존 EXE 유지)",
    "scope": "홈·목표·파일/부서 첨부, 현황·동향, 부서 라이브러리(드래그·버튼·해제), 파이프라인·기록·검증, 승인·피드백·중단·재개·결과 실행, 오너 개발실",
-   "verified_at": "dev/web-ui (커밋 전)", "tests": "tests.test_web (API·보안·중복 방지)",
-   "evidence": ["axbranch/web.py", "axbranch/webui/"], "limits": ["결과물 라이브러리·Develop 화면 없음", "Owner 확인 전"],
-   "done_when": "headless 자체 테스트·성능 측정 통과 후 Owner가 시각 품질·드래그·사용성 확인"},
-  {"id": "orb-tk", "title": "淸月 입자 구체 (Tk 창)", "impl": "구현 완료", "verify": "자동 테스트 확인",
-   "solves": "실제 상태를 움직임과 글로 보여 줌", "scope": "상태 연동, 위임 연결 효과, 완료 1회, 정지 상태, 모션 끄기·저부하, 숨김 시 중단",
-   "verified_at": "82efe44", "tests": "tests.test_orb 6/6, tests.test_gui",
-   "evidence": ["docs/evidence/2026-10-24-orb-motion.md"], "limits": ["Tk는 안티앨리어싱·투명도 없음", "실제 실행 중 움직임 Owner 미확인"],
-   "done_when": "Owner가 실제 실행 중 움직임 확인"},
-  {"id": "browser-check", "title": "브라우저 실행 검사 안정화", "impl": "계획", "verify": "미검증",
-   "solves": "headless Edge 간헐 시간 초과", "scope": "시작·페이지 준비·동작·선택자·종료 단계별 지연 기록",
-   "verified_at": "UNKNOWN", "tests": "-", "evidence": ["docs/evidence/2026-10-24-F160b-runtime-failure.md"],
-   "limits": ["원인 미확인"], "done_when": "지연 단계가 기록되고 원인 또는 대응이 근거로 확인됨"}
+   "verified_at": "ab6382d",
+   "tests": "tests.test_web 7/7, headless Chrome 자체 테스트 20/20",
+   "evidence": [
+    "axbranch/web.py",
+    "axbranch/webui/",
+    "docs/evidence/2026-10-24-web-selftest.json"
+   ],
+   "limits": [
+    "결과물 라이브러리·Develop 화면 없음",
+    "Owner 확인 전"
+   ],
+   "done_when": "headless 자체 테스트·성능 측정 통과 후 Owner가 시각 품질·드래그·사용성 확인"
+  },
+  {
+   "id": "orb-tk",
+   "title": "淸月 입자 구체 (Tk 창)",
+   "impl": "구현 완료",
+   "verify": "자동 테스트 확인",
+   "solves": "실제 상태를 움직임과 글로 보여 줌",
+   "scope": "상태 연동, 위임 연결 효과, 완료 1회, 정지 상태, 모션 끄기·저부하, 숨김 시 중단",
+   "verified_at": "82efe44",
+   "tests": "tests.test_orb 6/6, tests.test_gui",
+   "evidence": [
+    "docs/evidence/2026-10-24-orb-motion.md"
+   ],
+   "limits": [
+    "Tk는 안티앨리어싱·투명도 없음",
+    "실제 실행 중 움직임 Owner 미확인"
+   ],
+   "done_when": "Owner가 실제 실행 중 움직임 확인"
+  },
+  {
+   "id": "browser-check",
+   "title": "브라우저 실행 검사 안정화",
+   "impl": "계획",
+   "verify": "미검증",
+   "solves": "headless Edge 간헐 시간 초과",
+   "scope": "시작·페이지 준비·동작·선택자·종료 단계별 지연 기록",
+   "verified_at": "UNKNOWN",
+   "tests": "-",
+   "evidence": [
+    "docs/evidence/2026-10-24-F160b-runtime-failure.md"
+   ],
+   "limits": [
+    "원인 미확인"
+   ],
+   "done_when": "지연 단계가 기록되고 원인 또는 대응이 근거로 확인됨"
+  }
  ],
  "issues": [
-  {"id": "edge-timeout", "title": "headless Edge 90초 시간 초과", "status": "미해결", "kind": "자동 테스트", "priority": "중",
-   "repro": "tests.test_runtime 브라우저 테스트를 반복 실행: branch 8/10, main 9/10 통과", "impact": "전체 회귀에서 간헐 실패 1건",
-   "seen_at": "9483c1e (F160b, F160d)", "next": "브라우저 단계별 지연 기록 후 원인 조사 (시간 제한 연장·반복 금지)",
-   "evidence": ["docs/evidence/2026-10-24-F160b-runtime-failure.md"]},
-  {"id": "owner-run-unrestricted", "title": "Owner 결과 실행은 네트워크·파일 제한 없음", "status": "미해결", "kind": "설계 한계", "priority": "상",
-   "repro": "검증 통과 프로그램을 [결과 실행]하면 일반 환경에서 실행", "impact": "승인된 도메인 외 접속을 실행 시점에 막지 못함",
-   "seen_at": "82efe44 (코드 추적)", "next": "엔진 4번: 이 PC에서 가능한 최소 강제 조사",
-   "evidence": ["docs/evidence/2026-10-24-department-enforcement.md"]},
-  {"id": "contract-declared", "title": "부서 입출력·수용 기준이 선언에 그침", "status": "미해결", "kind": "설계 한계", "priority": "상",
-   "repro": "부서 결과에 필수 항목이 없어도 다음 부서로 전달됨", "impact": "형식 오류·누락이 후속 단계로 전파",
-   "seen_at": "82efe44 (코드 추적)", "next": "엔진 1·2번", "evidence": ["docs/evidence/2026-10-24-department-enforcement.md"]},
-  {"id": "drag-owner", "title": "실제 드래그 Owner 확인 범위", "status": "일부 확인", "kind": "Owner 확인", "priority": "중",
-   "repro": "OWNER-DRAG-CHECKLIST.txt", "impact": "기존 창: 홈 입력 영역 첨부만 Owner 확인. 프로젝트 연결·중복·실패 안내·복원은 미확인",
-   "seen_at": "기존 EXE (2026-10-24 Owner 보고)", "next": "웹 UI에서 실제 드래그 사용감 Owner 확인", "evidence": []},
-  {"id": "e2e-package-overwritten", "title": "E2E에 쓴 패키지(77db6aa9)는 모션 빌드로 교체됨", "status": "기록", "kind": "기록", "priority": "하",
-   "repro": "package-0.1.60 재빌드", "impact": "E2E 패키지 해시는 문서에만 남음", "seen_at": "ef5f8b5a", "next": "다음 E2E는 고정한 패키지를 별도 폴더에 보존",
-   "evidence": ["docs/evidence/2026-10-24-final-e2e.md"]}
+  {
+   "id": "edge-timeout",
+   "title": "headless Edge 90초 시간 초과",
+   "status": "미해결",
+   "kind": "자동 테스트",
+   "priority": "중",
+   "repro": "tests.test_runtime 브라우저 테스트를 반복 실행: branch 8/10, main 9/10 통과",
+   "impact": "전체 회귀에서 간헐 실패 1건",
+   "seen_at": "9483c1e (F160b, F160d)",
+   "next": "브라우저 단계별 지연 기록 후 원인 조사 (시간 제한 연장·반복 금지)",
+   "evidence": [
+    "docs/evidence/2026-10-24-F160b-runtime-failure.md"
+   ]
+  },
+  {
+   "id": "owner-run-unrestricted",
+   "title": "Owner 결과 실행은 네트워크·파일 제한 없음",
+   "status": "미해결",
+   "kind": "설계 한계",
+   "priority": "상",
+   "repro": "검증 통과 프로그램을 [결과 실행]하면 일반 환경에서 실행",
+   "impact": "승인된 도메인 외 접속을 실행 시점에 막지 못함",
+   "seen_at": "82efe44 (코드 추적)",
+   "next": "엔진 4번: 이 PC에서 가능한 최소 강제 조사",
+   "evidence": [
+    "docs/evidence/2026-10-24-department-enforcement.md"
+   ]
+  },
+  {
+   "id": "contract-declared",
+   "title": "부서 수용 기준이 선언에 그침 (입출력 계약은 형식 검사 구현)",
+   "status": "미해결",
+   "kind": "설계 한계",
+   "priority": "상",
+   "repro": "부서 결과에 필수 항목이 없어도 다음 부서로 전달됨",
+   "impact": "형식 오류·누락이 후속 단계로 전파",
+   "seen_at": "82efe44 (코드 추적)",
+   "next": "엔진 2번",
+   "evidence": [
+    "docs/evidence/2026-10-24-department-enforcement.md"
+   ]
+  },
+  {
+   "id": "drag-owner",
+   "title": "실제 드래그 Owner 확인 범위",
+   "status": "일부 확인",
+   "kind": "Owner 확인",
+   "priority": "중",
+   "repro": "OWNER-DRAG-CHECKLIST.txt",
+   "impact": "기존 창: 홈 입력 영역 첨부만 Owner 확인. 프로젝트 연결·중복·실패 안내·복원은 미확인",
+   "seen_at": "기존 EXE (2026-10-24 Owner 보고)",
+   "next": "웹 UI에서 실제 드래그 사용감 Owner 확인",
+   "evidence": []
+  },
+  {
+   "id": "e2e-package-overwritten",
+   "title": "E2E에 쓴 패키지(77db6aa9)는 모션 빌드로 교체됨",
+   "status": "기록",
+   "kind": "기록",
+   "priority": "하",
+   "repro": "package-0.1.60 재빌드",
+   "impact": "E2E 패키지 해시는 문서에만 남음",
+   "seen_at": "ef5f8b5a",
+   "next": "다음 E2E는 고정한 패키지를 별도 폴더에 보존",
+   "evidence": [
+    "docs/evidence/2026-10-24-final-e2e.md"
+   ]
+  }
  ],
  "proposals": [
-  {"id": "web-ui", "title": "로컬 웹 UI 전환 완료", "source": "owner", "priority": 1,
-   "why": "Owner 결정. 화면 품질·모션·사용성", "depends": "", "scope": "기존 기능 유지 + 웹 입자 구체 + 오너 개발실",
-   "done_when": "headless 자체 테스트·권한·중복 방지·성능 확인, Owner 3개 항목 확인", "verify": "tests.test_web, headless Chrome 자체 테스트, 성능 측정", "approval": "불필요 (로컬 전용)"},
-  {"id": "contract", "title": "엔진 1: 부서 입력·출력 계약 검증", "source": "owner", "priority": 2,
-   "why": "형식 오류·누락·다른 프로젝트 참조의 전파 차단", "depends": "", "scope": "호환 가능한 contract 필드, 결과 구조·필수 항목·참조 검사, 실패 시 담당 부서 제한 재작업",
-   "done_when": "계약 위반이 다음 부서로 가지 않음을 테스트로 확인", "verify": "모델 없는 테스트 후 작은 실제 E2E", "approval": "불필요"},
-  {"id": "acceptance", "title": "엔진 2: 부서 수용 기준을 독립 검증에 연결", "source": "owner", "priority": 3,
-   "why": "자기 보고로 통과 방지", "depends": "엔진 1", "scope": "결정적 기준 코드 검사 + 의미 기준 검증 에이전트 판정",
-   "done_when": "미충족·검증 불가가 PASS가 되지 않음", "verify": "모델 없는 테스트", "approval": "불필요"},
-  {"id": "rework", "title": "엔진 3: 부분 재작업·재개 안정화", "source": "owner", "priority": 4,
-   "why": "의존 결과 재검사와 중복 실행 방지", "depends": "엔진 1", "scope": "재사용/폐기 근거 기록, 의존 재실행, 같은 실패 반복 차단",
-   "done_when": "테스트로 확인", "verify": "모델 없는 테스트", "approval": "불필요"},
-  {"id": "exec", "title": "엔진 4: 생성 프로그램 실행 권한 통제", "source": "owner", "priority": 5,
-   "why": "Owner 결과 실행의 무제한 실행", "depends": "", "scope": "선언/사전 승인/실제 강제 구분, 최소 강제 구현",
-   "done_when": "강제 범위를 증거로 확인", "verify": "실제 차단 테스트", "approval": "OS 설정 변경·방화벽 규칙이 필요하면 그 단계에서 Owner 승인"},
-  {"id": "browser", "title": "엔진 5: 브라우저 검사 안정화", "source": "owner", "priority": 6,
-   "why": "Edge 간헐 시간 초과", "depends": "", "scope": "단계별 지연 기록, 원인 조사", "done_when": "지연 단계 근거 확보",
-   "verify": "반복 측정(성공할 때까지 반복 아님)", "approval": "불필요"},
-  {"id": "web-library", "title": "웹 UI 결과물 라이브러리·Develop 화면", "source": "dev", "priority": 7,
-   "why": "기존 창에만 있는 기능", "depends": "웹 UI", "scope": "완료 산출물 목록·버전·이어서 개발", "done_when": "창과 같은 동작",
-   "verify": "자동 테스트", "approval": "불필요"}
+  {
+   "id": "web-ui",
+   "title": "로컬 웹 UI 전환 완료",
+   "source": "owner",
+   "priority": 1,
+   "why": "Owner 결정. 화면 품질·모션·사용성",
+   "depends": "",
+   "scope": "기존 기능 유지 + 웹 입자 구체 + 오너 개발실",
+   "done_when": "headless 자체 테스트·권한·중복 방지·성능 확인, Owner 3개 항목 확인",
+   "verify": "tests.test_web, headless Chrome 자체 테스트, 성능 측정",
+   "approval": "불필요 (로컬 전용)"
+  },
+  {
+   "id": "contract",
+   "title": "엔진 1: 부서 입력·출력 계약 검증",
+   "source": "owner",
+   "priority": 2,
+   "why": "형식 오류·누락·다른 프로젝트 참조의 전파 차단",
+   "depends": "",
+   "scope": "호환 가능한 contract 필드, 결과 구조·필수 항목·참조 검사, 실패 시 담당 부서 제한 재작업",
+   "done_when": "계약 위반이 다음 부서로 가지 않음을 테스트로 확인",
+   "verify": "모델 없는 테스트 후 작은 실제 E2E",
+   "approval": "불필요"
+  },
+  {
+   "id": "acceptance",
+   "title": "엔진 2: 부서 수용 기준을 독립 검증에 연결",
+   "source": "owner",
+   "priority": 3,
+   "why": "자기 보고로 통과 방지",
+   "depends": "엔진 1",
+   "scope": "결정적 기준 코드 검사 + 의미 기준 검증 에이전트 판정",
+   "done_when": "미충족·검증 불가가 PASS가 되지 않음",
+   "verify": "모델 없는 테스트",
+   "approval": "불필요"
+  },
+  {
+   "id": "rework",
+   "title": "엔진 3: 부분 재작업·재개 안정화",
+   "source": "owner",
+   "priority": 4,
+   "why": "의존 결과 재검사와 중복 실행 방지",
+   "depends": "엔진 1",
+   "scope": "재사용/폐기 근거 기록, 의존 재실행, 같은 실패 반복 차단",
+   "done_when": "테스트로 확인",
+   "verify": "모델 없는 테스트",
+   "approval": "불필요"
+  },
+  {
+   "id": "exec",
+   "title": "엔진 4: 생성 프로그램 실행 권한 통제",
+   "source": "owner",
+   "priority": 5,
+   "why": "Owner 결과 실행의 무제한 실행",
+   "depends": "",
+   "scope": "선언/사전 승인/실제 강제 구분, 최소 강제 구현",
+   "done_when": "강제 범위를 증거로 확인",
+   "verify": "실제 차단 테스트",
+   "approval": "OS 설정 변경·방화벽 규칙이 필요하면 그 단계에서 Owner 승인"
+  },
+  {
+   "id": "browser",
+   "title": "엔진 5: 브라우저 검사 안정화",
+   "source": "owner",
+   "priority": 6,
+   "why": "Edge 간헐 시간 초과",
+   "depends": "",
+   "scope": "단계별 지연 기록, 원인 조사",
+   "done_when": "지연 단계 근거 확보",
+   "verify": "반복 측정(성공할 때까지 반복 아님)",
+   "approval": "불필요"
+  },
+  {
+   "id": "web-library",
+   "title": "웹 UI 결과물 라이브러리·Develop 화면",
+   "source": "dev",
+   "priority": 7,
+   "why": "기존 창에만 있는 기능",
+   "depends": "웹 UI",
+   "scope": "완료 산출물 목록·버전·이어서 개발",
+   "done_when": "창과 같은 동작",
+   "verify": "자동 테스트",
+   "approval": "불필요"
+  }
  ]
 }

@@ -4,6 +4,7 @@ import json
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from axbranch import departments as D, engine as E
@@ -216,6 +217,69 @@ class DepartmentTests(unittest.TestCase):
         self.assertEqual(run('detach', 'research')[1], 'operations')
         self.assertEqual(run('list')[1], 'operations')
         self.assertEqual(len(self.store.events(pid, {'department_attached'})), 2)
+
+    def test_contract_failure_is_not_handed_on_and_gets_one_bounded_rework(self):
+        bad = {'output': '', 'key_points': [], 'evidence': [], 'counterpoints': []}
+        good = {'output': 'card team has 40% of inquiries (row 3)', 'key_points': ['card 40%'],
+                'evidence': ['inputs row 3'], 'counterpoints': []}
+        for replies, final_state in (([bad, good], 'OWNER_REVIEW'), ([bad, bad, good], 'PAUSED')):
+            with self.subTest(replies=len(replies)):
+                script = DepartmentScript()
+                queue = list(replies)
+                original = DepartmentScript.__call__
+
+                def call(prompt, schema, *a, _q=queue, **kw):
+                    result, used, notes = original(script, prompt, schema, *a, **kw)
+                    return (dict(_q.pop(0)) if schema is E.WORK else result), used, notes
+                script.__call__ = call
+                pid = self.project('research', 'operations')
+                p = self.engine(call).run(pid)
+                self.assertEqual(p['state'], final_state, p['pause_reason'])
+                checks = [e['detail'] for e in self.store.events(pid, {'department_contract'})]
+                self.assertEqual(checks[0]['status'], 'fail')
+                self.assertIn('결과(output)가 비어 있음', checks[0]['problems'])
+                works = [c for s_, c in script.contexts if s_ is E.WORK]
+                self.assertIn('contract_feedback', works[1])                       # the problems go back to it
+                builds = [c for s_, c in script.contexts if s_ is E.BUILD]
+                if final_state == 'PAUSED':
+                    self.assertEqual(len(works), 2)                                 # bounded: no third attempt
+                    self.assertEqual(builds, [])                                    # nothing handed on
+                    self.assertIn('department contract failed', p['pause_reason'])
+                    self.engine(call).run(pid)                                      # a resume does not retry it
+                    self.assertEqual(len([c for s_, c in script.contexts if s_ is E.WORK]), 2)
+                else:
+                    self.assertEqual(checks[-1]['status'], 'format_ok')
+                    self.assertIn('independent verification', checks[-1]['note'])
+                    self.assertEqual(builds[0]['previous_stages'][0]['output'], good['output'])
+
+    def test_contract_checks_foreign_references_inputs_and_legacy_specs(self):
+        spec = SPECS['research']
+        self.assertIn("다른 프로젝트 참조: ['P-20990101-abcdef']",
+                      D.check_output(spec, {'output': 'see P-20990101-abcdef for the numbers', 'key_points': ['k'],
+                                            'evidence': ['e']}, 'P-20261024-000000'))
+        self.assertEqual(D.check_output(spec, {'output': 'own project P-20261024-000000 row 3 says 40%',
+                                               'key_points': ['k'], 'evidence': ['e']}, 'P-20261024-000000'), [])
+        self.assertIn('근거 부족 (0개 < 1개)', D.check_output(spec, {'output': 'x' * 30, 'key_points': ['k'], 'evidence': []}, 'P'))
+        needs = dict(spec, contract={'version': 1, 'output': {}, 'input': {'require': ['owner_inputs']}})
+        self.assertEqual(D.check_input(needs, False, True), ['필수 입력 없음: owner_inputs'])
+        legacy = {k: v for k, v in spec.items() if k != 'contract'}
+        self.assertEqual(D.validate(legacy, 'research'), [])                            # old specs still load
+        self.assertEqual(D.check_output(legacy, {'output': 'short'}, 'P'), [])           # universal checks only
+        self.assertTrue(D.validate(dict(spec, contract={'version': 1, 'output': {'require': ['nope']}}), 'research'))
+        pid = self.project('research', 'operations')                                     # a failing input check
+        with unittest.mock.patch.dict(SPECS['research'], contract=needs['contract']):
+            with unittest.mock.patch.object(D, 'catalog', return_value=(SPECS, {})):
+                p = self.engine(DepartmentScript()).run(pid)
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertIn('필수 입력 없음: owner_inputs', p['pause_reason'])
+
+    def test_reused_results_are_recorded_with_a_reason(self):
+        script = DepartmentScript()
+        script.builds, script.verdicts = [BROKEN, GOOD, GOOD], ['FAIL', 'PASS', 'PASS']
+        pid = self.project('research', 'operations')
+        self.engine(script).run(pid)
+        reused = [e['detail'] for e in self.store.events(pid, {'stage_reused'})]
+        self.assertTrue(reused and reused[0]['stage'] == 'analyse' and 'contract' in reused[0]['why'])
 
 if __name__ == '__main__':
     unittest.main()

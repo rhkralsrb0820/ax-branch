@@ -44,6 +44,63 @@ def validate(spec, folder=None):
             problems.append(f'permissions.{key} must be a list of paths')
     if not spec['acceptance_criteria']:
         problems.append('acceptance_criteria must not be empty')
+    problems += _contract_problems(spec.get('contract'))
+    return problems
+
+
+WORK_FIELDS = ('output', 'key_points', 'evidence', 'counterpoints')
+INPUT_KINDS = ('owner_inputs', 'previous_stages')
+MAX_CONTRACT_FAILURES = 2          # per stage and plan version: the first failure gets one rework, then the Owner
+FOREIGN_PROJECT = __import__('re').compile(r'P-\d{8}-[0-9a-f]{6}')
+
+
+def _contract_problems(c):
+    """An optional machine-checked contract (absent = a legacy spec: only the universal checks apply)."""
+    if c is None:
+        return []
+    if not isinstance(c, dict) or not isinstance(c.get('version'), int):
+        return ['contract must be an object with an integer version']
+    out, inp = c.get('output', {}), c.get('input', {})
+    problems = []
+    if not isinstance(out, dict) or not isinstance(inp, dict):
+        return ['contract.output and contract.input must be objects']
+    if not set(out.get('require', [])) <= set(WORK_FIELDS):
+        problems.append(f'contract.output.require must be among {WORK_FIELDS}')
+    for key in ('min_evidence', 'min_output_chars'):
+        if not isinstance(out.get(key, 0), int) or out.get(key, 0) < 0:
+            problems.append(f'contract.output.{key} must be a non-negative integer')
+    if not set(inp.get('require', [])) <= set(INPUT_KINDS):
+        problems.append(f'contract.input.require must be among {INPUT_KINDS}')
+    return problems
+
+
+def check_input(spec, has_owner_inputs, has_previous):
+    """Required inputs of a department stage that are missing (checked before any model call)."""
+    need = ((spec or {}).get('contract') or {}).get('input', {}).get('require', [])
+    have = {'owner_inputs': has_owner_inputs, 'previous_stages': has_previous}
+    return [f'필수 입력 없음: {k}' for k in need if not have[k]]
+
+
+def check_output(spec, out, pid):
+    """FORMAT problems of a stage result before it may be handed to the next stage ([] = format passed).
+    Passing says nothing about whether the content is right: that stays with independent verification."""
+    problems = []
+    text = str(out.get('output') or '').strip()
+    if not text:
+        problems.append('결과(output)가 비어 있음')
+    c = (spec or {}).get('contract') or {}
+    rules = c.get('output', {})
+    for field in rules.get('require', []):
+        if not out.get(field):
+            problems.append(f'필수 항목 없음: {field}')
+    if len(text) < rules.get('min_output_chars', 0):
+        problems.append(f"결과가 너무 짧음 ({len(text)}자 < {rules['min_output_chars']}자)")
+    if len(out.get('evidence') or []) < rules.get('min_evidence', 0):
+        problems.append(f"근거 부족 ({len(out.get('evidence') or [])}개 < {rules['min_evidence']}개)")
+    blob = json.dumps(out, ensure_ascii=False)
+    foreign = sorted(set(FOREIGN_PROJECT.findall(blob)) - {pid})
+    if foreign:
+        problems.append(f'다른 프로젝트 참조: {foreign}')
     return problems
 
 

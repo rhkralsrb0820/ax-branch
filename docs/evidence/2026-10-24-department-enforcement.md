@@ -12,7 +12,8 @@ firewall). Enforcement below is by the engine's own checks and by the provider C
 | `permissions.read` / `write` paths | **Declared only** | Agents have no file system access at all (empty temp workdir, file writes off); the engine writes the deliverable into the project folder. There is no per-path OS enforcement |
 | `knowledge` | **Declared (guidance)** | Passed to the department's agent in its brief; not checked |
 | `acceptance_criteria` | **Declared to the agent; not a gate** | Given to the department's agent. The verifier's gate is still the plan's approved criteria plus the deterministic checks; department criteria are not added to it automatically |
-| `inputs` / `outputs` | **Declared (planning)** | Shown to the CEO for planning; outputs are not schema-validated per department |
+| `inputs` / `outputs` (text) | **Declared (planning)** | Shown to the CEO for planning |
+| `contract` (new, optional, versioned) | **Enforced as a FORMAT check (engine)** | Notes stages of projects with departments: required inputs before the call; after it, a non-empty result, required fields, minimum evidence/length, and no other project's id. A failing result is not saved or handed on: one rework of that department with the problems, then an Owner pause (a resume never repeats it). `format_ok` means format only, never correctness. Not applied to the final build stage (its artifact goes through the existing checks and independent verification) nor to legacy projects without departments. Specs without a contract get the universal checks only |
 
 ## Temporary agents (no fitting department) — `departments.check_stage`, staffing and again before execution
 - With at least one department attached, a temporary agent (`department=""`) is refused (`delegation_refused`,

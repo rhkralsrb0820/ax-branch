@@ -890,6 +890,11 @@ class Engine:
         attached = {d['id']: valid[d['id']] for d in departments.attached(self.store, pid) if d['id'] in valid}
         return (attached, valid) if with_library else attached
 
+    def _contract_paused(self, pid, stage, problems):
+        self.store.pause(pid, (f"Owner action needed: department contract failed - stage {stage['name']!r} "
+                               f"({stage.get('department') or 'temporary agent'}): {'; '.join(problems)}. "
+                               '결과를 다음 부서로 넘기지 않았습니다. [수정 요청 / 계속]으로 다시 계획하게 하세요.')[:400])
+
     def _delegation_refused(self, pid, why):
         self.store.event(pid, 'delegation_refused', reason=why)
         self.store.pause(pid, f'Owner action needed: department delegation refused - {why}. '
@@ -1015,6 +1020,9 @@ class Engine:
                 return self._delegation_refused(pid, why)
         for idx, stage in enumerate(notes_stages):
             done = self.store.output(pid, idx, pv)      # reused across rework rounds of the same plan
+            if done is not None and specs:
+                self.store.event(pid, 'stage_reused', stage=stage['name'], plan_version=pv,
+                                 why='same plan version; its result passed the contract check when produced')
             if done is None:
                 stage_context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
                                  'stage': stage['name'], 'previous_stages': upstream, **self._connections(pid),
@@ -1022,9 +1030,34 @@ class Engine:
                 stage_context.update(baseline)
                 if plan.get('owner_rework'):
                     stage_context['owner_rework'] = plan['owner_rework']
+                spec = specs.get(stage.get('department') or '')
+                if specs:                                  # department projects: contract before and after the call
+                    missing = departments.check_input(spec, bool(self._owner_inputs(pid)), bool(upstream))
+                    if missing:
+                        return self._delegation_refused(pid, f"stage {stage['name']!r}: {'; '.join(missing)}")
+                    failed = [e['detail'] for e in self.store.events(pid, {'department_contract'})
+                              if e['detail'].get('stage') == stage['name'] and e['detail'].get('plan_version') == pv
+                              and e['detail'].get('status') == 'fail']
+                    if len(failed) >= departments.MAX_CONTRACT_FAILURES:   # never the same failure the same way again
+                        return self._contract_paused(pid, stage, failed[-1]['problems'])
+                    if failed:
+                        stage_context['contract_feedback'] = {
+                            'problems': failed[-1]['problems'],
+                            'rule': 'Your previous result for this stage was NOT handed on: fix exactly these problems.'}
                 out, used = self._ask(pid, stage['agent_role'], WORKER_SYSTEM.format(role=stage['agent_role']),
                                       stage['instructions'], stage_context,
                                       WORK, prefer=stage['provider'], web=stage['web'], required=self._agent_caps(pid, stage))
+                if specs:
+                    problems = departments.check_output(spec, out, pid)
+                    contract = (spec or {}).get('contract') or {}
+                    self.store.event(pid, 'department_contract', stage=stage['name'], department=stage.get('department') or '',
+                                     plan_version=pv, contract_version=contract.get('version', 'universal'),
+                                     status='fail' if problems else 'format_ok', problems=problems,
+                                     note='format only; the content is judged by independent verification')
+                    if problems:
+                        if len(failed) + 1 >= departments.MAX_CONTRACT_FAILURES:
+                            return self._contract_paused(pid, stage, problems)
+                        return self._executing(pid)        # one bounded rework of this department only
                 self.store.save_output(pid, it, pv, idx, self._agent(pid, stage), used, out)
                 if stage.get('department'):
                     self.store.event(pid, 'department_result', stage=stage['name'], department=stage['department'],

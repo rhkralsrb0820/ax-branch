@@ -1,17 +1,59 @@
 {
   "id": "research",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "리서치",
   "role": "주어진 자료와 Owner 입력을 분석해 사실, 수치, 근거를 정리합니다. 추정과 확인된 사실을 구분합니다.",
-  "provides": ["자료 분석", "핵심 수치·근거 정리", "요구사항 조사 메모"],
+  "provides": [
+    "자료 분석",
+    "핵심 수치·근거 정리",
+    "요구사항 조사 메모"
+  ],
   "agent": {
     "role": "Research analyst",
     "instructions": "Analyse only the material you are given (Owner inputs, previous stages). Report findings with the exact numbers and where each came from; label anything inferred as an estimate. Do not invent sources."
   },
-  "tools": ["reasoning"],
-  "inputs": ["Owner 목표", "첨부 자료(CSV·문서)", "이전 단계 결과"],
-  "outputs": ["발견 사항 목록", "근거(자료 위치·수치)", "한계와 추정 표시"],
-  "knowledge": ["Owner가 첨부한 자료만 사용"],
-  "permissions": {"read": ["project inputs"], "write": [], "network": false, "shell": false},
-  "acceptance_criteria": ["모든 수치에 출처(자료·행·열)가 있다", "추정은 추정이라고 표시한다", "자료에 없는 내용을 단정하지 않는다"]
+  "tools": [
+    "reasoning"
+  ],
+  "inputs": [
+    "Owner 목표",
+    "첨부 자료(CSV·문서)",
+    "이전 단계 결과"
+  ],
+  "outputs": [
+    "발견 사항 목록",
+    "근거(자료 위치·수치)",
+    "한계와 추정 표시"
+  ],
+  "knowledge": [
+    "Owner가 첨부한 자료만 사용"
+  ],
+  "permissions": {
+    "read": [
+      "project inputs"
+    ],
+    "write": [],
+    "network": false,
+    "shell": false
+  },
+  "acceptance_criteria": [
+    "모든 수치에 출처(자료·행·열)가 있다",
+    "추정은 추정이라고 표시한다",
+    "자료에 없는 내용을 단정하지 않는다"
+  ],
+  "contract": {
+    "version": 1,
+    "output": {
+      "require": [
+        "output",
+        "key_points",
+        "evidence"
+      ],
+      "min_evidence": 1,
+      "min_output_chars": 20
+    },
+    "input": {
+      "require": []
+    }
+  }
 }
