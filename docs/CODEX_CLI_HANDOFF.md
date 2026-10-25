@@ -1,3 +1,12 @@
+## START HERE — Codex checkpoint 2026-10-25 12:16:36 KST
+- 브랜치 `dev/web-ui`, 코드 `83a17dd` (이후 문서 상태 커밋). 시작 기준 `1a8df78`, clean 확인.
+- W1/W2/W3는 순서대로 수정·로컬 커밋. 현재 코드 Node DOM 35/35 및 JS 구문 통과. 실제 브라우저/서버/모델 검증 아님.
+- **4번 실제 텍스트 수정 E2E는 미실행**. `--text-rework` 검증 절차만 준비됨. Python 실행 경로 접근 거부, headless Chrome GPU subprocess 시작 실패.
+- 새 EXE 빌드/BUILD.json/서버 전환 없음. 기존 서버·DB·산출물·오너 메모 보존, main 병합/푸시 없음.
+- 다음: 실행 환경 복구 → 전체 회귀/Chrome → 보존 빌드 → 같은 격리 프로젝트 텍스트 요청·REWORK·새 PASS·수정 결과 열기.
+- 근거: `docs/evidence/2026-10-25-codex-continuation.md`. 보고: 저장소 `outputs/ceo-demo-review/IMPLEMENTATION_STATUS.md` (공유 경로는 쓰기 허용 밖).
+- 이전 441/441과 이전 E2E를 이번 검증으로 사용하지 않음. 아래 인계 내용은 역사 기록.
+
 ## Codex 착수 — 2026-10-25 12:03 KST
 - 브랜치 `dev/web-ui`, HEAD `1a8df78408931fb7fb3edc5d4402c5ea2ceb40fd`, 착수 전 작업 트리 clean. 인계 기준과 일치.
 - START HERE와 공유 CODEX_REVIEW.md(07:53 KST) 확인. 완료된 화면 수정은 반복하지 않음.
