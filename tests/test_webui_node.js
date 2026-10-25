@@ -26,7 +26,7 @@ class Element {
 }
 const ids=[...fs.readFileSync(path.join(__dirname,'../axbranch/webui/index.html'),'utf8').matchAll(/id="([^"]+)"/g)].map(m=>m[1]);
 for(const id of ids) nodes.set(id,new Element(id));
-const document={hidden:false,body:new Element(),createElement:()=>new Element(),querySelector(sel){
+const document={hidden:false,body:new Element(),getElementById:id=>nodes.get(id)||null,createElement:()=>new Element(),querySelector(sel){
   if(sel.startsWith('#')) return nodes.get(sel.slice(1))||null;
   if(sel==='meta[name=axb-token]') return {content:'fixture'};
   if(sel==='input[name=works]:checked') return radios.find(r=>r.checked)||null;

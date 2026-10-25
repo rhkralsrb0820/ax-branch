@@ -180,3 +180,7 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
 ## Codex W2 checkpoint — 2026-10-25 12:09 KST
 - 제출 직전 sessionStorage 기록, GET /api/submission으로 created_by 조회, 확인된 접수 복구. 파일 내용은 저장하지 않으며 미접수 첨부는 재선택 필요. 의도적으로 바꾼 목표에는 미확인 ID 재사용 금지.
 - Node DOM W1 10/10 + W2 11/11; 서버 unittest 추가했으나 Python 접근 제한으로 미실행. 빌드/서버 전환 없음. 다음 W3.
+
+## Codex W3 checkpoint — 2026-10-25 12:10 KST
+- 출처별 마지막 성공 수집 시각·24시간 경과·갱신 실패를 캐시 유무와 무관하게 표시. 출처/게시일, 홈 최신 3개씩, 전체 목록 유지.
+- Node DOM 9/9, JS 구문 확인. Python 캐시 보존/출처별 실패 회귀 추가했으나 미실행. 빌드/서버 전환 없음. 다음 텍스트 수정 E2E.

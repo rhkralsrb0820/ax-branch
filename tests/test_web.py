@@ -128,6 +128,27 @@ class WebTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_feed_refresh_failure_preserves_items_and_last_success_per_source(self):
+        from unittest import mock
+        old = {'AI 동향': {'items': [{'title': '기존 기사', 'url': 'https://openai.com/news/old',
+                                  'published': 100}], 'fetched': 200, 'error': ''}}
+        cache = self.ws / 'home-feeds.json'
+        cache.write_text(json.dumps(old), encoding='utf-8')
+        with mock.patch('axbranch.home.fetch_feeds', return_value={
+            'AI 동향': {'items': [], 'fetched': None, 'error': 'timeout'},
+            'AI 취업': {'items': [], 'fetched': 300, 'error': ''},
+        }):
+            code, _ = self.call('/api/feeds/refresh', {})
+        self.assertEqual(code, 200)
+        _, feeds = self.call('/api/feeds')
+        self.assertEqual(feeds['AI 동향']['items'], old['AI 동향']['items'])
+        self.assertEqual(feeds['AI 동향']['fetched'], 200)
+        self.assertEqual(feeds['AI 동향']['error'], 'timeout')
+        self.assertEqual(feeds['AI 동향']['source'], web.home.FEEDS['AI 동향'])
+        self.assertEqual(feeds['AI 취업']['fetched'], 300)
+        self.assertEqual(feeds['AI 취업']['error'], '')
+        self.assertEqual(self.launched, [])
+
     def test_departments_attach_detach_persist_and_refuse_duplicates(self):
         _, p = self.call('/api/projects', {'goal': 'g', 'request_id': 'req-0004-abcd'})
         url = f"/api/project/{p['id']}/department"

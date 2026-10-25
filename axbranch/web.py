@@ -109,9 +109,10 @@ class App:
 
     def feeds(self):
         try:
-            return json.loads((self.workspace / 'home-feeds.json').read_text(encoding='utf-8'))
+            data = json.loads((self.workspace / 'home-feeds.json').read_text(encoding='utf-8'))
         except (OSError, ValueError):
-            return {}
+            data = {}
+        return {cat: dict(data.get(cat, {}), source=source) for cat, source in home.FEEDS.items()}
 
     # ---- Owner development room (AX Branch's OWN development status; not user projects) ----
     def devroom_data(self):

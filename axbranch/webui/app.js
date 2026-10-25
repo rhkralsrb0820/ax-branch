@@ -329,9 +329,17 @@
   // ---- feeds ----
   async function loadFeeds(target) {
     const data = await api('feeds');
-    const render = cat => { const c = data[cat] || {}; return `<h3>${esc(cat)}</h3>` + ((c.items || []).slice(0, target ? 30 : 6).map(i =>
-      `<div class="feed-item"><a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a><div class="muted">${esc(i.summary)}</div></div>`).join('')
-      || `<div class="muted">${c.error ? '수집 실패: ' + esc(c.error) : '아직 수집한 자료가 없습니다. [공개 정보 새로 수집]을 누르세요.'}</div>`); };
+    const when = stamp => new Date(stamp * 1000).toLocaleString();
+    const host = url => { try { return new URL(url).hostname; } catch (e) { return '출처 미상'; } };
+    const render = cat => {
+      const c = data[cat] || {}, stale = c.fetched && Date.now() / 1000 - c.fetched > 86400;
+      const items = (c.items || []).slice().sort((a, b) => (b.published || 0) - (a.published || 0)).slice(0, target ? 30 : 3);
+      return `<h3>${esc(cat)}</h3><div class="muted">출처: ${esc(c.source ? host(c.source) : '출처 미상')} · ${c.fetched ? '마지막 성공 수집: ' + esc(when(c.fetched)) : '수집 전'}</div>`
+        + (stale ? '<div class="muted">오래된 정보 (24시간 초과) — 새로 수집하세요.</div>' : '')
+        + (c.error ? `<div class="feed-error" role="status">갱신 실패: ${esc(c.error)}${items.length ? ' · 이전 수집 자료를 표시합니다.' : ''}</div>` : '')
+        + (items.map(i => `<div class="feed-item"><a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a><div class="muted">${esc(host(i.url))} · ${i.published ? '게시: ' + esc(when(i.published)) : '게시일 미상'}</div><div class="muted">${esc(i.summary)}</div></div>`).join('')
+          || '<div class="muted">아직 수집한 자료가 없습니다. [공개 정보 새로 수집]을 누르세요.</div>');
+    };
     if (target) $('#feedFull').innerHTML = render(target);
     else { document.getElementById('feed-AI 동향').innerHTML = render('AI 동향'); document.getElementById('feed-AI 취업').innerHTML = render('AI 취업'); }
   }
