@@ -1,0 +1,57 @@
+{
+  "runner": "Node DOM fixture, not a real browser",
+  "passed": 10,
+  "total": 10,
+  "checks": [
+    {
+      "name": "W1 polling preserves same-project typing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 switching clears another project feedback",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 review posts B text to B only",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 detached A action rejected",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 returning restores own draft",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 delayed records cannot overwrite B",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 delayed A project cannot overwrite B",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 approval displays B explanation and clears A note",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 approve targets visible B only",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "W1 A approval draft restored",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

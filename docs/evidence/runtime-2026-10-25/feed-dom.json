@@ -1,0 +1,43 @@
+{
+  "runner": "Node DOM fixture, no live public fetch",
+  "passed": 9,
+  "total": 9,
+  "checks": [
+    {
+      "name": "W3 old nonempty cache shows refresh failure and age",
+      "ok": true
+    },
+    {
+      "name": "W3 failed refresh keeps last successful fetched timestamp",
+      "ok": true
+    },
+    {
+      "name": "W3 source and publication time visible",
+      "ok": true
+    },
+    {
+      "name": "W3 home shows latest three in publication order",
+      "ok": true
+    },
+    {
+      "name": "W3 failure text escaped",
+      "ok": true
+    },
+    {
+      "name": "W3 empty failed source shows failure and never collected",
+      "ok": true
+    },
+    {
+      "name": "W3 full feed retains all five items",
+      "ok": true
+    },
+    {
+      "name": "W3 successful refresh clears failure and stale indicators",
+      "ok": true
+    },
+    {
+      "name": "W3 missing publication date explicitly labelled",
+      "ok": true
+    }
+  ]
+}

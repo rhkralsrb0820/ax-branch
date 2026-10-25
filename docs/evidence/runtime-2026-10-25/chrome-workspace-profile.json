@@ -1,0 +1,27 @@
+{
+  "passed": 0,
+  "total": 1,
+  "finished": false,
+  "checks": [
+    {
+      "name": "Chrome stayed running",
+      "ok": false,
+      "detail": "2147483651 :1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:54068:1025/130528.124:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\Desktop\\AX-Branch\\ax-branch\\outputs\\chrome-regression-aJTacX\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[50656:49604:1025/130528.162:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:49604:1025/130528.191:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:50268:1025/130528.193:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\Desktop\\AX-Branch\\ax-branch\\outputs\\chrome-regression-aJTacX\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[50656:54480:1025/130528.216:ERROR:services\\device\\public\\cpp\\geolocation\\system_geolocation_source_win.cc:124] Failed to create IAppCapability: 액세스가 거부되었습니다. (0x80070005)\r\n[50656:49604:1025/130528.218:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:49604:1025/130528.218:FATAL:content\\browser\\gpu\\gpu_data_manager_impl_private.cc:389] GPU process isn't usable. Goodbye.\r\n"
+    }
+  ],
+  "executable": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "args": [
+    "--headless=new",
+    "--user-data-dir=C:\\Users\\HP\\Desktop\\AX-Branch\\ax-branch\\outputs\\chrome-regression-aJTacX",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-gpu",
+    "--window-size=1400,1000",
+    "http://127.0.0.1:57537/?selftest=1"
+  ],
+  "stderr": "[50656:49604:1025/130527.435:ERROR:components\\os_crypt\\async\\browser\\os_crypt_win.cc:63] Failed to encrypt: 지정된 파일을 찾을 수 없습니다. (0x2)\r\n[50656:51132:1025/130527.573:ERROR:chrome\\installer\\util\\google_update_settings_win.cc:270] Failed opening key Software\\Google\\Update\\ClientStateMedium\\{8A69D345-D564-463c-AFF1-A69D9E530F96} to set usagestats; result: 5\r\n[50656:44720:1025/130527.775:ERROR:components\\password_manager\\core\\browser\\password_store\\login_database_async_helper.cc:100] Encryption is not available.\r\n[50656:4360:1025/130527.784:ERROR:components\\password_manager\\core\\browser\\password_store\\login_database_async_helper.cc:100] Encryption is not available.\r\n[50656:49604:1025/130527.977:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:50268:1025/130527.978:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\Desktop\\AX-Branch\\ax-branch\\outputs\\chrome-regression-aJTacX\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[50656:49604:1025/130528.044:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:50268:1025/130528.091:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\Desktop\\AX-Branch\\ax-branch\\outputs\\chrome-regression-aJTacX\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[50656:49604:1025/130528.123:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:54068:1025/130528.124:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\Desktop\\AX-Branch\\ax-branch\\outputs\\chrome-regression-aJTacX\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[50656:49604:1025/130528.162:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:49604:1025/130528.191:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:50268:1025/130528.193:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\Desktop\\AX-Branch\\ax-branch\\outputs\\chrome-regression-aJTacX\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[50656:54480:1025/130528.216:ERROR:services\\device\\public\\cpp\\geolocation\\system_geolocation_source_win.cc:124] Failed to create IAppCapability: 액세스가 거부되었습니다. (0x80070005)\r\n[50656:49604:1025/130528.218:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[50656:49604:1025/130528.218:FATAL:content\\browser\\gpu\\gpu_data_manager_impl_private.cc:389] GPU process isn't usable. Goodbye.\r\n",
+  "requests": [
+    "/"
+  ]
+}

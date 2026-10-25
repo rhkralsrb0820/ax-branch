@@ -234,6 +234,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = route(self.app, store, method, path, query, body)
             self._send(200, result)
+        except actions.StartRejected as e:
+            self._send(400, {'error': str(e), 'submission': 'rejected_before_creation', 'request_id': e.request_id})
         except (Rejected, ValueError, KeyError) as e:
             self._send(400, {'error': str(e)})
         except Exception as e:                     # never a traceback page; the message only
@@ -326,18 +328,21 @@ def create_project(app, store, body, channel):
         raise Rejected('request_id가 필요합니다 (새로고침·중복 제출 방지).')
     files, tmp = [], None
     try:
-        if body.get('files'):
-            tmp = Path(tempfile.mkdtemp(prefix='axb-web-upload-'))
-            for f in body['files'][:20]:
-                name = Path(str(f.get('name', ''))).name
-                if not name or name.startswith('.'):
-                    raise Rejected('파일 이름이 올바르지 않습니다.')
-                (tmp / name).write_bytes(base64.b64decode(f.get('data', ''), validate=True))
-                files.append(str(tmp / name))
         with app.lock:                               # one creation at a time: the same request_id never twice
             existing = actions.created_by(store, request_id)
             if existing:
                 return {'id': existing, 'created': False}
+            try:
+                if body.get('files'):
+                    tmp = Path(tempfile.mkdtemp(prefix='axb-web-upload-'))
+                    for f in body['files'][:20]:
+                        name = Path(str(f.get('name', ''))).name
+                        if not name or name.startswith('.'):
+                            raise Rejected('파일 이름이 올바르지 않습니다.')
+                        (tmp / name).write_bytes(base64.b64decode(f.get('data', ''), validate=True))
+                        files.append(str(tmp / name))
+            except (Rejected, ValueError, OSError) as e:
+                raise actions.StartRejected(str(e), request_id) from e
             pid = actions.start(store, app.engine_factory, body.get('goal', ''), list(body.get('departments') or []),
                                 app.specs, files, channel, request_id=request_id)
         actions.launch(app.workspace, store, pid, app.launcher)

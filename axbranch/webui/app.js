@@ -13,7 +13,11 @@
     if (body !== undefined) { opt.method = 'POST'; opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
     const r = await fetch('/api/' + path, opt);
     const data = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    if (!r.ok) {
+      const error = new Error(data.error || `HTTP ${r.status}`);
+      if (r.status === 400 && data.submission === 'rejected_before_creation') error.rejectedRequest = data.request_id;
+      throw error;
+    }
     return data;
   }
   function notice(text, ms) {
@@ -170,7 +174,17 @@
       }
       const r = await api('projects', {goal: text, departments: S.pending, files: S.files, request_id: S.requestId});
       await accepted(r);
-    } catch (e) { notice('접수 확인이 끝나지 않았습니다. 새로고침 또는 재시도로 기존 접수를 먼저 확인합니다. ' + String(e.message || e), 0); }
+    } catch (e) {
+      if (submission && e.rejectedRequest === submission.id) {
+        try {
+          sessionStorage.removeItem(submissionKey); submission = null; S.requestId = null;
+          notice('프로젝트를 만들기 전에 제출이 거절됐습니다. 첨부·부서·목표를 수정하고 다시 제출하세요. ' + e.message, 0);
+        } catch (storageError) {
+          submissionUnavailable = true;
+          notice('거절된 접수 기록을 지우지 못했습니다. 저장소 접근을 복구한 뒤 새로고침하세요.', 0);
+        }
+      } else notice('접수 확인이 끝나지 않았습니다. 새로고침 또는 재시도로 기존 접수를 먼저 확인합니다. ' + String(e.message || e), 0);
+    }
     finally { S.busy = false; $('#submit').disabled = false; }
   };
 

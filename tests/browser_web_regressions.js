@@ -3,7 +3,10 @@
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
 const {spawn} = require('node:child_process');
 const root = path.resolve(__dirname, '..'), checks = [], posts = [], requests = [];
-const profile = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'axb-regression-'));
+// Keep the disposable profile inside the explicit writable workspace, not the HP user's AppData tree.
+const profileRoot = path.join(root, 'outputs');
+fs.mkdirSync(profileRoot, {recursive: true});
+const profile = fs.mkdtempSync(path.join(profileRoot, 'chrome-regression-'));
 const project = id => ({id, title: id, state: 'OWNER_REVIEW', status: 'WAITING_OWNER', iteration: 2,
   banner: {text: id, color: '#fff'}, attached: [], pipeline: [], verifications: [], acceptance: {}, conflicts: [], contract: [], timeline: [],
   owner: {mode: 'review', note: id + ' 안내'}});
@@ -33,25 +36,27 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8');
   res.end(fs.readFileSync(full, 'utf8').replace('__AXB_TOKEN__', 'fixture'));
 });
-let finished = false, chrome, chromeError = '';
+let finished = false, exited = false, chrome, chromeError = '', chromeArgs;
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
-  chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', ['--headless=new', '--user-data-dir=' + profile,
-    '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--window-size=1400,1000', `http://127.0.0.1:${port}/?selftest=1`], {stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true});
+  chromeArgs = ['--headless=new', '--user-data-dir=' + profile,
+    '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--window-size=1400,1000', `http://127.0.0.1:${port}/?selftest=1`];
+  chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', chromeArgs, {stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true});
   chrome.stderr.on('data', d => { chromeError += d.toString(); });
-  chrome.on('exit', code => { if (!finished) { checks.push({name: 'Chrome stayed running', ok: false, detail: String(code) + ' ' + chromeError.slice(-1500)}); finished = true; } });
-  chrome.on('error', e => { checks.push({name: 'Chrome launch', ok: false, detail: e.message}); finished = true; });
+  chrome.on('exit', code => { if (!finished) { checks.push({name: 'Chrome stayed running', ok: false, detail: String(code) + ' ' + chromeError.slice(-1500)}); exited = true; } });
+  chrome.on('error', e => { checks.push({name: 'Chrome launch', ok: false, detail: e.message}); exited = true; });
   const start = Date.now();
-  while (!finished && Date.now() - start < 60000) await new Promise(resolve => setTimeout(resolve, 100));
-  if (!finished) checks.push({name: 'finished within 60 seconds', ok: false, detail: requests.join(', ') + ' ' + chromeError.slice(-1500)});
+  while (!finished && !exited && Date.now() - start < 60000) await new Promise(resolve => setTimeout(resolve, 100));
+  if (!finished && !exited) checks.push({name: 'finished within 60 seconds', ok: false, detail: requests.join(', ') + ' ' + chromeError.slice(-1500)});
   for (const c of checks) console.log(`${c.ok ? 'PASS' : 'FAIL'} ${c.name} ${c.detail || ''}`);
-  const summary = {passed: checks.filter(c => c.ok).length, total: checks.length, finished, checks};
+  const summary = {passed: checks.filter(c => c.ok).length, total: checks.length, finished, checks,
+    executable: 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: chromeArgs, stderr: chromeError, requests};
   if (process.argv[2]) fs.writeFileSync(process.argv[2], JSON.stringify(summary, null, 2));
   process.exitCode = finished && checks.length > 0 && checks.every(c => c.ok) ? 0 : 1;
 })().catch(e => {console.error(e); process.exitCode = 1;}).finally(async () => {
   if (chrome && chrome.pid) await new Promise(resolve => spawn('taskkill', ['/PID', String(chrome.pid), '/T', '/F'], {stdio: 'ignore', windowsHide: true}).on('exit', resolve));
   server.close();
   // Only this test's newly-created, resolved temporary directory may be removed.
-  if (path.dirname(profile) === path.resolve(require('node:os').tmpdir()) && path.basename(profile).startsWith('axb-regression-')) fs.rmSync(profile, {recursive: true, force: true, maxRetries: 5, retryDelay: 200});
+  if (path.dirname(profile) === profileRoot && path.basename(profile).startsWith('chrome-regression-')) fs.rmSync(profile, {recursive: true, force: true, maxRetries: 5, retryDelay: 200});
 });

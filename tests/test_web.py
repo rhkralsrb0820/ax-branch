@@ -135,6 +135,94 @@ class WebTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_precreation_rejection_can_be_corrected_without_creating_twice(self):
+        from axbranch import artifacts
+
+        class InputsEngine:
+            def __init__(engine):
+                engine.store = Store(self.ws / 'axbranch.sqlite3')
+
+            def attach_inputs(engine, pid, files):
+                artifacts.attach_inputs(self.ws / 'projects' / pid, files)
+
+        self.app.engine_factory = InputsEngine
+        cases = [
+            {'files': [{'name': 'bad name.csv', 'data': 'YQ=='}]},
+            {'departments': ['removed-department']},
+            {'files': [{'name': 'ok.csv', 'data': 'not base64!'}]},
+        ]
+        for n, invalid in enumerate(cases):
+            with self.subTest(invalid=invalid):
+                request_id = f'rejected-{n:04d}'
+                body = {'goal': '고쳐서 제출', 'request_id': request_id, **invalid}
+                code, rejected = self.call('/api/projects', body)
+                self.assertEqual(code, 400)
+                self.assertEqual(rejected['submission'], 'rejected_before_creation')
+                self.assertEqual(rejected['request_id'], request_id)
+                self.assertIsNone(self.call('/api/submission?request_id=' + request_id)[1]['id'])
+                self.assertEqual(len(self.launched), n)
+                corrected = {'goal': '고쳐서 제출', 'request_id': f'corrected-{n:04d}',
+                             'files': [{'name': 'ok.csv', 'data': 'YQ=='}], 'departments': ['research']}
+                _, created = self.call('/api/projects', corrected)
+                self.assertTrue(created['created'])
+                self.assertEqual(self.call('/api/projects', corrected)[1], {'id': created['id'], 'created': False})
+                self.assertEqual(len(self.launched), n + 1)
+        store = self.app.store()
+        try:
+            self.assertEqual(len(store.projects()), len(cases))
+        finally:
+            store.close()
+
+    def test_partial_creation_is_not_reported_as_precreation_rejection(self):
+        class FailingInputsEngine:
+            def __init__(engine):
+                engine.store = Store(self.ws / 'axbranch.sqlite3')
+
+            def attach_inputs(engine, pid, files):
+                raise OSError('simulated attachment copy failure after creation')
+
+        self.app.engine_factory = FailingInputsEngine
+        body = {'goal': '부분 생성 보존', 'request_id': 'partial-create-0001',
+                'files': [{'name': 'ok.csv', 'data': 'YQ=='}]}
+        code, failed = self.call('/api/projects', body)
+        self.assertEqual(code, 400)
+        self.assertNotIn('submission', failed)
+        _, receipt = self.call('/api/submission?request_id=partial-create-0001')
+        self.assertTrue(receipt['id'])
+        # A retry checks the receipt before even validating changed upload data.
+        _, retry = self.call('/api/projects', dict(body, files=[{'name': '.bad', 'data': '!'}]))
+        self.assertEqual(retry, {'id': receipt['id'], 'created': False})
+        self.assertEqual(self.launched, [])
+        store = self.app.store()
+        try:
+            self.assertEqual(len(store.projects()), 1)
+        finally:
+            store.close()
+
+    def test_receipt_write_failure_rolls_back_project_before_retry(self):
+        from unittest import mock
+        original = Store.event
+
+        def fail_receipt(store, pid, kind, **detail):
+            if kind == 'owner_action' and detail.get('request_id') == 'receipt-write-0001':
+                raise OSError('simulated receipt write failure')
+            return original(store, pid, kind, **detail)
+
+        body = {'goal': '접수 기록 실패 복구', 'request_id': 'receipt-write-0001'}
+        with mock.patch.object(Store, 'event', fail_receipt):
+            code, error = self.call('/api/projects', body)
+        self.assertEqual(code, 500)
+        self.assertNotIn('submission', error)
+        store = self.app.store()
+        try:
+            self.assertEqual(store.projects(), [])
+        finally:
+            store.close()
+        self.assertEqual(self.launched, [])
+        _, created = self.call('/api/projects', body)
+        self.assertTrue(created['created'])
+        self.assertEqual(self.launched, [created['id']])
+
     def test_feed_refresh_failure_preserves_items_and_last_success_per_source(self):
         from unittest import mock
         old = {'AI 동향': {'items': [{'title': '기존 기사', 'url': 'https://openai.com/news/old',

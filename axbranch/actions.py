@@ -7,6 +7,13 @@ from .state import Rejected
 OWNER_WAIT = ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL')
 
 
+class StartRejected(Rejected):
+    """Input validation failed before any project was created for this request."""
+    def __init__(self, message, request_id=None):
+        super().__init__(message)
+        self.request_id = request_id
+
+
 def launch(workspace, store, pid, launcher=None):
     """Start the project's background worker unless one already runs. Returns True when started."""
     if supervisor.status(workspace, store, pid)['status'] == 'ACTIVE':
@@ -19,21 +26,25 @@ def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_i
     """A new project from the goal box: inputs checked first (a bad file never leaves a half project), then the
     project, its departments (function connections only) and its inputs. Returns the project id.
     request_id: the same id again returns the project it already created (a reload or double submit)."""
-    goal = (goal or '').strip()
-    if not goal:
-        raise Rejected('목표를 입력해 주세요.')
     if request_id:
         existing = created_by(store, request_id)
         if existing:
             return existing
-    if files:
-        from .artifacts import validate_inputs
-        validate_inputs(files)
-    unknown = [d for d in dep_ids if d not in specs]
-    if unknown:
-        raise Rejected(f'라이브러리에 없는 부서: {unknown}')
-    pid = store.new_project(goal)
-    store.event(pid, 'owner_action', action='new', channel=channel, **({'request_id': request_id} if request_id else {}))
+    try:
+        goal = (goal or '').strip()
+        if not goal:
+            raise Rejected('목표를 입력해 주세요.')
+        if files:
+            from .artifacts import validate_inputs
+            validate_inputs(files)
+        unknown = [d for d in dep_ids if d not in specs]
+        if unknown:
+            raise Rejected(f'라이브러리에 없는 부서: {unknown}')
+    except (Rejected, ValueError) as e:
+        raise StartRejected(str(e), request_id) from e
+    with store.tx():
+        pid = store.new_project(goal)
+        store.event(pid, 'owner_action', action='new', channel=channel, **({'request_id': request_id} if request_id else {}))
     for dep_id in dict.fromkeys(dep_ids):
         departments.attach(store, pid, dep_id, specs)
     if files:

@@ -1,0 +1,44 @@
+[
+  {
+    "ts": 1792900765,
+    "level": "WARN",
+    "target": "codex_core::hook_runtime",
+    "message": "session_loop{thread_id=01a14887-a973-7e11-a141-168cb9c993c1}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a17136-47e7-70d3-9201-6ded33aa4922\" codex.op=\"turn_input\"}:codex.turn_input{conversation.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=\"01a17136-47e7-70d3-9201-6ded33aa4922\"}:turn{otel.name=\"session_task.turn\" thread.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=01a17136-47e7-70d3-9201-6ded33aa4922 model=gpt-6-astra codex.turn.reasoning_effort=medium}:session_task.run:run_turn:run_legacy_after_agent_hook: after_agent hook failed; continuing turn_id=01a17136-47e7-70d3-9201-6ded33aa4922 hook_name=legacy_notify error=파일 이름이나 확장명이 너무 깁니다. (os error 206)"
+  },
+  {
+    "ts": 1792898988,
+    "level": "WARN",
+    "target": "codex_core::hook_runtime",
+    "message": "session_loop{thread_id=01a14887-a973-7e11-a141-168cb9c993c1}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a1711a-594a-7f21-9919-75bf121cc879\" codex.op=\"turn_input\"}:codex.turn_input{conversation.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=\"01a1711a-594a-7f21-9919-75bf121cc879\"}:turn{otel.name=\"session_task.turn\" thread.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=01a1711a-594a-7f21-9919-75bf121cc879 model=gpt-6-astra codex.turn.reasoning_effort=medium}:session_task.run:run_turn:run_legacy_after_agent_hook: after_agent hook failed; continuing turn_id=01a1711a-594a-7f21-9919-75bf121cc879 hook_name=legacy_notify error=파일 이름이나 확장명이 너무 깁니다. (os error 206)"
+  },
+  {
+    "ts": 1792897108,
+    "level": "WARN",
+    "target": "codex_core::hook_runtime",
+    "message": "session_loop{thread_id=01a14887-a973-7e11-a141-168cb9c993c1}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a170fe-9d5b-7252-a157-40d5fa0bd16d\" codex.op=\"turn_input\"}:codex.turn_input{conversation.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=\"01a170fe-9d5b-7252-a157-40d5fa0bd16d\"}:turn{otel.name=\"session_task.turn\" thread.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=01a170fe-9d5b-7252-a157-40d5fa0bd16d model=gpt-6-astra codex.turn.reasoning_effort=medium}:session_task.run:run_turn:run_legacy_after_agent_hook: after_agent hook failed; continuing turn_id=01a170fe-9d5b-7252-a157-40d5fa0bd16d hook_name=legacy_notify error=파일 이름이나 확장명이 너무 깁니다. (os error 206)"
+  },
+  {
+    "ts": 1792897060,
+    "level": "WARN",
+    "target": "codex_core::hook_runtime",
+    "message": "session_loop{thread_id=01a14887-a973-7e11-a141-168cb9c993c1}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a170fd-d325-7a90-b6f6-b1c202a0d8c5\" codex.op=\"turn_input\"}:codex.turn_input{conversation.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=\"01a170fd-d325-7a90-b6f6-b1c202a0d8c5\"}:turn{otel.name=\"session_task.turn\" thread.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=01a170fd-d325-7a90-b6f6-b1c202a0d8c5 model=gpt-6-astra codex.turn.reasoning_effort=medium}:session_task.run:run_turn:run_legacy_after_agent_hook: after_agent hook failed; continuing turn_id=01a170fd-d325-7a90-b6f6-b1c202a0d8c5 hook_name=legacy_notify error=파일 이름이나 확장명이 너무 깁니다. (os error 206)"
+  },
+  {
+    "ts": 1792897023,
+    "level": "WARN",
+    "target": "codex_core::hook_runtime",
+    "message": "session_loop{thread_id=01a14887-a973-7e11-a141-168cb9c993c1}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a170fd-4cd8-7262-8a1a-e1f06bb47d43\" codex.op=\"turn_input\"}:codex.turn_input{conversation.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=\"01a170fd-4cd8-7262-8a1a-e1f06bb47d43\"}:turn{otel.name=\"session_task.turn\" thread.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=01a170fd-4cd8-7262-8a1a-e1f06bb47d43 model=gpt-6-astra codex.turn.reasoning_effort=medium}:session_task.run:run_turn:run_legacy_after_agent_hook: after_agent hook failed; continuing turn_id=01a170fd-4cd8-7262-8a1a-e1f06bb47d43 hook_name=legacy_notify error=파일 이름이나 확장명이 너무 깁니다. (os error 206)"
+  },
+  {
+    "ts": 1792895596,
+    "level": "WARN",
+    "target": "codex_core::hook_runtime",
+    "message": "session_loop{thread_id=01a14887-a973-7e11-a141-168cb9c993c1}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a170e3-538f-7833-be36-71ab19fb6d81\" codex.op=\"turn_input\"}:codex.turn_input{conversation.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=\"01a170e3-538f-7833-be36-71ab19fb6d81\"}:turn{otel.name=\"session_task.turn\" thread.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=01a170e3-538f-7833-be36-71ab19fb6d81 model=gpt-6-astra codex.turn.reasoning_effort=medium}:session_task.run:run_turn:run_legacy_after_agent_hook: after_agent hook failed; continuing turn_id=01a170e3-538f-7833-be36-71ab19fb6d81 hook_name=legacy_notify error=파일 이름이나 확장명이 너무 깁니다. (os error 206)"
+  },
+  {
+    "ts": 1792895235,
+    "level": "WARN",
+    "target": "codex_core::hook_runtime",
+    "message": "session_loop{thread_id=01a14887-a973-7e11-a141-168cb9c993c1}:submission_dispatch{otel.name=\"op.dispatch.turn_input\" submission.id=\"01a170e1-444e-7472-a8f3-99cbca4f4f93\" codex.op=\"turn_input\"}:codex.turn_input{conversation.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=\"01a170e1-444e-7472-a8f3-99cbca4f4f93\"}:turn{otel.name=\"session_task.turn\" thread.id=01a14887-a973-7e11-a141-168cb9c993c1 turn.id=01a170e1-444e-7472-a8f3-99cbca4f4f93 model=gpt-6-astra codex.turn.reasoning_effort=medium}:session_task.run:run_turn:run_legacy_after_agent_hook: after_agent hook failed; continuing turn_id=01a170e1-444e-7472-a8f3-99cbca4f4f93 hook_name=legacy_notify error=파일 이름이나 확장명이 너무 깁니다. (os error 206)"
+  }
+]

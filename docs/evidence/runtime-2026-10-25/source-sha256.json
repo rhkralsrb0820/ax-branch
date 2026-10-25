@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-25T04:08:43.119Z",
+  "files": {
+    "axbranch/actions.py": "1da214e7d1ed4beac924e1560ff57fae01b97b5f25f1a3349326c189484575da",
+    "axbranch/web.py": "77c79af038be85d836ac4b6dee1232f60668feea17d61702b3e0b4f205db69b5",
+    "axbranch/webui/app.js": "e662ff82a9e57c7f706c0056675909bed63e39d00d979dfbebd8b868ff6413d2",
+    "tests/test_web.py": "7a542da5f6cf6ba68fa5a49b7bb1e01ea882f77ce8b2a0365c9b8a405f66e1b4",
+    "tests/test_submission_rejection_node.js": "91abd77032ad8e3a8f8d6f53c56e9bbc3d64eb91492343b29c0b824df8ab44fc",
+    "tests/browser_web_regressions.js": "0cc63c7b29460b9e9c5b5086f450ee7bcf73893b252d8701476470f4bf131257"
+  }
+}
