@@ -182,10 +182,83 @@ def run(root):
     return report
 
 
+# Compact design (Owner option c, 2026-10-26): developer-designed fixed tasks (NOT autonomous CEO opportunity
+# discovery), one concise proposal each, same contracts and verification. Per-call costs are MEASURED reported
+# tokens (input + output + cache creation + cache read) from attempt 1 (outputs/product-ab-786834f) - not guesses.
+COMPACT_TASKS = {
+    'A': {'catalog_id': 'tutor', 'goal': ('Write ONE concise product proposal (brief sections) for the supplied fictional solo '
+          'tutor data: one customer/problem, one alternative, one value hypothesis, three compact cost scenarios '
+          '(downside/base/upside), one MVP and one measurable next experiment. Willingness to pay and revenue stay '
+          'UNKNOWN. Use only the attached synthetic data; no software, web research, contact or training.')},
+    'B': {'catalog_id': 'repair', 'goal': ('Write ONE concise product proposal (brief sections) for the supplied fictional small '
+          'repair shop data: one customer/problem, one alternative, one value hypothesis, three compact cost scenarios '
+          '(downside/base/upside), one MVP and one measurable next experiment. Willingness to pay and revenue stay '
+          'UNKNOWN. Use only the attached synthetic data; no software, web research, contact or training.')},
+}
+MEASURED_CALL_TOKENS = {   # (min, max) observed in attempt 1, P-20261026-a47117 / a16736
+    'ceo': (10276, 14522), 'worker': (7049, 12959), 'worker_edit': (17434, 17434), 'verify': (15504, 20080),
+}
+EXPERIENCE_CONTEXT_TOKENS = 3000      # <= 6,000 characters of experience cards
+EVALUATION_TOKENS = (15504, 20080)    # an independent call of verification size, charged to the B project
+
+
+def compact_estimate():
+    """Per-project reported-token estimate of the compact design from measured per-call costs (no model call)."""
+    m = MEASURED_CALL_TOKENS
+    base = [m['ceo'], m['worker'], m['verify'], m['ceo']]                      # plan, proposal, verify, acceptance
+    revision = [m['ceo'], m['worker_edit'], m['verify'], m['ceo']]             # diagnosis, edit, verify, acceptance
+    total = lambda calls, extra=(0, 0): (sum(c[0] for c in calls) + extra[0], sum(c[1] for c in calls) + extra[1])
+    return {'A (with one textual revision)': total(base + revision),
+            'B-control (+ independent evaluation)': total(base, EVALUATION_TOKENS),
+            'B-experience (+ experience context, evaluation)': total(base, (EVALUATION_TOKENS[0] + EXPERIENCE_CONTEXT_TOKENS,
+                                                                           EVALUATION_TOKENS[1] + EXPERIENCE_CONTEXT_TOKENS))}
+
+
+def run_compact(root):
+    """Pre-register, then start ONLY if every project credibly fits the unchanged per-project budget."""
+    root = Path(root).resolve()
+    if root.exists():
+        raise Rejected('Use a NEW root; existing databases and artifacts are never modified by this experiment.')
+    root.mkdir(parents=True)
+    specs, _ = departments.catalog()
+    estimate = compact_estimate()
+    cap = BUDGET['max_reported_tokens']
+    infeasible = {k: v for k, v in estimate.items() if v[0] > cap}
+    revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
+    prereg = {'design': 'compact (Owner option c, 2026-10-26)', 'tasks': COMPACT_TASKS,
+              'task_origin': 'developer-designed evaluation input; NOT autonomous CEO opportunity discovery',
+              'inputs': {k: {'catalog_id': t['catalog_id'], 'sha256': digest(next(d for d in DATA if d['id'] == t['catalog_id']))}
+                         for k, t in COMPACT_TASKS.items()},
+              'department_specs': {dep: departments.spec_digest(specs[dep]) for dep in ('research', 'operations', 'product-planning')},
+              'rubric': kindex.PRODUCT_RUBRIC, 'rubric_sha256': kindex.product_rubric_hash(),
+              'acceptance': specs['product-planning']['acceptance_criteria'], 'budget_per_project': BUDGET,
+              'experience_policy': {'treatment': 'B-experience only', 'source_projects': ['<A project id>'],
+                                    'before': '<time A finished>', 'excluded': 'B-control outputs, evaluator judgments'},
+              'planned_interventions': ['A: one Owner-delegated textual revision (add a heading, keep content)'],
+              'stop_conditions': ['first budget exhaustion', 'first substantive failure (no PASS, invalid evaluation)',
+                                  'no automatic rerun'],
+              'estimate_reported_tokens_per_project': estimate,
+              'estimate_method': 'sum of MEASURED per-call reported tokens (attempt 1), min..max; in-flight calls may exceed',
+              'source_revision': revision.stdout.strip() if revision.returncode == 0 else 'UNKNOWN'}
+    (root / 'PRE_REGISTERED.json').write_text(json.dumps(prereg, ensure_ascii=False, indent=1), encoding='utf-8')
+    if infeasible:
+        report = {'status': 'NOT_STARTED_INFEASIBLE', 'model_calls': 0, 'cap_per_project': cap, 'infeasible': infeasible,
+                  'reason': 'even the MINIMUM measured cost of these projects exceeds the unchanged per-project cap',
+                  'quality_improvement': 'UNPROVEN'}
+        (root / 'REPORT.json').write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding='utf-8')
+        return report
+    raise Rejected('Compact design fits; execution path to be enabled only after Owner review of the estimate.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True)
+    parser.add_argument('--design', choices=('original', 'compact'), default='original')
     args = parser.parse_args()
+    if args.design == 'compact':
+        result = run_compact(args.root)
+        print(json.dumps(result, ensure_ascii=False, indent=1))
+        return 0
     result = run(args.root)
     print(json.dumps({k: result.get(k) for k in ('passed', 'error', 'root', 'quality_improvement')}, ensure_ascii=False))
     return 0 if result['passed'] else 1

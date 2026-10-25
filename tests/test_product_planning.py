@@ -195,6 +195,22 @@ class ProductPlanningTests(unittest.TestCase):
         self.assertEqual(card['verification_level'], knowledge.verification_level(v))
         self.assertNotEqual(card['verification_level'], 'INDEPENDENT_PASS')
 
+    def test_compact_design_preregisters_and_refuses_to_start_when_it_cannot_fit(self):
+        from axbranch import product_experiment as X
+        est = X.compact_estimate()
+        self.assertEqual(est['A (with one textual revision)'][0], 10276 + 7049 + 15504 + 10276 + 10276 + 17434 + 15504 + 10276)
+        root = self.tmp / 'compact'
+        report = X.run_compact(root)                                   # no provider is touched on this path
+        self.assertEqual((report['status'], report['model_calls']), ('NOT_STARTED_INFEASIBLE', 0))
+        prereg = json.loads((root / 'PRE_REGISTERED.json').read_text(encoding='utf-8'))
+        for key in ('tasks', 'task_origin', 'inputs', 'department_specs', 'rubric_sha256', 'acceptance', 'budget_per_project',
+                    'experience_policy', 'planned_interventions', 'stop_conditions', 'estimate_reported_tokens_per_project'):
+            self.assertIn(key, prereg)
+        self.assertIn('NOT autonomous CEO', prereg['task_origin'])
+        self.assertEqual(prereg['budget_per_project']['max_reported_tokens'], 60000)   # the cap is unchanged
+        with self.assertRaises(Rejected):
+            X.run_compact(root)                                        # never reuses or overwrites a root
+
     def test_comparison_rejects_leakage_and_never_promotes_small_sample(self):
         control = {'execution_mode': 'subscription_cli', 'artifact_sha256': 'a' * 64, 'verification_ref': 'V-fixture',
                    'task_sha256': 'b' * 64, 'input_sha256': 'c' * 64, 'department_specs': {'product': 'fixed'},
