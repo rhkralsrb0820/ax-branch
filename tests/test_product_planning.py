@@ -172,6 +172,29 @@ class ProductPlanningTests(unittest.TestCase):
         self.assertEqual(second, [])
         self.assertEqual(len(self.store.events(pid, {'department_experience'})), len(first))
 
+    def test_experience_level_comes_from_recorded_provenance_not_the_verdict(self):
+        ok = {'verdict': 'PASS', 'checks': {'ok': True}}
+        prov = lambda producer, verifier, source='recorded': {**ok, 'checks': {'ok': True, 'verifier_provenance': {
+            'producer': producer, 'verifier': verifier, 'producer_source': source}}}
+        self.assertEqual(knowledge.verification_level(prov('claude', 'codex')), 'CROSS_PROVIDER_PASS')
+        self.assertEqual(knowledge.verification_level(prov('claude', 'claude')), 'SAME_PROVIDER_ROLE_SEPARATED_PASS')
+        self.assertEqual(knowledge.verification_level(ok), 'PASS_PROVENANCE_UNKNOWN')            # older record
+        self.assertEqual(knowledge.verification_level(prov('claude', 'codex', 'configured fallback')),
+                         'PASS_PROVENANCE_UNKNOWN')                                              # producer not recorded
+        self.assertIsNone(knowledge.verification_level({'verdict': 'FAIL', 'checks': {'ok': False}}))
+        # Through the engine: the verification stores provenance and the card carries it.
+        script = DepartmentScript()
+        pid = self.store.new_project('provenance fixture')
+        for dep in ('research', 'operations'):
+            D.attach(self.store, pid, dep, self.specs)
+        eng = E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x', llm=script)
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        v = self.store.verifications(pid)[-1]
+        self.assertEqual(set(v['checks']['verifier_provenance']), {'producer', 'verifier', 'producer_source'})
+        card = self.store.events(pid, {'department_experience'})[-1]['detail']
+        self.assertEqual(card['verification_level'], knowledge.verification_level(v))
+        self.assertNotEqual(card['verification_level'], 'INDEPENDENT_PASS')
+
     def test_comparison_rejects_leakage_and_never_promotes_small_sample(self):
         control = {'execution_mode': 'subscription_cli', 'artifact_sha256': 'a' * 64, 'verification_ref': 'V-fixture',
                    'task_sha256': 'b' * 64, 'input_sha256': 'c' * 64, 'department_specs': {'product': 'fixed'},

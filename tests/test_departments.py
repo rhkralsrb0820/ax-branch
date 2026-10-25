@@ -410,19 +410,48 @@ class DepartmentTests(unittest.TestCase):
         self.assertEqual(checks[0]['problems'], [f"다른 프로젝트 참조: ['{other}']"])     # only the real other project
         self.assertFalse(any(s_ is E.BUILD for s_, _ in script.contexts))            # nothing handed on
 
-    def test_a_rework_plan_that_only_edits_gets_the_evidence_it_was_built_from(self):
-        # E2E P-20261026-53b987: the Owner's text request re-planned to ONE operations stage; the verifier saw no
-        # stage results and judged "cites the earlier stage" unverifiable. It must see plan v1's recorded results.
-        script = DepartmentScript()
+    def _edit_only_rework(self, edited=True):
+        """A finished v1 (PASS) and a v2 plan with ONE final stage, as an Owner text request produced in E2E
+        P-20261026-53b987. Returns (engine, pid, plan v2, the v2 artifact under verification)."""
+        import time as _t
+        eng = self.engine(DepartmentScript())
         pid = self.project('research', 'operations')
-        eng = self.engine(script)
         self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
         p = self.store.project(pid)
         plan = dict(p['plan'], pipeline=[dict(p['plan']['pipeline'][-1], instructions='add one heading line')])
         self.store.update(pid, plan=plan, plan_version=p['plan_version'] + 1)
-        results = eng._recorded_stage_results(pid, plan)
+        if edited:
+            self.store.event(pid, 'edits_applied', count=1, base_version=1)
+        return eng, pid, plan, {'id': 'F-v2', 'iteration': 2, 'created': _t.time() + 1}
+
+    def test_a_text_edit_of_a_verified_version_gets_the_evidence_it_was_built_from(self):
+        eng, pid, plan, art = self._edit_only_rework()
+        results = eng._recorded_stage_results(pid, plan, art)
         self.assertEqual([(r['stage'], r['department'], r['plan_version']) for r in results], [('analyse', 'research', 1)])
         self.assertEqual(results[0]['evidence'], ['inputs row 3'])
+        self.assertIn('edit lineage: v1 (PASS)', results[0]['basis'])
+        self.assertEqual(self.store.events(pid, {'stage_evidence_lineage'})[-1]['detail']['status'], 'used')
+
+    def test_historical_notes_are_never_current_evidence_without_valid_lineage(self):
+        cases = {
+            'rebuilt': lambda eng, pid, plan: None,
+            'inputs changed': lambda eng, pid, plan: self.store.event(pid, 'owner_inputs', files=[]),
+            'department detached': lambda eng, pid, plan: D.detach(self.store, pid, 'research'),
+            'history discarded': lambda eng, pid, plan: self.store.event(
+                pid, 'stage_discarded', stage='analyse', from_plan_version=1, plan_version=2, why='fixture'),
+            'criteria changed': lambda eng, pid, plan: plan.update(acceptance_criteria=['a different requirement']),
+        }
+        expected = {'rebuilt': 'rebuilt, not edited', 'inputs changed': 'inputs changed',
+                    'department detached': 'no longer attached', 'history discarded': 'was discarded',
+                    'criteria changed': 'criteria changed'}
+        for name, change in cases.items():
+            with self.subTest(name):
+                eng, pid, plan, art = self._edit_only_rework(edited=name != 'rebuilt')
+                change(eng, pid, plan)
+                self.assertEqual(eng._recorded_stage_results(pid, plan, art), [])          # fail closed
+                why = self.store.events(pid, {'stage_evidence_lineage'})[-1]['detail']
+                self.assertEqual(why['status'], 'none')
+                self.assertIn(expected[name], why['why'])
 
 if __name__ == '__main__':
     unittest.main()

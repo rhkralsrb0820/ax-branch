@@ -973,33 +973,80 @@ class Engine:
         used = dict.fromkeys(st.get('department') for st in plan.get('pipeline', []) if st.get('department') in specs)
         return [{'department': d, 'criterion': c} for d in used for c in specs[d]['acceptance_criteria']]
 
-    def _recorded_stage_results(self, pid, plan, limit=6000):
-        """The current plan's recorded notes-stage results, so department criteria about earlier stages can be judged
-        (E2E P-20261025-9f78e5: without them they were 'unverifiable' by construction)."""
+    def _recorded_stage_results(self, pid, plan, artifact=None, limit=6000):
+        """Recorded notes-stage results the department criteria may be judged against: the current plan's, or - only
+        for a deliverable EDITED from a verified version - that version's, when their lineage and validity can be
+        established (_edit_lineage). Otherwise nothing: historical notes never silently count as current evidence."""
         pv, out = self.store.project(pid)['plan_version'], []
-        row = lambda o, name, dep, version: {
-            'stage': name, 'department': dep, 'plan_version': version, 'output': str(o.get('output', ''))[:limit],
-            'key_points': o.get('key_points', [])[:20], 'evidence': o.get('evidence', [])[:30],
-            'counterpoints': o.get('counterpoints', [])[:10]}
         for idx, stage in enumerate(plan.get('pipeline', [])[:-1]):
             done = self.store.output(pid, idx, pv)
             if done:
-                out.append(row(done['output'], stage['name'], stage.get('department') or '', pv))
+                out.append(self._stage_row(done['output'], stage['name'], stage.get('department') or '', pv, limit))
         if out or len(plan.get('pipeline', [])) > 1:
             return out
-        # A rework plan that only edits the deliverable (E2E P-20261026-53b987: the Owner's text request re-planned to
-        # one operations stage): the evidence the artifact was built from is the latest earlier plan version's stages.
-        for earlier in range(pv - 1, 0, -1):
-            staffed = [e['detail'] for e in self.store.events(pid, {'department_delegation', 'temporary_agent'})
-                       if e['detail'].get('plan_version') == earlier]
-            first = min((d.get('iteration', 0) for d in staffed), default=0)   # one staffing pass = pipeline order
-            names = [d for d in staffed if d.get('iteration', 0) == first][:-1]   # the last stage is the deliverable
-            found = [(i, self.store.output(pid, i, earlier)) for i in range(len(names))]
-            found = [(i, d) for i, d in found if d]
-            if found:
-                return [row(d['output'], names[i].get('stage', f'stage {i}'), names[i].get('department', ''), earlier)
-                        for i, d in found]
-        return out
+        rows, why = self._edit_lineage(pid, plan, artifact, limit)
+        self.store.event(pid, 'stage_evidence_lineage', artifact=(artifact or {}).get('id'),
+                         status='used' if rows else 'none', why=why, stages=[r['stage'] for r in rows])
+        return rows
+
+    @staticmethod
+    def _stage_row(o, name, dep, version, limit, basis=None):
+        row = {'stage': name, 'department': dep, 'plan_version': version, 'output': str(o.get('output', ''))[:limit],
+               'key_points': o.get('key_points', [])[:20], 'evidence': o.get('evidence', [])[:30],
+               'counterpoints': o.get('counterpoints', [])[:10]}
+        return {**row, 'basis': basis} if basis else row
+
+    def _edit_lineage(self, pid, plan, artifact, limit):
+        """(rows, why). E2E P-20261026-53b987: an Owner text request re-planned to one stage that edits the verified
+        memo, so its supporting evidence is the stages that memo was built from. Fail closed on any doubt."""
+        if not artifact:
+            return [], 'no artifact under verification'
+        arts = self.store.artifacts(pid)
+        prior = [a for a in arts if a['created'] < artifact['created']]
+        since = prior[-1]['created'] if prior else 0
+        edits = [e['detail'] for e in self.store.events(pid, {'edits_applied'}) if since <= e['at'] <= artifact['created']]
+        if not edits:
+            return [], 'the deliverable was rebuilt, not edited from a verified version: no lineage'
+        base_it = edits[-1].get('base_version')
+        base = next((a for a in reversed(prior) if a['iteration'] == base_it), None)
+        base_pass = base and next((v for v in self.store.verifications(pid)
+                                   if v['artifact_id'] == base['id'] and v['verdict'] == 'PASS'), None)
+        if not base_pass:
+            return [], f'edited base v{base_it} has no recorded PASS'
+        staffed = [e for e in self.store.events(pid, {'department_delegation', 'temporary_agent'})
+                   if e['detail'].get('iteration') == base_it and e['at'] <= base['created']]
+        base_pv = staffed[0]['detail'].get('plan_version') if staffed else None
+        stages = [e['detail'] for e in staffed if e['detail'].get('plan_version') == base_pv][:-1]
+        if base_pv is None or not stages:
+            return [], f'no recorded notes stages for the plan that built v{base_it}'
+        if any(e['at'] > base['created'] for e in self.store.events(pid, {'owner_inputs'})):
+            return [], 'inputs changed after the evidence was produced'
+        old = {c.get('criterion') for c in (base_pass['result'] or {}).get('criteria', [])}
+        if not old <= set(plan.get('acceptance_criteria', [])):
+            return [], 'approved criteria changed since the evidence was produced'
+        try:
+            specs = self._attached_departments(pid)
+        except Rejected as e:
+            return [], f'department scope cannot be confirmed: {e}'
+        used = {(e['detail'].get('stage'), e['detail'].get('plan_version')): e['detail'].get('spec_sha256')
+                for e in self.store.events(pid, {'department_version_used'})}
+        discarded = {(e['detail'].get('stage'), e['detail'].get('from_plan_version'))
+                     for e in self.store.events(pid, {'stage_discarded'})}
+        rows = []
+        for idx, d in enumerate(stages):
+            name, dep = d.get('stage', f'stage {idx}'), d.get('department', '')
+            if (name, base_pv) in discarded:
+                return [], f'stage {name!r} of plan v{base_pv} was discarded'
+            if dep and dep not in specs:
+                return [], f'department {dep!r} is no longer attached'
+            if dep and used.get((name, base_pv)) not in (None, departments.spec_digest(specs[dep])):
+                return [], f'department {dep!r} specification changed since the evidence was produced'
+            done = self.store.output(pid, idx, base_pv)
+            if not done:
+                return [], f'stage {name!r} of plan v{base_pv} has no recorded result'
+            rows.append(self._stage_row(done['output'], name, dep, base_pv, limit,
+                                        basis=f'edit lineage: v{base_it} (PASS) edited into v{artifact["iteration"]}'))
+        return rows, f'edit lineage v{base_it} -> v{artifact["iteration"]} with unchanged inputs, criteria and departments'
 
     def _department_gate(self, pid, p, expected, result):
         """Each department criterion must be judged 'met' by the verifier: unmet, unverifiable, a conflict or no
@@ -1572,7 +1619,7 @@ class Engine:
         if dept_criteria:
             context['department_acceptance'] = {
                 'criteria': dept_criteria,
-                'stage_results': self._recorded_stage_results(pid, plan),
+                'stage_results': self._recorded_stage_results(pid, plan, artifact),
                 'rule': ('Judge EACH department criterion separately from the approved project criteria, in '
                          'department_criteria: met / unmet / unverifiable / conflict (it contradicts an approved '
                          'project criterion; say which) with evidence from the artifact or stage_results (the recorded '
@@ -1652,6 +1699,9 @@ class Engine:
         review_steps = failed_steps if not is_product and step_kinds <= {'harness', 'ambiguous'} else unexecutable
         review_needed = (bool(review_steps) and not any(e['detail'].get('artifact') == artifact['id']
                                                         for e in self.store.events(pid, {'probe_review_pending'})))
+        # Who produced and who verified, as recorded - never inferred from the verdict (Codex review P2, 2026-10-26).
+        checks['verifier_provenance'] = {'producer': producer, 'producer_source': 'configured fallback' if fallback else 'recorded',
+                                         'verifier': used}
         with self.store.tx():
             vid = self.store.add_verification(pid, artifact['id'], p['iteration'], 'PASS' if passed else 'FAIL',
                                               result, checks, used)

@@ -162,7 +162,7 @@ def _slug(text, n=50):
 
 # Department experience is a projection into the EXISTING event store, never a second knowledge database.
 # Free text (goals, feedback, source content, decisions, provider errors) stays at its original reference.
-EXPERIENCE_VERSION = 1
+EXPERIENCE_VERSION = 2   # 2: verification level from recorded producer/verifier provenance
 EXPERIENCE_DAYS = 180
 TOKEN_FIELDS = ('input_tokens', 'output_tokens', 'cached_input_tokens', 'cache_creation_input_tokens',
                 'cache_read_input_tokens', 'reasoning_output_tokens')
@@ -202,6 +202,18 @@ def reported_tokens(events):
         if str(u.get('source', '')).lower().startswith('claude'):
             total += sum(u.get(k) or 0 for k in ('cache_creation_input_tokens', 'cache_read_input_tokens'))
     return total
+
+
+def verification_level(v):
+    """A PASS's independence as RECORDED: a different provider than the producer, the same provider in a separate
+    verification role (fallback), or unknown provenance (older records, unrecorded producer). None if not a PASS."""
+    if not v or v.get('verdict') != 'PASS' or not (v.get('checks') or {}).get('ok'):
+        return None
+    prov = (v.get('checks') or {}).get('verifier_provenance') or {}
+    producer, verifier = prov.get('producer'), prov.get('verifier')
+    if not producer or not verifier or prov.get('producer_source') != 'recorded':
+        return 'PASS_PROVENANCE_UNKNOWN'
+    return 'CROSS_PROVIDER_PASS' if producer != verifier else 'SAME_PROVIDER_ROLE_SEPARATED_PASS'
 
 
 def record_department_experience(store, pid):
@@ -256,8 +268,8 @@ def record_department_experience(store, pid):
                  'department_version': version, 'iteration': iteration, 'recorded_at': at, 'outcome': outcome,
                  'department_spec_sha256': spec_hash,
                  'execution_mode': mode, 'verification': subject,
-                 'verification_level': ('INDEPENDENT_PASS' if v and v['verdict'] == 'PASS' and v['checks'].get('ok')
-                                        else 'FAIL' if outcome == 'FAIL' else 'UNVERIFIED'),
+                 'verification_level': verification_level(v) or ('FAIL' if outcome == 'FAIL' else 'UNVERIFIED'),
+                 'verification_provenance': (v['checks'].get('verifier_provenance') if v else None) or 'UNKNOWN',
                  'goal': {'ref': f'project:{pid}#goal', 'sha256': hashlib.sha256(p['goal'].encode()).hexdigest()},
                  'conditions': {'artifact_kind': artifact['kind'] if artifact else 'UNKNOWN',
                                 'source_inputs': [e['id'] for e in relevant if e['kind'] == 'owner_inputs'][-10:],
