@@ -1,4 +1,81 @@
-## START HERE — 실행 환경 진단 checkpoint (2026-10-25 13:09 KST)
+## START HERE — Desktop takeover (2026-10-25 evening KST)
+
+## START HERE — Claude takeover round, 2026-10-26 02:22 KST (review checkpoint; NOT a usage-limit stop)
+**Claude usage at checkpoint.** 5-hour window 36% remaining (resets ~05:00 KST); 7-day window 91% remaining.
+
+**Git.** Branch `dev/web-ui`, HEAD = the commit containing this section (code e62d440). Not merged into main; not
+pushed in this round.
+- Commits this round:
+  - 180dd64 — Codex's preserved product-planning / experience work, unchanged;
+  - b7e96f0 — test_orb Tcl lifecycle fix, restart test, harness proposal;
+  - 3a7f432 — 0.1.62 version and changelog;
+  - e62d440 — rework-plan stage-results fix.
+- Before this section is committed, the only uncommitted change is Codex's own desktop START HERE edit to this
+  file. It is preserved below as-is.
+
+**Completed with evidence:**
+- Corrected Codex's "full regression running / browser pending". The log has no summary and ends in a
+  `Tcl_AsyncDelete` abort, so it is NOT a pass.
+- Root cause: `test_orb` Tk roots collected on another test's thread (test lifecycle). Fixed.
+  - Full single-process suite on b7e96f0: 457 run, 455 passed, 2 failed (known headless-Edge 90 s timeouts in
+    unchanged browser tests).
+  - Log `outputs/0.1.40-evidence/FULL-b7e96f0-single-process.log`, hashes `tested-code-b7e96f0.sha256`.
+- Targeted:
+  - product_planning, departments, web, inputs: 46/46;
+  - new restart test (budget kept, experience not duplicated);
+  - on e62d440: departments, product_planning, engine, web: 134/134;
+  - Node UI fixtures 4/4; JS syntax OK.
+- **Real web text-rework E2E** (`docs/evidence/2026-10-26-web-text-rework-e2e.md`):
+  - run 1 (build 3a7f432) found an engine defect: an edit-only rework plan gave the verifier no stage results.
+    Fixed in e62d440;
+  - run 2 (build 0.1.62-e62d440) passed every page check: goal + file + departments → PASS → result → text
+    request on the SAME project → REWORK → PASS → revised result containing the requested heading. 10 calls,
+    537 s, output 60,363 tokens;
+  - **verification was NOT engine-independent**: Codex usage limit, so Claude fell back (recorded);
+  - the harness process was reaped for memory pressure; the run completed in the page and its record was
+    collected from the isolated DB.
+- **Edge stall localized:** after page load (requests at 1.6–2.3 s), the browser never exits the virtual-time
+  dump. Root cause unknown.
+- **Department Harness proposal** (design only): `docs/DEPARTMENT_HARNESS_PROPOSAL.md`.
+  - External source anthropics/knowledge-work-plugins @ 33d3dea, Apache-2.0; partner packages MIT/Apache.
+  - **STOP for Owner review**: nothing of H1–H4 is implemented.
+
+**Blocked / not run:**
+- **Product A/B comparison** (`python -m axbranch.product_experiment --root <NEW dir>`). Codex CLI: "You've hit
+  your usage limit … try again at 5:41 AM", so no independent evaluator is possible. Nothing was started; no
+  partial experiment exists.
+- Missing source: the "AX BRANCH IN-PLACE EVOLUTION DIRECTIVE" text (20 areas) is not in either attachment, the
+  repository or the shared folder.
+
+**Builds** (preserved, BUILD.json each; NOT serving):
+- `demo-2026-11/builds/0.1.62-3a7f432` (5ddad583…);
+- `demo-2026-11/builds/0.1.62-e62d440` (d619d7ef…).
+
+The Owner's server is unchanged: `builds/0.1.61-67d9095`, http://127.0.0.1:8765/.
+
+**Running processes:** only the Owner's web server (PID 54292), safe to leave. All E2E test processes were
+stopped.
+
+**Next, in order:**
+1. After Codex recovers, run the A/B comparison once (new root), recording calls, tokens, retries, interventions
+   and independence.
+2. Owner decision on `DEPARTMENT_HARNESS_PROPOSAL.md` (H1 → H2 …).
+3. Persist the provider's unavailability reason in call events.
+4. Investigate the Edge cause.
+
+Do not switch the serving build without Owner authorization.
+
+
+- Owner authorized Codex desktop to continue development before handing back to Claude after 22:00. Do not assume the older CLI is still developing: its latest turn ended at the usage limit. Preserve the inherited product-planning changes.
+- Base `dev/web-ui` / `5f70f97`; this continuation is not a release or main merge. Serving web build and user databases are unchanged.
+- Python works here with scoped approved execution. The earlier CLI denial and legacy hook failure are NOT shown to be repaired globally. Do not repeat the same environment investigation in this working session.
+- Read `docs/evidence/2026-10-25-product-takeover.md` for exact validation results and remaining work, and `docs/IN_PLACE_EVOLUTION_REVIEW.md` for the 20-area directive mapping.
+- Preserved implementation: product-planning department, pinned department snapshots, scoped experience cards and UI, experimental budgets and comparison driver. Added malformed scenario-name validation fix and regression test.
+- Validation is in progress. Do not start a concurrent test, model run or edit until this turn's final checkpoint is recorded.
+- Next order: finish regression and isolated headless web validation; then preserved build and bounded real text-rework/product experiment. Do not call structured experience retrieval proven quality improvement. Do not start LoRA, a replacement CEO or a second engine.
+- Owner will manually relay the handoff to Claude. No direct CLI delivery or acceptance is claimed.
+
+## Historical checkpoint — 실행 환경 진단 (2026-10-25 13:09 KST)
 - `dev/web-ui`, 수정 코드 `b1275d9`. 이번 시작 기준 `8a5530d`, clean 확인. 새 기능 중단.
 - 최신 공유 리뷰의 생성 전 제출 거절 후 수정 불가 문제 수정. 확정된 생성 전 거절만 ID 해제; 응답 유실/부분 생성의 중복 방지는 유지. 프로젝트와 접수 ID는 한 트랜잭션으로 저장.
 - 이번 코드 Node DOM 45/45 및 JS 구문 통과. Python API 회귀 추가했으나 실행 경로 접근 거부로 미실행.
