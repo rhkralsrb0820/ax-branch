@@ -20,7 +20,7 @@
     <section class="dcard"><h2>2. 지금 무엇을 하고 있나</h2>${cw && cw.state === '개발 중'
       ? `<p class="lead"><b>${esc(cw.title)}</b></p><p>왜: ${esc(cw.why)}</p><p>끝나면: ${esc(cw.after)}</p><div class="meta">${esc(cw.basis)}</div>`
       : '<p class="lead">개발 대기 — 진행 중으로 보고된 작업이 없습니다.</p>'}</section>
-    <section class="dcard top"><h2>3. 다음에 무엇을 고쳐야 하나</h2>${top ? `
+    <section class="dcard recommendation"><h2>3. 다음에 무엇을 고쳐야 하나</h2>${top ? `
       <div class="badge">${src(top)}</div><p class="lead"><b>${esc(top.title)}</b></p>
       <p><b>왜 먼저:</b> ${esc(top.why)}</p><p><b>나아지는 점:</b> ${esc(top.improves)}</p><p><b>완료 기준:</b> ${esc(top.done_when)}</p>
       <p><b>비용·권한 승인:</b> ${esc(top.approval)}</p>

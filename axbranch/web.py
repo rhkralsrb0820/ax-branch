@@ -61,6 +61,9 @@ class App:
     def overview(self, store):
         statuses, rows = {}, []
         for p in store.projects():
+            # The summary rows omit plan, including the CEO's saved display title.
+            # Use the same full record as the project page; never rewrite the original goal.
+            p = store.project(p['id'])
             rec = supervisor.status(self.workspace, store, p['id'])
             statuses[p['id']] = rec['status']
             reason = store.project(p['id'])['pause_reason'] if p['state'] == 'PAUSED' else None

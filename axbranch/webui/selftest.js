@@ -60,6 +60,19 @@
       await report('attachment restored after reload', p.attached.map(d => d.id).join() === 'operations', JSON.stringify(p.attached));
       window.AXB.show('devroom');
       await until(() => document.getElementById('copyTop'));
+      const card = document.getElementById('copyTop').closest('.dcard');
+      for (const width of [320, 720, 1100]) {
+        card.style.width = width + 'px';
+        const heading = card.querySelector('h2').getBoundingClientRect();
+        const badge = card.querySelector('.badge').getBoundingClientRect();
+        const lead = card.querySelector('.lead').getBoundingClientRect();
+        const button = document.getElementById('copyTop').getBoundingClientRect();
+        await report('recommendation readable at width ' + width,
+          badge.top >= heading.bottom && lead.top >= badge.bottom &&
+          button.width >= 150 && button.top > lead.bottom && card.scrollWidth <= card.clientWidth,
+          JSON.stringify({heading, badge, lead, button}));
+      }
+      card.style.width = '';
       const dv = document.getElementById('view-devroom').textContent;
       await report('devroom first screen answers the four questions', /지금 어디까지 됐나/.test(dv) && /지금 무엇을 하고 있나/.test(dv) && /다음에 무엇을 고쳐야 하나/.test(dv) && /내가 지금 해야 할 일/.test(dv));
       await window.AXDev.setTab('notes'); await until(() => document.getElementById('noteText'));

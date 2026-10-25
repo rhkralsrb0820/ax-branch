@@ -69,6 +69,22 @@ class WebTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn(self.app.token.encode(), page)                                          # only our own page has it
 
+    def test_sidebar_uses_saved_title_without_rewriting_original_goal(self):
+        broken_goal = '泥⑤???寃 검증?? CSV'
+        store = self.app.store()
+        try:
+            pid = store.new_project(broken_goal)
+            store.update(pid, plan={'title': '검증 실패 원인 메모'})
+            before = store.project(pid)
+            _, overview = self.call('/api/overview')
+            row = next(p for p in overview['projects'] if p['id'] == pid)
+            self.assertEqual(row['title'], '검증 실패 원인 메모')
+            self.assertEqual(store.project(pid), before)
+            self.assertEqual(row['goal'], broken_goal)
+            self.assertEqual(self.launched, [])
+        finally:
+            store.close()
+
     def test_create_is_idempotent_and_launches_once(self):
         body = {'goal': '팀별 문의 집계', 'departments': ['research'], 'request_id': 'req-0001-abcd'}
         code, first = self.call('/api/projects', body)
