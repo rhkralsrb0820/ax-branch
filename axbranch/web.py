@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import WORKSPACE, __version__, actions, departments, home, live, supervisor
+from . import WORKSPACE, __version__, actions, departments, home, knowledge, live, supervisor
 from .state import Rejected, Store
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
@@ -99,7 +99,9 @@ class App:
                                    'created': v['created']} for v in store.verifications(pid)],
                 'contract': [e['detail'] for e in store.events(pid, {'department_contract'})][-10:],
                 'acceptance': ([e['detail'] for e in store.events(pid, {'department_acceptance'})] or [{}])[-1],
-                'conflicts': [e['detail'] for e in store.events(pid, {'criteria_conflict'})][-5:]}
+                'conflicts': [e['detail'] for e in store.events(pid, {'criteria_conflict'})][-5:],
+                'document_contract': [e['detail'] for e in store.events(pid, {'department_document_contract'})][-10:],
+                'experience': knowledge.experience_view(store, pid)}
 
     def settings(self):
         try:
@@ -378,7 +380,8 @@ def project_action(app, store, pid, action, body, channel):
     if action == 'review':
         works = {'yes': True, 'no': False}.get(body.get('works'))
         _, needs = actions.review(app.engine_factory, pid, works, str(body.get('text', ''))[:8000],
-                                  bool(body.get('finish')), channel)
+                                  bool(body.get('finish')), channel,
+                                  actor='owner_delegated_test' if app.test_mode else 'owner')
         if needs:
             actions.launch(app.workspace, store, pid, app.launcher)
         return {'ok': True}

@@ -1,0 +1,47 @@
+{
+  "runner": "Node DOM fixture only",
+  "passed": 10,
+  "total": 10,
+  "checks": [
+    {
+      "name": "confirmed pre-creation rejection clears only pending ID",
+      "ok": true
+    },
+    {
+      "name": "rejection retains editable goal and explains correction",
+      "ok": true
+    },
+    {
+      "name": "corrected attachment and department create exactly once with new ID",
+      "ok": true
+    },
+    {
+      "name": "lost rejection response stays uncertain after reload",
+      "ok": true
+    },
+    {
+      "name": "explicit retry obtains confirmed rejection before unlocking edits",
+      "ok": true
+    },
+    {
+      "name": "generic cannot clear uncertain receipt",
+      "ok": true
+    },
+    {
+      "name": "wrong-id cannot clear uncertain receipt",
+      "ok": true
+    },
+    {
+      "name": "server-error cannot clear uncertain receipt",
+      "ok": true
+    },
+    {
+      "name": "partial creation preserves receipt instead of allowing new goal",
+      "ok": true
+    },
+    {
+      "name": "partial creation reload recovers same project without POST or launch",
+      "ok": true
+    }
+  ]
+}

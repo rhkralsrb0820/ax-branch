@@ -77,7 +77,7 @@ class DepartmentTests(unittest.TestCase):
         self.assertEqual(sorted(refused), ['broken', 'mismatch', 'missing', 'shell', 'tools', 'web'])
         self.assertIn('payments', ' '.join(refused['tools']))
         self.assertIn('shell', ' '.join(refused['shell']))
-        self.assertEqual(sorted(SPECS), ['operations', 'research'])           # the shipped packages are valid
+        self.assertEqual(sorted(SPECS), ['operations', 'product-planning', 'research'])
 
     def test_attach_is_persistent_per_project_without_duplicates(self):
         a, b = self.project('research'), self.project()
@@ -272,8 +272,8 @@ class DepartmentTests(unittest.TestCase):
         self.assertEqual(D.validate(legacy, 'research'), [])                            # old specs still load
         self.assertEqual(D.check_output(legacy, {'output': 'short'}, 'P'), [])           # universal checks only
         self.assertTrue(D.validate(dict(spec, contract={'version': 1, 'output': {'require': ['nope']}}), 'research'))
-        pid = self.project('research', 'operations')                                     # a failing input check
         with unittest.mock.patch.dict(SPECS['research'], contract=needs['contract']):
+            pid = self.project('research', 'operations')  # pin the tested contract at attachment time
             with unittest.mock.patch.object(D, 'catalog', return_value=(SPECS, {})):
                 p = self.engine(DepartmentScript()).run(pid)
         self.assertEqual(p['state'], 'PAUSED')

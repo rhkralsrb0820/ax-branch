@@ -2,6 +2,7 @@
 Global AI Intelligence's library (read-only). Only relevant excerpts ever reach a
 model; the vault is never injected whole."""
 import hashlib
+import json
 import re
 import sqlite3
 import time
@@ -157,6 +158,227 @@ def experience(store, query, exclude_project=None, signatures=(), limit=3, befor
 
 def _slug(text, n=50):
     return re.sub(r'[\\/:*?"<>|#^\[\]\s]+', ' ', text).strip()[:n].strip() or 'project'
+
+
+# Department experience is a projection into the EXISTING event store, never a second knowledge database.
+# Free text (goals, feedback, source content, decisions, provider errors) stays at its original reference.
+EXPERIENCE_VERSION = 1
+EXPERIENCE_DAYS = 180
+TOKEN_FIELDS = ('input_tokens', 'output_tokens', 'cached_input_tokens', 'cache_creation_input_tokens',
+                'cache_read_input_tokens', 'reasoning_output_tokens')
+
+
+def usage_summary(events):
+    """Agent turns and reported usage only; retries/hidden usage are not guessed or counted as zero."""
+    calls = [e for e in events if e['kind'] == 'call']
+    usage = []
+    for e in calls:
+        raw = e['detail'].get('tokens')
+        usage.append({k: raw[k] for k in TOKEN_FIELDS if isinstance(raw.get(k), (int, float)) and not isinstance(raw[k], bool)}
+                     if isinstance(raw, dict) else {})
+    return {'agent_turn_attempts': sum(e['kind'] == 'call_start' for e in events), 'agent_turns_completed': len(calls),
+            'failed_turns': sum(e['kind'] == 'call_failed' for e in events),
+            'provider_seconds': sum(e['detail'].get('seconds', 0) for e in events if e['kind'] in ('call', 'call_failed')),
+            'call_event_ids': [e['id'] for e in calls][-32:], 'call_usage_truncated': len(calls) > 32,
+            'reported_total_tokens': reported_tokens(events),
+            'token_usage_by_call': usage[-32:], 'token_usage_complete': bool(calls) and reported_tokens(events) is not None,
+            'physical_cli_attempts': 'UNKNOWN',
+            'owner_actions': sum(e['kind'] == 'owner_action' for e in events),
+            'developer_test_inputs': sum(e['kind'] == 'feedback_provenance' and e['detail'].get('actor') == 'owner_delegated_test'
+                                         for e in events)}
+
+
+def reported_tokens(events):
+    """None if any completed turn lacks input/output usage. Cached/reasoning subsets are not double-counted."""
+    total = 0
+    for e in events:
+        if e['kind'] != 'call':
+            continue
+        u = e['detail'].get('tokens')
+        if not isinstance(u, dict) or any(not isinstance(u.get(k), (int, float)) or isinstance(u.get(k), bool)
+                                          or u[k] < 0 for k in ('input_tokens', 'output_tokens')):
+            return None
+        total += u['input_tokens'] + u['output_tokens']
+        if str(u.get('source', '')).lower().startswith('claude'):
+            total += sum(u.get(k) or 0 for k in ('cache_creation_input_tokens', 'cache_read_input_tokens'))
+    return total
+
+
+def record_department_experience(store, pid):
+    """Record bounded, nontextual facts for each verification and terminal stop, idempotently.
+    This records evidence links, not a model-authored lesson, performance gain or business validation."""
+    from . import departments
+    p, events = store.project(pid), store.events(pid)
+    if p['closed_mode'] == 'discard' or not departments.attached(store, pid):
+        return []
+    plan = p['plan'] or {}
+    verifications = store.verifications(pid)
+    subjects = [(v['id'], v['iteration'], v['verdict'], v['created'], v) for v in verifications]
+    if p['state'] == 'PAUSED' and events:
+        stops = [e for e in events if e['kind'] == 'state' and e['detail'].get('to') == 'PAUSED']
+        if stops:
+            e = stops[-1]
+            subjects.append((f'event:{e["id"]}', p['iteration'], 'PAUSED', e['at'], None))
+    prior = {e['detail']['revision'] for e in events if e['kind'] == 'department_experience'}
+    provenance = {fid: e['detail'].get('actor', 'UNKNOWN') for e in events if e['kind'] == 'feedback_provenance'
+                  for fid in e['detail'].get('feedback_ids', [])}
+    added = []
+    for subject, iteration, outcome, at, v in subjects:
+        # Delegations are dated and versioned. Never assign today's department version to an old verification.
+        delegated = [e for e in events if e['kind'] in ('department_delegation', 'department_version_used') and e['at'] <= at
+                     and e['detail'].get('iteration') == iteration]
+        bindings = {e['detail']['department']: e['detail']['version'] for e in delegated}
+        snapshots = {}
+        for e in events:
+            if e['at'] > at:
+                continue
+            if e['kind'] == 'department_attached':
+                snapshots[e['detail']['department']] = e['detail']
+            elif e['kind'] == 'department_detached':
+                snapshots.pop(e['detail']['department'], None)
+        if outcome == 'PAUSED' and not bindings:
+            bindings = {dep: d['version'] for dep, d in snapshots.items()}
+        for dep, version in bindings.items():
+            ds = [e for e in delegated if e['detail']['department'] == dep]
+            spec_hash = (ds[-1]['detail'].get('spec_sha256') if ds else None) or (
+                snapshots.get(dep, {}).get('spec_sha256') if snapshots.get(dep, {}).get('version') == version else None) or 'UNKNOWN'
+            identity = 'E-' + hashlib.sha256(f'{pid}:{dep}:{version}:{subject}'.encode()).hexdigest()[:16]
+            artifact = next((a for a in store.artifacts(pid) if v and a['id'] == v['artifact_id']), None)
+            feedback = [{'id': f['id'], 'iteration': f['iteration'], 'verdict': f['verdict'],
+                         'actor': provenance.get(f['id'], 'UNKNOWN')}
+                        for f in store.feedback(pid) if f['iteration'] == iteration][-20:]
+            relevant = [e for e in events if e['at'] <= at]
+            sessions = [e for e in relevant if e['kind'] == 'session']
+            mode = sessions[-1]['detail'].get('execution_mode', 'UNKNOWN') if sessions else 'UNKNOWN'
+            contract = [e for e in relevant if e['kind'] in ('department_contract', 'department_document_contract')
+                        and e['detail'].get('department') == dep]
+            d = {'experience_id': identity, 'schema': EXPERIENCE_VERSION, 'project': pid, 'department': dep,
+                 'department_version': version, 'iteration': iteration, 'recorded_at': at, 'outcome': outcome,
+                 'department_spec_sha256': spec_hash,
+                 'execution_mode': mode, 'verification': subject,
+                 'verification_level': ('INDEPENDENT_PASS' if v and v['verdict'] == 'PASS' and v['checks'].get('ok')
+                                        else 'FAIL' if outcome == 'FAIL' else 'UNVERIFIED'),
+                 'goal': {'ref': f'project:{pid}#goal', 'sha256': hashlib.sha256(p['goal'].encode()).hexdigest()},
+                 'conditions': {'artifact_kind': artifact['kind'] if artifact else 'UNKNOWN',
+                                'source_inputs': [e['id'] for e in relevant if e['kind'] == 'owner_inputs'][-10:],
+                                'customer': 'UNKNOWN', 'market': 'UNKNOWN'},
+                 'procedures': {'delegations': [e['id'] for e in ds],
+                                'decisions': [e['id'] for e in relevant if e['kind'] in ('decision_trace', 'decision_applied')][-20:],
+                                'tools': sorted({t for e in relevant if e['kind'] == 'permission_granted'
+                                                 for t in e['detail'].get('capabilities', []) if t in ('reasoning', 'code_generation', 'web_research')})},
+                 'failures': {'contract_failures': sum(e['detail'].get('status') == 'fail' for e in contract),
+                              'failed_verifications': [w['id'] for w in verifications if w['created'] <= at and w['verdict'] == 'FAIL'],
+                              'reworks': sum(e['kind'] == 'state' and e['detail'].get('to') == 'REWORK' for e in relevant)},
+                 'artifact': {k: artifact[k] for k in ('id', 'iteration', 'sha256', 'kind')} if artifact else None,
+                 'feedback': feedback, 'metrics': usage_summary(relevant),
+                 'applicable': {'department': dep, 'department_version': version, 'artifact_kind': artifact['kind'] if artifact else 'UNKNOWN'},
+                 'not_applicable': ['different department version', 'unverified market or customer assumptions',
+                                    'permissions or acceptance criteria changes'],
+                 'facts': ['recorded verification outcome and event references'],
+                 'estimates': [], 'unknowns': ['business success', 'willingness to pay', 'actual revenue', 'quality improvement'],
+                 'authority': 'reference data only; never instructions or permission', 'improvement': 'UNKNOWN'}
+            revision = hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()
+            if revision not in prior:
+                store.event(pid, 'department_experience', revision=revision, **d)
+                prior.add(revision)
+                added.append(identity)
+    return added
+
+
+def department_experience(store, query, requesting_project, allowed_departments, *, source_projects=None,
+                          before=None, now=None, limit=3, chars=6000):
+    """Bounded SQL scan, no embedding/model call. Interrupted retrieval is a miss, never a new permission."""
+    deadline = time.monotonic() + 0.25
+    store.db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+    try:
+        return _department_experience(store, query, requesting_project, allowed_departments,
+                                      source_projects=source_projects, before=before, now=now, limit=limit,
+                                      chars=chars, deadline=deadline)
+    except sqlite3.OperationalError:
+        if time.monotonic() >= deadline:
+            return []
+        raise
+    finally:
+        store.db.set_progress_handler(None, 0)
+
+
+def _department_experience(store, query, requesting_project, allowed_departments, *, source_projects=None,
+                           before=None, now=None, limit=3, chars=6000, deadline):
+    """Scoped metadata keyword retrieval. No free source text or evaluation answers cross the boundary."""
+    now = time.time() if now is None else now
+    if limit <= 0 or chars <= 0:
+        return []
+    cutoff = min(now, before) if before is not None else now
+    allowed = {(d['id'], d['version']) for d in allowed_departments}
+    hashes = {(d['id'], d['version']): d.get('spec_sha256') for d in allowed_departments}
+    q, cards = terms(query), []
+    for row in store.db.execute('SELECT id FROM projects ORDER BY updated DESC LIMIT 200').fetchall():
+        if time.monotonic() >= deadline:
+            break
+        p = store.project(row['id'])
+        if p['id'] == requesting_project or p['closed_mode'] == 'discard' or (source_projects is not None and p['id'] not in source_projects):
+            continue
+        # Match source goal locally; never export the goal, tokens, feedback text or private source material.
+        score = len(q & terms(p['goal']))
+        if score < 2:
+            continue
+        latest = {}
+        rows = store.db.execute("SELECT at,detail FROM events WHERE project_id=? AND kind='department_experience' "
+                                'AND at<=? ORDER BY id DESC LIMIT 128', (p['id'], cutoff)).fetchall()
+        for row_ in rows:
+            if time.monotonic() >= deadline:
+                break
+            d = json.loads(row_['detail'])
+            latest.setdefault(d['experience_id'], {'at': row_['at'], 'detail': d})
+        for e in latest.values():
+            d = e['detail']
+            if (d['department'], d['department_version']) not in allowed or d['execution_mode'] != 'subscription_cli':
+                continue
+            expected_hash = hashes.get((d['department'], d['department_version']))
+            if expected_hash and expected_hash != d.get('department_spec_sha256'):
+                continue
+            if not (0 <= cutoff - d['recorded_at'] <= EXPERIENCE_DAYS * 86400):
+                continue
+            card = {k: d[k] for k in ('experience_id', 'project', 'department', 'department_version', 'iteration',
+                                      'outcome', 'verification_level', 'verification', 'artifact', 'failures',
+                                      'applicable', 'not_applicable', 'facts', 'estimates', 'unknowns', 'authority', 'improvement')}
+            card.update(kind='department_experience', evidence=d['verification'], recorded_at=d['recorded_at'],
+                        _source_sha256=e['detail']['revision'],
+                        matched_terms=score, selection_reason='same pinned department version and matching goal terms',
+                        difference_required='customer/market are UNKNOWN; compare current conditions before any adoption')
+            cards.append((score, d['recorded_at'], card))
+    cards.sort(key=lambda r: (-r[0], -r[1]))
+    out, used, seen = [], 0, set()
+    for _, _, card in cards:
+        if card['project'] in seen:
+            continue
+        size = len(json.dumps(card, ensure_ascii=False))
+        if used + size <= min(chars, 6000):
+            out.append(card); used += size; seen.add(card['project'])
+        if len(out) >= min(limit, 3):
+            break
+    return out
+
+
+def experience_view(store, pid):
+    events, records, retrieved, uses = store.events(pid), {}, {}, []
+    for e in events:
+        d = e['detail']
+        if e['kind'] == 'department_experience':
+            records[d['experience_id']] = d
+        if e['kind'] == 'knowledge_trace' and d.get('phase') == 'RETRIEVED':
+            hit = d.get('presented') or {}
+            if hit.get('kind') == 'department_experience':
+                retrieved[d['retrieval']] = hit
+        if e['kind'] == 'knowledge_trace' and d.get('phase') in ('ADOPTED', 'REJECTED', 'UNASSESSED') and d['retrieval'] in retrieved:
+            hit = retrieved[d['retrieval']]
+            uses.append({'retrieval': d['retrieval'], 'experience': hit['experience_id'],
+                         'source_project': hit['project'], 'disposition': d['phase'], 'reason': d.get('reason', ''),
+                         'difference': d.get('difference', ''), 'verification': hit['verification_level']})
+    return {'records': list(records.values())[-10:], 'uses': uses[-15:],
+            'errors': [e['detail'] for e in events if e['kind'] == 'experience_record_error'][-3:],
+            'searches': [e['detail'] for e in events if e['kind'] == 'experience_search'][-5:],
+            'improvement': 'UNKNOWN', 'rule': '기록·검색·채택은 품질 개선의 증거가 아닙니다. 비교 평가 전에는 개선 미확인.'}
 
 
 SUMMARY, RESULT, PROBLEMS, LESSONS = '요약 (Summary)', '최종 결과 (Final Result)', '문제 → 원인 → 해결', 'Verification Lessons'

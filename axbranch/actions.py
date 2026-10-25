@@ -123,12 +123,18 @@ def decide_network(engine_factory, pid, approve, channel, note=''):
         engine.store.close()
 
 
-def review(engine_factory, pid, works, text, finish, channel):
+def review(engine_factory, pid, works, text, finish, channel, actor='owner'):
     """Record the Owner's review. Returns (project, needs_worker)."""
     engine = engine_factory()
     try:
+        before = {f['id'] for f in engine.store.feedback(pid)}
         p = engine.owner_review(pid, works, text, finish)
+        engine.store.event(pid, 'feedback_provenance',
+                           feedback_ids=[f['id'] for f in engine.store.feedback(pid) if f['id'] not in before],
+                           actor=actor if actor in ('owner', 'owner_delegated_test') else 'UNKNOWN',
+                           purpose='Owner 위임에 따른 검증용 입력' if actor == 'owner_delegated_test' else 'Owner feedback')
         engine.store.event(pid, 'owner_action', action='review', channel=channel)
+        engine._record_experience(pid)
     finally:
         engine.store.close()
     return p, p['state'] not in OWNER_WAIT + ('PAUSED', 'CLOSED')

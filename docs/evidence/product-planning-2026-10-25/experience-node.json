@@ -1,0 +1,23 @@
+{
+  "runner": "Node DOM fixture only",
+  "passed": 4,
+  "total": 4,
+  "checks": [
+    {
+      "name": "experience displays reason, difference and uncertainty",
+      "ok": true
+    },
+    {
+      "name": "experience escapes retrieved text and folds technical details",
+      "ok": true
+    },
+    {
+      "name": "attached department shows pinned version",
+      "ok": true
+    },
+    {
+      "name": "experience switching clears prior source and shows no match",
+      "ok": true
+    }
+  ]
+}

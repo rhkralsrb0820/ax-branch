@@ -1,0 +1,23 @@
+{
+  "runner": "Node DOM fixture, not actual engine verification",
+  "passed": 4,
+  "total": 4,
+  "checks": [
+    {
+      "name": "result library opens document for its own project",
+      "ok": true
+    },
+    {
+      "name": "result library keeps selected project identity",
+      "ok": true
+    },
+    {
+      "name": "delayed library result ignored after project navigation",
+      "ok": true
+    },
+    {
+      "name": "project result opens visible project result",
+      "ok": true
+    }
+  ]
+}

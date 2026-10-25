@@ -3,6 +3,9 @@ attaches. Attachment is per project and recorded as events (persisted, auditable
 淸月 CEO delegates pipeline stages only to attached departments; a stage without one is a visibly recorded
 temporary agent. Attaching connects functions; it never approves payments, credentials, publishing or contact."""
 import json
+import hashlib
+import re
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 import sys
 from pathlib import Path
 
@@ -44,6 +47,8 @@ def validate(spec, folder=None):
             problems.append(f'permissions.{key} must be a list of paths')
     if not spec['acceptance_criteria']:
         problems.append('acceptance_criteria must not be empty')
+    if not isinstance(spec.get('workflow', []), list) or not all(isinstance(s, str) and s.strip() for s in spec.get('workflow', [])):
+        problems.append('workflow must be a list of nonempty steps')
     problems += _contract_problems(spec.get('contract'))
     return problems
 
@@ -71,6 +76,11 @@ def _contract_problems(c):
             problems.append(f'contract.output.{key} must be a non-negative integer')
     if not set(inp.get('require', [])) <= set(INPUT_KINDS):
         problems.append(f'contract.input.require must be among {INPUT_KINDS}')
+    if not isinstance(c.get('document_sections', []), list) or not all(
+            isinstance(s, str) and s.strip() for s in c.get('document_sections', [])):
+        problems.append('contract.document_sections must be nonempty strings')
+    if 'product_plan' in c and not isinstance(c['product_plan'], bool):
+        problems.append('contract.product_plan must be boolean')
     return problems
 
 
@@ -101,6 +111,73 @@ def check_output(spec, out, pid, known_ids=()):
     foreign = sorted(set(FOREIGN_PROJECT.findall(blob)) - {pid} - set(known_ids))   # ids in this project's own data are fine
     if foreign:
         problems.append(f'다른 프로젝트 참조: {foreign}')
+    return problems + check_document(spec, text)
+
+
+def check_document(spec, text):
+    """Structure and arithmetic only. Independent verification still judges evidence and decisions."""
+    contract = (spec or {}).get('contract') or {}
+    headings = {s.strip() for s in re.findall(r'^#{1,6}\s+(.+?)\s*$', text, re.M)}
+    problems = [f'필수 문서 항목 없음: {s}' for s in contract.get('document_sections', []) if s not in headings]
+    if not contract.get('product_plan'):
+        return problems
+    plans = []
+    for raw in re.findall(r'```json\s*\n(.*?)\n```', text, re.S):
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and 'product_plan' in data:
+                plans.append(data['product_plan'])
+        except ValueError:
+            continue
+    if len(plans) != 1 or not isinstance(plans[0], dict):
+        return problems + ['product_plan JSON 객체가 정확히 한 개 필요합니다']
+    plan = plans[0]
+    for key in ('claims', 'mvp', 'excluded', 'experiments'):
+        if not isinstance(plan.get(key), list) or not plan[key]:
+            problems.append(f'product_plan.{key} 목록이 필요합니다')
+    for key in ('mvp', 'excluded'):
+        if isinstance(plan.get(key), list) and not all(isinstance(s, str) and s.strip() for s in plan[key]):
+            problems.append(f'product_plan.{key}에 비어 있지 않은 설명이 필요합니다')
+    for claim in plan.get('claims', []) if isinstance(plan.get('claims'), list) else []:
+        if not isinstance(claim, dict) or not str(claim.get('statement', '')).strip() or claim.get('status') not in (
+                'VERIFIED', 'ESTIMATED', 'UNKNOWN'):
+            problems.append('주장에 내용과 사실/추정/미확인 구분이 필요합니다')
+        elif claim['status'] == 'VERIFIED' and (not isinstance(claim.get('evidence'), list) or
+                not any(isinstance(e, str) and e.strip() for e in claim['evidence'])):
+            problems.append('확인 사실에 근거 참조가 없습니다')
+    for experiment in plan.get('experiments', []) if isinstance(plan.get('experiments'), list) else []:
+        if not isinstance(experiment, dict) or not all(str(experiment.get(k, '')).strip() for k in ('metric', 'threshold', 'method')):
+            problems.append('실험에 지표·기준·방법이 필요합니다')
+    if plan.get('market_validation') != {'willingness_to_pay': 'UNKNOWN', 'revenue': 'UNKNOWN'}:
+        problems.append('고객 접촉·거래 없는 지불 의사와 실제 매출은 UNKNOWN이어야 합니다')
+    scenarios = plan.get('scenarios')
+    if not isinstance(scenarios, list) or len(scenarios) != 3:
+        return problems + ['손익 시나리오 세 개가 필요합니다']
+    names = [s.get('name') for s in scenarios if isinstance(s, dict)]
+    if (len(names) != 3 or not all(isinstance(name, str) for name in names)
+            or set(names) != {'downside', 'base', 'upside'}):
+        problems.append('시나리오 이름은 downside/base/upside여야 합니다')
+    for s in scenarios:
+        try:
+            nums = []
+            for key in ('price', 'unit_cost', 'quantity', 'fixed_cost', 'revenue', 'profit'):
+                if isinstance(s[key], bool) or not isinstance(s[key], (int, float)):
+                    raise ValueError('수치 형식')
+                value = Decimal(str(s[key]))
+                if not value.is_finite():
+                    raise ValueError('유한 수치')
+                nums.append(value)
+            price, cost, quantity, fixed, revenue, profit = nums
+            if min(price, cost, quantity, fixed) < 0 or quantity != quantity.to_integral_value():
+                raise ValueError('비음수 금액과 정수 수량')
+            margin = price - cost
+            breakeven = int((fixed / margin).to_integral_value(rounding=ROUND_CEILING)) if margin > 0 else None
+            if abs(revenue - price * quantity) > Decimal('0.01') or abs(profit - (margin * quantity - fixed)) > Decimal('0.01'):
+                raise ValueError('매출/손익 산식')
+            if isinstance(s.get('break_even_units'), bool) or s.get('break_even_units') != breakeven:
+                raise ValueError('손익분기 수량')
+        except (KeyError, TypeError, ValueError, InvalidOperation, OverflowError) as e:
+            problems.append(f'손익 시나리오 오류: {e}')
     return problems
 
 
@@ -138,8 +215,33 @@ def attach(store, pid, dep_id, specs):
         raise Rejected(f'부서 {dep_id!r}는 라이브러리에 없거나 명세 검증에 실패했습니다.')
     if any(d['id'] == dep_id for d in attached(store, pid)):
         raise Rejected(f"이미 연결된 부서입니다: {specs[dep_id]['name']}")
-    store.event(pid, 'department_attached', department=dep_id, version=specs[dep_id]['version'],
+    spec = specs[dep_id]
+    store.event(pid, 'department_attached', department=dep_id, version=spec['version'],
+                spec=spec, spec_sha256=spec_digest(spec),
                 note='function connection only; Owner approvals (payment, credentials, publishing, contact) unchanged')
+
+
+def spec_digest(spec):
+    return hashlib.sha256(json.dumps(spec, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+
+
+def resolve(store, pid, library):
+    """Use the exact attached snapshot. A legacy version mismatch stops instead of silently upgrading."""
+    current = {}
+    for e in store.events(pid, {'department_attached', 'department_detached'}):
+        d = e['detail']
+        if e['kind'] == 'department_detached':
+            current.pop(d['department'], None)
+        else:
+            current[d['department']] = d
+    out = {}
+    for dep, d in current.items():
+        spec = d.get('spec') or library.get(dep)
+        if not spec or validate(spec, dep) or spec.get('version') != d['version'] or (
+                d.get('spec') and d.get('spec_sha256') != spec_digest(spec)):
+            raise Rejected(f'연결한 부서 {dep}@{d["version"]} 명세를 확인할 수 없습니다. 자동 업그레이드하지 않습니다.')
+        out[dep] = spec
+    return out
 
 
 def detach(store, pid, dep_id):
@@ -153,7 +255,8 @@ def summary(spec):
     """What 淸月 CEO needs to plan with a department (not its prompt text)."""
     return {k: spec[k] for k in ('id', 'version', 'name', 'role', 'provides', 'tools', 'inputs', 'outputs',
                                  'acceptance_criteria')} | {'agent_role': spec['agent']['role'],
-                                                            'network': spec['permissions']['network']}
+                                                            'network': spec['permissions']['network'],
+                                                            'workflow': spec.get('workflow', [])}
 
 
 def check_stage(stage, attached_specs, library=None, final=False):
@@ -174,6 +277,10 @@ def check_stage(stage, attached_specs, library=None, final=False):
                     'attach a department that provides it')
         if stage.get('web') and not any(s['permissions']['network'] for s in attached_specs.values()):
             return f"temporary agent for stage {name!r} needs web access but no attached department has network permission"
+        requested = set(stage.get('capabilities', [])) - build
+        if not any(requested <= set(s['tools']) and (not stage.get('web') or s['permissions']['network'])
+                   for s in attached_specs.values()):
+            return f"temporary agent for stage {name!r} combines tools/permissions from different departments"
         role = str(stage.get('agent_role', '')).strip().lower()
         for other, spec in (library or {}).items():
             if other not in attached_specs and spec['agent']['role'].strip().lower() == role:

@@ -20,6 +20,47 @@ INDEX_VERSION = 1
 MIN_LABELED = 50            # labeled situations needed before any promotion verdict
 MIN_PROJECTS = 20           # ...from at least this many DIFFERENT projects: situations of one project are not
                             # independent evidence (one project's repeated FAILs share one cause)
+
+# Pre-registered product rubric; never generated from the observed answers or promoted by two tasks.
+PRODUCT_RUBRIC = {'evidence_accuracy': '0 incorrect/unsupported; 1 partially grounded; 2 every material claim traceable',
+                 'requirements': '0 missing core requirements; 1 partly met; 2 all required sections and decisions met',
+                 'specificity': '0 vague/unexecutable; 1 partial concrete next steps; 2 bounded actionable MVP and experiments',
+                 'cost_accuracy': '0 incorrect; 1 incomplete assumptions; 2 correct scenarios with currency/period/assumptions',
+                 'fact_assumption_separation': '0 misleading validation claims; 1 mixed labels; 2 facts/estimates/unknowns explicit'}
+
+
+def product_rubric_hash():
+    return hashlib.sha256(json.dumps(PRODUCT_RUBRIC, sort_keys=True).encode()).hexdigest()
+
+
+def compare_product_evaluations(control, treatment):
+    """A bounded local comparison, never an automatic department change or general improvement claim."""
+    matched = ('task_sha256', 'input_sha256', 'department_specs', 'budget', 'rubric_sha256')
+    reasons = [f'mismatched {k}' for k in matched if control.get(k) != treatment.get(k) or k not in control]
+    if control.get('rubric_sha256') != product_rubric_hash():
+        reasons.append('rubric not pre-registered')
+    for result in (control, treatment):
+        if result.get('execution_mode') != 'subscription_cli' or not result.get('verification_ref') or any(
+                not isinstance(result.get(k), str) or not re.fullmatch(r'[a-f0-9]{64}', result[k])
+                for k in ('artifact_sha256', 'task_sha256', 'input_sha256')):
+            reasons.append('no real-model artifact provenance')
+        scores = result.get('scores', {})
+        if not isinstance(scores, dict) or set(scores) != set(PRODUCT_RUBRIC) or any(not isinstance(s, dict) or type(s.get('score')) is not int
+                or s['score'] not in (0, 1, 2) or not isinstance(s.get('evidence'), list) or not s['evidence']
+                or not all(isinstance(e, str) and e.strip() for e in s['evidence']) for s in scores.values()):
+            reasons.append('missing score/evidence')
+        metrics = result.get('metrics') or {}
+        if not metrics.get('token_usage_complete') or not metrics.get('agent_turns_completed') or not isinstance(metrics.get('provider_seconds'), (int, float)):
+            reasons.append('measured usage/time incomplete')
+        if not result.get('independent_evaluator'):
+            reasons.append('evaluator independence not established')
+    delta = None if reasons else sum(s['score'] for s in treatment['scores'].values()) - sum(s['score'] for s in control['scores'].values())
+    return {'rubric_sha256': product_rubric_hash(), 'paired_tasks': 1 if not reasons else 0,
+            'local_score_delta': delta, 'comparison_valid': not reasons, 'limitations': reasons + [
+                'one paired B task; order/provider variance uncontrolled; no general quality improvement established',
+                'retrieval and evaluation scores do not authorize changing permissions or acceptance criteria'],
+            'quality_improvement': 'UNPROVEN', 'recommendation': 'HOLD', 'department_update_applied': False,
+            'control_metrics': control.get('metrics'), 'treatment_metrics': treatment.get('metrics')}
 SKIP_SECTIONS = (knowledge.EVIDENCE,)       # raw logs: noise for retrieval (still in the note for humans)
 _DATE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
 _PROJECT = re.compile(r'project: `(P-[\w-]+)`')
