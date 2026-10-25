@@ -21,6 +21,25 @@
   3. If both providers are available: a preserved candidate build, then ONE bounded A/B comparison (new root).
   4. H1–H4 and switching the server wait for the Owner.
 - Status of this round's validation: see the newest entry of the shared `IMPLEMENTATION_STATUS.md`.
+- **Round result (2026-10-26 07:53 KST).** Claude usage: 5-hour window 70% remaining, 7-day window 87%
+  remaining.
+  - **Codex review fixes** (786834f), regression-tested:
+    - P1: historical stage evidence only through a valid edit lineage; fails closed with the reason recorded;
+    - P2: experience cards derive `CROSS_PROVIDER_PASS`, `SAME_PROVIDER_ROLE_SEPARATED_PASS` or
+      `PASS_PROVENANCE_UNKNOWN` from the recorded producer/verifier provenance;
+    - docs P2: one current handoff checkpoint, older blocks marked historical, missing-source claim withdrawn.
+  - **Full single-process suite on 786834f:** 460/460 OK, hashes matched (`outputs/0.1.40-evidence/
+    FULL-786834f-single-process.log`, `tested-code-786834f.sha256`). No Edge timeout in this run; that is not
+    evidence that the Edge issue is fixed.
+  - **Provider check (one real call each, 07:47):** Codex OK, Claude OK.
+  - **Candidate build** `demo-2026-11/builds/0.1.62-bcd2a84` (fd65a29d…), preserved, NOT serving. No packaged
+    web E2E on this exact build.
+  - **Product A/B attempt 1:** stopped by its own budget (Task A: 64,995 reported tokens > 60,000 after 4 turns).
+    No comparison; UNPROVEN (`docs/evidence/2026-10-26-product-ab-attempt.md`). Not rerun.
+  - **Owner decision needed:** a per-project budget able to hold one full cycle (measured about 175k reported
+    tokens for a comparable flow). Options (a)/(b)/(c) are in that evidence file.
+  - **Running:** only the Owner web server (PID 54292, `builds/0.1.61-67d9095`); safe to leave. No test or
+    experiment processes.
 
 # ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
 
