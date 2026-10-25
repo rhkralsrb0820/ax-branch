@@ -143,9 +143,34 @@
       const shown = document.getElementById('modalBody').textContent;
       await report('e2e: verified result opened in the page', shown.length > 200, shown.slice(0, 160));
       document.getElementById('modal').close();
-      document.querySelector('input[name=works][value=yes]').checked = true;
-      document.getElementById('oSend').click(); await sleep(3000);
-      await report('e2e: feedback sent', true, 'works=yes');
+      if (new URLSearchParams(location.search).has('text-rework')) {
+        const originalIteration = p.iteration, marker = 'AXB-TEXT-REWORK';
+        const request = '기존 메모의 내용과 근거 수치는 유지하고, 문서 맨 앞에 "# 재작업 확인: ' + marker + '" 제목 한 줄을 추가해 주세요. 다른 기능·외부 연결·학습은 추가하지 마세요.';
+        document.getElementById('oText').value = request;
+        document.getElementById('oText').dispatchEvent(new Event('input', {bubbles: true}));
+        document.getElementById('oSend').click();
+        await report('e2e: textual change requested on existing project', true, JSON.stringify({pid, originalIteration, request}));
+        const start = Date.now();
+        while (Date.now() - start < 25 * 60000) {
+          p = await api('project/' + pid);
+          if (p.state === 'PAUSED' || p.state === 'CLOSED' || (p.state === 'OWNER_REVIEW' && p.iteration > originalIteration)) break;
+          await sleep(5000);
+        }
+        const ready = p.state === 'OWNER_REVIEW' && p.iteration > originalIteration;
+        await report('e2e: revised iteration returned to Owner review', ready, JSON.stringify({id: p.id, state: p.state, iteration: p.iteration, pause: p.pause_reason}));
+        const passed = ready && p.verifications.some(v => v.iteration === p.iteration && v.verdict === 'PASS');
+        await report('e2e: revised iteration independently verified', passed);
+        if (passed) {
+          await window.AXB.openProject(pid);
+          document.getElementById('oRun').click();
+          const opened = await until(() => document.getElementById('modal').open && document.getElementById('modalBody').textContent.includes(marker), 20000);
+          await report('e2e: revised verified result opened with requested text', opened, document.getElementById('modalBody').textContent.slice(0, 250));
+        }
+      } else {
+        document.querySelector('input[name=works][value=yes]').checked = true;
+        document.getElementById('oSend').click(); await sleep(3000);
+        await report('e2e: feedback sent', true, 'works=yes');
+      }
     }
     await api('test/selftest', {phase: 'e2e', name: 'done', ok: true, detail: pid});
   }

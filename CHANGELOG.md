@@ -3,6 +3,16 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## Unreleased — Codex continuation (2026-10-25)
+
+- Project-bound approval/review drafts and actions; old navigation responses cannot replace current records.
+- Persist pending submission receipts across reloads, query before retry; require reattaching missing files.
+- Feed last-success timestamps, refresh failures with cached items, source/publication dates and three home items.
+- Default web Engine uses the App workspace; text-change E2E harness now checks persisted REWORK, a new PASS and
+  opening the revised result. Library result opening keeps the selected project identity.
+- Validation is limited to the new Node DOM fixture and JavaScript syntax checks. Python tests, new EXE builds
+  and real model/browser E2E are pending runtime access; no release/server switch or main merge.
+
 ## [0.1.61] - 2026-10-25
 
 Local web UI over the same engine, Owner development room, department contract check (branch dev/web-ui).

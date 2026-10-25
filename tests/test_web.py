@@ -69,6 +69,13 @@ class WebTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn(self.app.token.encode(), page)                                          # only our own page has it
 
+    def test_default_engine_uses_the_apps_isolated_workspace(self):
+        from unittest import mock
+        app = web.App(workspace=self.ws)
+        with mock.patch('axbranch.engine.open_engine', return_value=mock.sentinel.engine) as factory:
+            self.assertIs(app.engine_factory(), mock.sentinel.engine)
+        factory.assert_called_once_with(self.ws)
+
     def test_sidebar_uses_saved_title_without_rewriting_original_goal(self):
         broken_goal = '泥⑤???寃 검증?? CSV'
         store = self.app.store()

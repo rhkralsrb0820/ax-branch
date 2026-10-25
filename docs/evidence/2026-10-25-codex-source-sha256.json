@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-25T03:14:47.932Z",
+  "basis": "1a8df78; final source checkpoint, see Codex evidence note",
+  "files": {
+    "axbranch/web.py": "810842ccf4383387df3cf9d7b0738a73f3b91ae3860b48c6036a6d69c7471a3c",
+    "axbranch/webui/app.js": "9028fce5bd6be25e66405319b2fbca7cc5edf80b83f90ada4da1a3a1ea48b132",
+    "axbranch/webui/selftest.js": "55c3a28e30c6bf204a8ba6ba1b7c07c3cd0557a84847c87a132ee9645b928e13",
+    "tests/test_web.py": "a5acbea87e3886b2cae3745def763608240c76e93757f9b8c3609cc3369a4ec4",
+    "tests/browser_web_e2e.py": "25f7108c7713561bf163d47be488393851851adde56b2a193d3dbf556a40c7de",
+    "tests/test_webui_node.js": "afa48313108812e813174c81d6f2c419a21315f60f01e738064851f566eb54a4",
+    "tests/test_submission_node.js": "b6bcc4f6d792454d14ec8a7c4b2db11a5405a8f35990056fae557ca886be50df",
+    "tests/test_feeds_node.js": "ea3087fc329d8b4cdf9a5d7dd1a0e9ef3d18628d166f0de91424fc7b7d2cf074",
+    "tests/test_result_node.js": "6941c3d46397a298d9697b3e66b60dc08562c232990e2961d8d33ff134365173",
+    "tests/web_regressions.js": "f551a030a8b8eac9b85857c4c9874eb88df6ac140588f0303c6e5c47513ee5c6"
+  }
+}

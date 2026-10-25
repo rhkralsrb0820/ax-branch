@@ -45,6 +45,9 @@ function page(){
   report('W2 missing reattached file blocks replay',requests.length===count&&p.nodes.get('fileNames').textContent.includes('다시 첨부'));
   p.context.AXB.files=[{name:'private.txt',data:'c2VjcmV0'}];failBeforeCommit=false;await p.nodes.get('submit').click();
   report('W2 same reattached file allows explicit retry',requests.length===count+1);
+  p.close();storage.set('axb-pending-submission','{broken');p=page();await until(()=>p.context.AXB.ov);
+  const beforeCorrupt=requests.length;p.nodes.get('goal').value='저장소 오류';await p.nodes.get('submit').click();
+  report('W2 corrupt pending record prevents unsafe new submission',requests.length===beforeCorrupt&&p.nodes.get('notice').textContent.includes('제출을 멈췄습니다'));
 })().catch(e=>{checks.push({name:e.stack,ok:false});process.exitCode=1;}).finally(()=>{
   for(const p of pages)p.close();for(const c of checks)console.log(`${c.ok?'PASS':'FAIL'} ${c.name}`);
   if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify({runner:'Node DOM fixture, not a real server/browser',passed:checks.filter(c=>c.ok).length,total:checks.length,checks},null,2));

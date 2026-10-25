@@ -7,12 +7,14 @@ class Element {
     this.classList={add(){},remove(){},toggle(){}}; }
   set innerHTML(html) {
     this.html=html; this.textContent=html.replace(/<[^>]*>/g,'');
+    this.children=[];
     for (const [id,e] of nodes) if (e.parent===this) nodes.delete(id);
     if (this.id==='owner') radios.length=0;
     if (this.id==='pipeline') stages.length=0;
     for (const m of html.matchAll(/<([\w]+)\b([^>]*)>/g)) {
       const attrs=m[2], id=/\bid="([^"]+)"/.exec(attrs)?.[1], e=new Element(id);
       e.parent=this;
+      this.children.push(e);
       if (id) nodes.set(id,e);
       for (const d of attrs.matchAll(/data-([\w-]+)="([^"]*)"/g)) e.dataset[d[1]]=d[2];
       if (/name="works"/.test(attrs)) { e.value=/value="([^"]+)"/.exec(attrs)[1]; e.checked=/\bchecked\b/.test(attrs); radios.push(e); }
@@ -20,8 +22,9 @@ class Element {
     }
   }
   get innerHTML(){return this.html||'';}
-  querySelectorAll(sel){return sel==='input[name=works]' ? radios : sel==='.stage' ? stages : [];}
-  addEventListener(){} appendChild(){} focus(){} showModal(){} close(){}
+  querySelectorAll(sel){return sel==='input[name=works]' ? radios : sel==='.stage' ? stages :
+    sel.startsWith('[data-') ? (this.children||[]).filter(e=>Object.hasOwn(e.dataset,sel.slice(6,-1))) : [];}
+  addEventListener(){} appendChild(){} focus(){} showModal(){this.open=true;} close(){this.open=false;}
   click(){ if(!this.disabled && this.onclick) return this.onclick(); }
 }
 const ids=[...fs.readFileSync(path.join(__dirname,'../axbranch/webui/index.html'),'utf8').matchAll(/id="([^"]+)"/g)].map(m=>m[1]);
@@ -40,7 +43,8 @@ const finished=new Promise(r=>{done=r;});
 const timers=new Set();
 const sandbox={document,Response,URL,URLSearchParams,crypto:require('node:crypto').webcrypto,console,Date,Math,Promise,
   location:{search:'',reload(){}},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
-  setTimeout(fn,ms){const t=setTimeout(fn,ms);timers.add(t);return t;},clearTimeout, setInterval(){},
+  setTimeout(fn,ms){const t=setTimeout(fn,ms);timers.add(t);return t;},clearTimeout,
+  setInterval(fn,ms){const t=setInterval(fn,ms);timers.add(t);return t;},
   AXOrb:class{set(){} pulse(){} wake(){}},
   async fetch(url,opt){const u=new URL(url,'http://fixture');
     if(opt?.method==='POST') {const body=JSON.parse(opt.body);posts.push({path:u.pathname,body});

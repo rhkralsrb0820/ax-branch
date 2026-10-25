@@ -269,10 +269,10 @@
     catch (e) { fail(e); throw e; }
   }
   async function runResult(pid = S.pid) {
-    const navigation = S.navigation;
+    const navigation = S.navigation, view = S.view, request = S.resultRequest = (S.resultRequest || 0) + 1;
     try {
       const r = await api(`project/${pid}/result`, {});
-      if (pid !== S.pid || navigation !== S.navigation || S.view !== 'project') return;
+      if ((view === 'project' && pid !== S.pid) || navigation !== S.navigation || S.view !== view || request !== S.resultRequest) return;
       if (r.text !== undefined) { $('#modalBody').innerHTML = `<h3>${esc(r.title)}</h3><div class="result"><pre>${esc(r.text)}</pre></div>`; $('#modal').showModal(); }
       else notice(`${r.how === 'run' ? '실행함' : '열었음'}: ${r.path} (검증된 버전)`);
     } catch (e) { fail(e); }
@@ -308,7 +308,7 @@
         <button class="primary" data-dev="${esc(e.project)}" data-title="${esc(e.title)}" data-v="${esc(e.version)}">이어서 개발</button>
         <button class="ghost" data-proj="${esc(e.project)}">관련 프로젝트</button></div></div>`).join('');
     }).join('') || '<div class="muted">아직 완료된 결과물이 없습니다.</div>';
-    box.querySelectorAll('[data-open]').forEach(b => b.onclick = async () => { S.pid = b.dataset.open; await runResult(); });
+    box.querySelectorAll('[data-open]').forEach(b => b.onclick = () => runResult(b.dataset.open));
     box.querySelectorAll('[data-proj]').forEach(b => b.onclick = () => openProject(b.dataset.proj));
     box.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => developDialog(b.dataset.dev, b.dataset.title, b.dataset.v));
   }

@@ -52,7 +52,7 @@ class App:
 
     def _open_engine(self):
         from .engine import open_engine
-        return open_engine()
+        return open_engine(self.workspace)
 
     def store(self):
         return Store(self.db)
