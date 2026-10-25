@@ -1,4 +1,5 @@
 """淸月's particle sphere: motion only from the state it is given, still when stopped, nothing while hidden."""
+import gc
 import tkinter as tk
 import unittest
 
@@ -15,7 +16,12 @@ class OrbTests(unittest.TestCase):
         self.orb = self.panel.orb
 
     def tearDown(self):
+        self.orb._cancel()
         self.root.destroy()
+        # Collect this root's Tk reference cycles HERE, on the Tk thread. Left to the cyclic GC they can be freed on a
+        # later test's worker thread, which aborts Tcl ("Tcl_AsyncDelete: async handler deleted by the wrong thread",
+        # single-process full run 2026-10-25) - the same reason App.destroy collects.
+        gc.collect()
 
     def finish(self):
         self.orb._settle_until, self.orb._impulse, self.orb._burst = 0, 0, 0
