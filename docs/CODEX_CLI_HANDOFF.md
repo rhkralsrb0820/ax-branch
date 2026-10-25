@@ -1,3 +1,14 @@
+## START HERE — 실행 환경 진단 checkpoint (2026-10-25 13:09 KST)
+- `dev/web-ui`, 수정 코드 `b1275d9`. 이번 시작 기준 `8a5530d`, clean 확인. 새 기능 중단.
+- 최신 공유 리뷰의 생성 전 제출 거절 후 수정 불가 문제 수정. 확정된 생성 전 거절만 ID 해제; 응답 유실/부분 생성의 중복 방지는 유지. 프로젝트와 접수 ID는 한 트랜잭션으로 저장.
+- 이번 코드 Node DOM 45/45 및 JS 구문 통과. Python API 회귀 추가했으나 실행 경로 접근 거부로 미실행.
+- 실패 Hook: `legacy_notify`, 현재 설정 `codex-computer-use.exe turn-ended`, Windows `os error 206`. Python 접근 거부/Chrome `0xC0000022`와 인과관계 근거 없음. Hook 신뢰/보안/notify 설정 변경 없음.
+- 현재 셸은 `codexsandboxoffline`. Python 설치 경로 및 HP 레지스트리 접근 거부로 설치 유무를 확정할 수 없음. 경로 한정 읽기/실행 허용 요청 대기.
+- Chrome 프로필을 workspace 안으로 옮긴 비교 1회도 동일 GPU 하위 프로세스 접근 거부로 종료. 실제 JS 검사 미도달. 같은 시도 반복 금지.
+- 최소 Owner 조치·정확한 명령: `docs/evidence/runtime-2026-10-25/README.md`. 즉시 필요한 범위는 `C:\Users\HP\AppData\Local\Programs\Python\Python312\` 읽기/실행이며 쓰기/관리자 권한은 요청하지 않음.
+- 다음: 관련 Python 검사 → 실제 headless Chrome → 전체 회귀 → 보존 빌드 → 텍스트 수정 E2E. 통과 전 서버 전환/오너 개발실 갱신 없음. 이번 `docs/devroom/status.json`은 변경하지 않음.
+- 사용자 DB/산출물/Chrome/마우스 보존. main 병합/푸시 없음. 아래는 이전 checkpoint.
+
 ## START HERE — Codex checkpoint 2026-10-25 12:16:36 KST
 - 브랜치 `dev/web-ui`, 코드 `83a17dd` (이후 문서 상태 커밋). 시작 기준 `1a8df78`, clean 확인.
 - W1/W2/W3는 순서대로 수정·로컬 커밋. 현재 코드 Node DOM 35/35 및 JS 구문 통과. 실제 브라우저/서버/모델 검증 아님.
