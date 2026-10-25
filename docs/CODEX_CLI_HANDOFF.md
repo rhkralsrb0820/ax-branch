@@ -1,3 +1,37 @@
+# Codex CLI handoff — AX Branch (Claude usage at 8%: handed over 2026-10-25 ~12:00 KST)
+
+## START HERE (Owner order of 2026-10-25, step 2 done by Claude, step 3 is yours)
+- Repo `C:\Users\HP\Desktop\AX-Branch\ax-branch`, branch `dev/web-ui`, HEAD = this commit (code 67d9095).
+  Not merged into main; do not merge.
+- **Step 2 is DONE.** Codex's screen fix (devroom `.recommendation` card, sidebar saved titles) was reviewed and
+  committed as 67d9095.
+  - Tests: `tests.test_web` 10/10, `tests.test_gui`, headless Chrome self-test 23/23.
+  - Built as `demo-2026-11/builds/0.1.61-67d9095` (AXBranch.exe sha256 c4ea707a…).
+  - The demo web server was switched to it: http://127.0.0.1:8765/. The Owner must REFRESH their tab.
+  - **No full regression on 67d9095.** F161b 441/441 is for 7fae36f and must NOT be shown as 67d9095's result.
+- **Step 3, in order** (re-check `outputs/ceo-demo-review/CODEX_REVIEW.md` first):
+  1. Switching projects in the web UI can leave another project's approval note or feedback text visible. The
+     owner panel keeps `box.dataset.mode = mode + iteration`; key it by project id too, and clear the text when
+     switching. Add a self-test.
+  2. Duplicate project if the submit response is lost and the page reloads. The page creates `S.requestId` in
+     memory only. Persist the draft request id in `sessionStorage` until the server confirms. On reload with a
+     pending id, ask the server (`created_by`) instead of re-creating. Test with the server responding but the
+     client dropping the response.
+  3. News: show the fetch time and refresh failures per source (`home-feeds.json` has `fetched` and `error`), and
+     show the latest 3 on the home screen.
+  4. Then a real web flow on an existing project: send a TEXT change request (review with text) → REWORK →
+     verification → result open. Use `tests/browser_web_e2e.py` as the model, on an isolated root with a copy of
+     a finished project or a fresh small one. Record calls, tokens and interventions. Never resume unrelated
+     projects. No LoRA training.
+- After each unit:
+  - commit;
+  - update `docs/devroom/status.json` in plain Korean (keep Owner memos, they are in the workspace);
+  - write `outputs/ceo-demo-review/IMPLEMENTATION_STATUS.md`;
+  - build into `demo-2026-11/builds/<version>-<commit>/` with BUILD.json (never overwrite);
+  - switch the server only after its checks pass.
+- Do not open or close the Owner's Chrome. Use headless Chrome with a temporary profile only. No paid API, new
+  credentials or sensitive permissions.
+
 # Codex CLI handoff — AX Branch (kept current by Claude)
 
 ## LATEST (2026-10-25 06:50): HEAD ad9b3f4 (code 7fae36f), F161b 441/441
