@@ -246,6 +246,13 @@ def route(app, store, method, path, query, body):
     if method == 'GET':
         if parts == ['overview']:
             return app.overview(store)
+        if parts == ['submission']:
+            request_id = (query.get('request_id') or [''])[0]
+            if not re.fullmatch(r'[\w-]{8,64}', request_id):
+                raise Rejected('올바른 request_id가 필요합니다.')
+            with app.lock:                         # wait for a creation currently committing
+                pid = actions.created_by(store, request_id)
+            return {'id': pid}
         if parts == ['feeds']:
             return app.feeds()
         if parts == ['devroom']:

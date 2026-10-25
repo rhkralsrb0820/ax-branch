@@ -110,6 +110,24 @@ class WebTests(unittest.TestCase):
             self.assertEqual(code, 200, path)
         self.assertEqual(self.launched, [])
 
+    def test_submission_receipt_recovers_lost_response_without_creation_or_launch(self):
+        body = {'goal': '응답 유실 복구', 'request_id': 'lost-response-0001'}
+        self.call('/api/projects', body)                 # response deliberately discarded
+        code, receipt = self.call('/api/submission?request_id=lost-response-0001')
+        self.assertEqual(code, 200)
+        self.assertTrue(receipt['id'])
+        self.assertEqual(self.launched, [receipt['id']])
+        _, retry = self.call('/api/projects', body)
+        self.assertEqual((retry['id'], retry['created']), (receipt['id'], False))
+        self.assertEqual(self.call('/api/submission?request_id=unknown-0001')[1], {'id': None})
+        self.assertEqual(self.call('/api/submission?request_id=x')[0], 400)
+        self.assertEqual(self.launched, [receipt['id']])
+        store = self.app.store()
+        try:
+            self.assertEqual(len(store.projects()), 1)
+        finally:
+            store.close()
+
     def test_departments_attach_detach_persist_and_refuse_duplicates(self):
         _, p = self.call('/api/projects', {'goal': 'g', 'request_id': 'req-0004-abcd'})
         url = f"/api/project/{p['id']}/department"

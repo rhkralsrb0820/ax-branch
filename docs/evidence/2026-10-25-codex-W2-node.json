@@ -1,0 +1,51 @@
+{
+  "runner": "Node DOM fixture, not a real server/browser",
+  "passed": 11,
+  "total": 11,
+  "checks": [
+    {
+      "name": "W2 committed response loss retains pending receipt",
+      "ok": true
+    },
+    {
+      "name": "W2 reload queries receipt and opens existing project",
+      "ok": true
+    },
+    {
+      "name": "W2 reload causes exactly one project and launch",
+      "ok": true
+    },
+    {
+      "name": "W2 recovery clearly labelled and storage cleared",
+      "ok": true
+    },
+    {
+      "name": "W2 intentional new goal gets distinct request",
+      "ok": true
+    },
+    {
+      "name": "W2 unconfirmed reload restores draft and original ID",
+      "ok": true
+    },
+    {
+      "name": "W2 changed goal cannot reuse uncertain request ID",
+      "ok": true
+    },
+    {
+      "name": "W2 retry keeps original request ID",
+      "ok": true
+    },
+    {
+      "name": "W2 stores attachment metadata without contents",
+      "ok": true
+    },
+    {
+      "name": "W2 missing reattached file blocks replay",
+      "ok": true
+    },
+    {
+      "name": "W2 same reattached file allows explicit retry",
+      "ok": true
+    }
+  ]
+}

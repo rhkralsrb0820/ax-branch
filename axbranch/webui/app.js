@@ -115,8 +115,30 @@
   $('#depMenu').onchange = e => { if (e.target.value) addPending(e.target.value); e.target.value = ''; };
 
   // ---- goal box ----
+  const submissionKey = 'axb-pending-submission';
+  let submission = null, submissionUnavailable = false;
+  try { submission = JSON.parse(sessionStorage.getItem(submissionKey) || 'null'); }
+  catch (e) { submissionUnavailable = true; notice('이전 접수 기록을 읽지 못했습니다. 저장소 접근을 복구한 뒤 새로고침하세요.', 0); }
   function draft() { if (!S.requestId) S.requestId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)); }
   const goal = $('#goal');
+  const fileList = () => S.files.map(f => ({name: f.name, bytes: f.data.length}));
+  async function accepted(r, recovered = false) {
+    sessionStorage.removeItem(submissionKey); submission = null;
+    goal.value = ''; S.pending = []; S.files = []; S.requestId = null; renderPending(); $('#fileNames').textContent = ''; $('#files').value = '';
+    orb.pulse(1.2);
+    notice(recovered ? '이전 제출의 접수를 확인해 복구했습니다. 프로젝트를 다시 만들지 않았습니다.'
+      : r.created ? '목표를 접수했습니다. 淸月 CEO가 계획을 시작합니다.' : '이미 접수된 목표입니다 (중복 생성 안 함).');
+    await refreshOverview(); await openProject(r.id);
+  }
+  async function recoverSubmission() {
+    if (!submission) return false;
+    const r = await api('submission?request_id=' + encodeURIComponent(submission.id));
+    if (r.id) { await accepted(r, true); return true; }
+    S.requestId = submission.id; goal.value = submission.goal; S.pending = submission.departments.slice(); renderPending();
+    $('#fileNames').textContent = submission.files.length ? '다시 첨부 필요: ' + submission.files.map(f => f.name).join(', ') : '';
+    notice('이전 제출의 접수가 아직 확인되지 않았습니다. 같은 목표로 재시도하세요.' + (submission.files.length ? ' 파일 내용은 저장하지 않았으므로 같은 파일을 다시 첨부해 주세요.' : ''), 0);
+    return false;
+  }
   goal.addEventListener('focus', () => { S.typing = Date.now(); orb.pulse(.2); updateOrb(); });
   goal.addEventListener('input', () => { draft(); S.typing = Date.now(); orb.pulse(.3); updateOrb(); setTimeout(updateOrb, 1600); });
   $('#files').onchange = async e => {
@@ -130,15 +152,25 @@
     draft(); $('#fileNames').textContent = S.files.length ? `첨부 ${S.files.length}개: ` + S.files.map(f => f.name).join(', ') : '';
   };
   $('#submit').onclick = async () => {
+    if (submissionUnavailable) return notice('이전 접수 기록을 읽을 수 없어 중복 방지를 위해 제출을 멈췄습니다. 저장소 접근을 복구한 뒤 새로고침하세요.', 0);
     const text = goal.value.trim(); if (!text || S.busy) return;
     draft(); S.busy = true; $('#submit').disabled = true;
     try {
+      if (submission) {
+        const r = await api('submission?request_id=' + encodeURIComponent(submission.id));
+        if (r.id) { await accepted(r, true); return; }
+        if (text !== submission.goal || JSON.stringify(S.pending) !== JSON.stringify(submission.departments) || JSON.stringify(fileList()) !== JSON.stringify(submission.files)) {
+          return notice('이전 제출을 확인 중입니다. 같은 목표·부서·첨부 파일로 재시도한 뒤 새 목표를 제출하세요.', 0);
+        }
+        S.requestId = submission.id;
+      } else {
+        const pending = {id: S.requestId, goal: text, departments: S.pending.slice(), files: fileList()};
+        sessionStorage.setItem(submissionKey, JSON.stringify(pending)); // failure stops submission before any POST
+        submission = pending;
+      }
       const r = await api('projects', {goal: text, departments: S.pending, files: S.files, request_id: S.requestId});
-      goal.value = ''; S.pending = []; S.files = []; S.requestId = null; renderPending(); $('#fileNames').textContent = ''; $('#files').value = '';
-      orb.pulse(1.2);
-      notice(r.created ? '목표를 접수했습니다. 淸月 CEO가 계획을 시작합니다.' : '이미 접수된 목표입니다 (중복 생성 안 함).');
-      await refreshOverview(); openProject(r.id);
-    } catch (e) { fail(e); }
+      await accepted(r);
+    } catch (e) { notice('접수 확인이 끝나지 않았습니다. 새로고침 또는 재시도로 기존 접수를 먼저 확인합니다. ' + String(e.message || e), 0); }
     finally { S.busy = false; $('#submit').disabled = false; }
   };
 
@@ -331,8 +363,9 @@
     try { await refreshOverview(); if (S.view === 'project') await refreshProject(); } catch (e) { /* server gone: keep the page */ }
   }
   setInterval(tick, 2000);
-  refreshOverview().then(() => {
+  refreshOverview().then(async () => {
     show('home');
+    if (submission) await recoverSubmission();
     const q = new URLSearchParams(location.search);
     if (S.ov.test_mode && q.has('selftest')) { const s = document.createElement('script'); s.src = '/selftest.js'; document.body.appendChild(s); }
     if (S.ov.test_mode && q.has('perf')) setInterval(() => api('test/perf', Object.assign({at: Date.now(), state: orb.state, low: orb.low}, orb.stats)).catch(() => {}), 3000);

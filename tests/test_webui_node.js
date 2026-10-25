@@ -1,5 +1,6 @@
 // Standard-library DOM fixture for app.js logic. This does not validate a browser's layout or rendering.
 const vm = require('node:vm'), fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+function createPage({storage = new Map(), fetchOverride} = {}) {
 const nodes = new Map(), radios = [], stages = [], posts = [], reports = [];
 class Element {
   constructor(id='') { this.id=id; this.dataset={}; this.value=''; this.textContent=''; this.hidden=false; this.style={}; this.checked=false; this.disabled=false;
@@ -38,7 +39,7 @@ let done;
 const finished=new Promise(r=>{done=r;});
 const timers=new Set();
 const sandbox={document,Response,URL,URLSearchParams,crypto:require('node:crypto').webcrypto,console,Date,Math,Promise,
-  location:{search:'',reload(){}},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},
+  location:{search:'',reload(){}},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
   setTimeout(fn,ms){const t=setTimeout(fn,ms);timers.add(t);return t;},clearTimeout, setInterval(){},
   AXOrb:class{set(){} pulse(){} wake(){}},
   async fetch(url,opt){const u=new URL(url,'http://fixture');
@@ -53,9 +54,15 @@ const sandbox={document,Response,URL,URLSearchParams,crypto:require('node:crypto
     throw Error('unexpected '+url);
   }};
 sandbox.window=sandbox;
+if(fetchOverride) { const base=sandbox.fetch; sandbox.fetch=(url,opt)=>fetchOverride(url,opt,base); }
 const context=vm.createContext(sandbox);
+return {context, nodes, reports, finished, timers, load(){vm.runInContext(fs.readFileSync(path.join(__dirname,'../axbranch/webui/app.js'),'utf8'),context);}, close(){for(const t of timers)clearTimeout(t);}};
+}
+module.exports = {createPage};
+if(require.main === module) {
+const {context,nodes,reports,finished,timers,load}=createPage();
 (async()=>{
-  vm.runInContext(fs.readFileSync(path.join(__dirname,'../axbranch/webui/app.js'),'utf8'),context);
+  load();
   await new Promise(r=>setImmediate(r));
   vm.runInContext(fs.readFileSync(path.join(__dirname,'web_regressions.js'),'utf8'),context);
   await Promise.race([finished,new Promise((_,reject)=>{const t=setTimeout(()=>reject(Error('timeout')),15000);timers.add(t);})]);
@@ -64,3 +71,4 @@ const context=vm.createContext(sandbox);
   if(process.argv[2]) fs.writeFileSync(process.argv[2],JSON.stringify(summary,null,2));
   assert(reports.length>0 && reports.every(r=>r.ok));
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{for(const t of timers)clearTimeout(t);});
+}

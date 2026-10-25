@@ -176,3 +176,7 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
 - 프로젝트·판정별 폼, 각 프로젝트 초안 보존, 지연 프로젝트/기록 응답과 오래된 폼 액션 차단 구현.
 - 새 코드: node --check 및 Node DOM 회귀 10/10. 실제 Chrome은 GPU subprocess 접근 거부로 종료(통과 아님). Python/새 EXE 빌드/실제 모델 E2E는 접근 제한으로 미실행.
 - 다음 W2 제출 ID 복구. 기존 서버는 변경하지 않음.
+
+## Codex W2 checkpoint — 2026-10-25 12:09 KST
+- 제출 직전 sessionStorage 기록, GET /api/submission으로 created_by 조회, 확인된 접수 복구. 파일 내용은 저장하지 않으며 미접수 첨부는 재선택 필요. 의도적으로 바꾼 목표에는 미확인 ID 재사용 금지.
+- Node DOM W1 10/10 + W2 11/11; 서버 unittest 추가했으나 Python 접근 제한으로 미실행. 빌드/서버 전환 없음. 다음 W3.
