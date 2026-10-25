@@ -13,6 +13,36 @@ Semantic versioning. Every release needs an entry with all five sections (enforc
 - Validation is limited to the new Node DOM fixture and JavaScript syntax checks. Python tests, new EXE builds
   and real model/browser E2E are pending runtime access; no release/server switch or main merge.
 
+## [0.1.62] - 2026-10-26
+
+Product Planning department with pinned department versions and scoped experience reuse (candidate; dev/web-ui).
+
+### Added
+- `departments/product-planning`: customer problem, alternatives, value hypothesis, P&L scenarios (arithmetic
+  checked), MVP/exclusions, experiments. Reuses Research/Operations results instead of duplicating them.
+- Scoped department experience: source, verification level, selection reason, difference from the current task;
+  cutoff and source allowlist for controlled comparisons. `product_experiment.py`: an isolated A/B driver.
+- Opt-in execution budgets. Missing usage (UNKNOWN) stops further calls; this is not a provider hard cap.
+
+### Changed
+- Department attachment pins the spec snapshot and sha256. A changed library spec never silently upgrades a
+  project.
+
+### Fixed
+- Single-process full test runs no longer abort with `Tcl_AsyncDelete` (test_orb teardown collects Tk cycles on
+  the Tk thread).
+- Malformed scenario names are rejected instead of crashing the contract check.
+
+### Verification
+- On b7e96f0, the full single-process suite completes: 457 run, 455 passed, 2 failed. Both failures are the known
+  intermittent headless-Edge 90 s timeout in unchanged browser tests, with the stall recorded after page load.
+- Targeted product/department/web/input suites: 46/46. Restart regression added.
+
+### Known issues
+- Edge timeout root cause unknown.
+- OS-level isolation not implemented.
+- Real product comparison results are recorded separately; one comparison does not prove improvement.
+
 ## [0.1.61] - 2026-10-25
 
 Local web UI over the same engine, Owner development room, department contract check (branch dev/web-ui).
