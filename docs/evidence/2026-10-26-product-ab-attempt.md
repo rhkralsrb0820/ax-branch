@@ -30,15 +30,16 @@ any kind.
 - `max_reported_tokens = 60000` per project. `knowledge.reported_tokens` counts input plus output, plus Claude's
   cache_creation and cache_read tokens, and Codex input.
 - One verify → rework cycle already exceeded it (64,995).
-- Measured reference: the comparable packaged web text-rework E2E (P-20261026-3ca452, 10 calls, plan → work → verify
-  → text revision → rework → verify) used about 175,000 tokens counted this way (cache creation 138,817 + cache read
-  35,781 + output 60,363).
+- Measured reference (CORRECTED 2026-10-26): the comparable packaged web text-rework E2E (P-20261026-3ca452,
+  10 real calls: plan → work → verify → text revision → rework → verify, both CEO acceptances) MEASURED 234,981
+  tokens counted this way (input 20 + output 60,363 + cache creation 138,817 + cache read 35,781). An earlier
+  version of this file said "about 175,000", which was only the cache part.
 
 This is an experiment-design parameter, not a verification criterion. Changing it changes the pre-registration and
 the subscription usage spent, so it is left for the Owner's decision; it was not rerun or edited.
 
 **Options for the Owner (not applied):**
-- (a) Raise the per-project reported-token limit to about 200,000, keeping calls ≤ 12 and time ≤ 20 min per
+- (a) Raise the per-project reported-token limit (the earlier suggestion of about 200,000 was based on the uncorrected figure), keeping calls ≤ 12 and time ≤ 20 min per
   project. Estimated total about 4 projects × ≤ 200k.
 - (b) Keep 60k but count only output tokens toward the cap. This changes the meaning of the cap and should be
   disclosed as such.
