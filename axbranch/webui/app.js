@@ -5,7 +5,7 @@
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
   const S = {ov: null, view: 'home', pid: null, project: null, pending: [], files: [], stageKey: null,
-             requestId: null, seen: {}, typing: 0, busy: false};
+             requestId: null, seen: {}, typing: 0, busy: false, navigation: 0, ownerDrafts: {}};
   window.AXB = S;
 
   async function api(path, body) {
@@ -143,17 +143,29 @@
   };
 
   // ---- project view ----
-  async function openProject(pid) { S.pid = pid; S.stageKey = null; show('project'); await refreshProject(); refreshOverview().catch(() => {}); }
+  function saveOwnerDraft() {
+    const box = $('#owner'), text = $('#oText') || $('#oNote'), works = $('input[name=works]:checked');
+    if (box.dataset.mode && text) S.ownerDrafts[box.dataset.mode] = {text: text.value, works: works ? works.value : 'unknown'};
+  }
+  async function openProject(pid) {
+    saveOwnerDraft(); S.navigation++; S.pid = pid; S.project = null; S.stageKey = null;
+    $('#owner').hidden = true; $('#owner').dataset.mode = ''; $('#owner').innerHTML = '';
+    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner']) $('#' + id).textContent = '';
+    show('project'); await refreshProject(); refreshOverview().catch(() => {});
+  }
   async function refreshProject() {
     if (!S.pid) return;
-    const p = S.project = await api('project/' + S.pid);
+    const pid = S.pid, navigation = S.navigation;
+    const p = await api('project/' + pid);
+    if (pid !== S.pid || navigation !== S.navigation || S.view !== 'project') return;
+    S.project = p;
     $('#crumb').textContent = '워크스페이스 / 실행 파이프라인';
     $('#banner').textContent = p.banner.text; $('#banner').style.background = p.banner.color;
     $('#pTitle').textContent = p.title;
     $('#pState').textContent = `${p.id} · ${p.state} · ${p.status} · v${p.iteration}` + (p.pause_reason ? ` · ${p.pause_reason.slice(0, 200)}` : '');
     $('#projectChips').innerHTML = p.attached.map(d => `<span class="chip">▣ ${esc(depName(d.id))}<button class="x" data-detach="${esc(d.id)}" title="해제 (다음 위임부터 적용)">×</button></span>`).join('') || '<span class="muted">없음 — 부서를 이 칸으로 끌어 놓거나 부서를 클릭해 [프로젝트에 추가]</span>';
     $('#projectChips').querySelectorAll('[data-detach]').forEach(b => b.onclick = async () => {
-      try { await api(`project/${S.pid}/department`, {action: 'detach', id: b.dataset.detach}); notice('부서 해제: 다음 위임부터 적용 (실행 중인 단계는 끝까지 진행, 기록은 보존)'); refreshProject(); } catch (e) { fail(e); }
+      try { await api(`project/${pid}/department`, {action: 'detach', id: b.dataset.detach}); notice('부서 해제: 다음 위임부터 적용 (실행 중인 단계는 끝까지 진행, 기록은 보존)'); refreshProject(); } catch (e) { fail(e); }
     });
     $('#pipeline').innerHTML = p.pipeline.map(r => `<div class="stage ${r.mark === '✓' ? 'done' : r.mark === '●' ? 'now' : ''} ${r.key === S.stageKey ? 'sel' : ''}" data-key="${esc(r.key || '')}">
         <div class="h">${esc(r.mark)} ${esc(r.title)}</div><div class="muted">${esc(r.engine)} · ${esc(r.detail)}</div></div>`).join('');
@@ -167,23 +179,35 @@
   }
   async function loadRecords() {
     if (!S.stageKey) return;
+    const pid = S.pid, key = S.stageKey, navigation = S.navigation;
     try {
-      const r = await api(`project/${S.pid}/records?key=${encodeURIComponent(S.stageKey)}`);
+      const r = await api(`project/${pid}/records?key=${encodeURIComponent(key)}`);
+      if (pid !== S.pid || key !== S.stageKey || navigation !== S.navigation || S.view !== 'project') return;
       const text = Array.isArray(r.records) ? r.records.join('\n') : String(r.records);
       $('#records').innerHTML = `<pre>${esc(text)}</pre>`;
     } catch (e) { fail(e); }
   }
   function renderOwner(p) {
     const box = $('#owner'), mode = p.owner.mode;
-    if (!mode) { box.hidden = true; box.dataset.mode = ''; return; }
+    const revision = JSON.stringify([p.id, mode, p.iteration, p.owner.note]);
+    if (!mode) { box.hidden = true; box.dataset.mode = ''; box.innerHTML = ''; return; }
     box.hidden = false;
-    if (box.dataset.mode === mode + p.iteration) return;   // keep what the Owner is typing
-    box.dataset.mode = mode + p.iteration;
+    if (box.dataset.mode === revision) return;   // keep typing only for this project's decision
+    saveOwnerDraft(); box.dataset.mode = revision;
+    const navigation = S.navigation;
+    const current = () => S.pid === p.id && S.navigation === navigation && box.dataset.mode === revision && S.view === 'project';
+    const send = (action, body) => current() ? act(action, body, p.id) : Promise.resolve();
+    const restore = () => {
+      const d = S.ownerDrafts[revision]; if (!d) return;
+      ($('#oText') || $('#oNote')).value = d.text;
+      box.querySelectorAll('input[name=works]').forEach(w => { w.checked = w.value === d.works; });
+    };
     if (mode === 'approval') {
       box.innerHTML = `<h3>승인 필요</h3><p>${esc(p.owner.note)}</p><textarea id="oNote" placeholder="거절할 때 淸月 CEO에게 줄 안내 (선택)"></textarea>
         <div class="row"><button class="primary" id="oYes">외부 연결 승인</button><button class="ghost" id="oNo">거절</button></div>`;
-      $('#oYes').onclick = () => act('network', {approve: true});
-      $('#oNo').onclick = () => act('network', {approve: false, note: $('#oNote').value});
+      $('#oYes').onclick = () => send('network', {approve: true});
+      $('#oNo').onclick = () => current() && send('network', {approve: false, note: $('#oNote').value});
+      restore();
       return;
     }
     const review = mode === 'review';
@@ -195,27 +219,36 @@
         <label><input type="radio" name="works" value="unknown" checked> 아직 확인 안 함</label></div>` : ''}
       <textarea id="oText" placeholder="바꾸거나 더하고 싶은 점을 자유롭게 적어 주세요"></textarea>
       <div class="row"><button class="primary" id="oSend">수정 요청 / 계속</button><button class="ghost" id="oFinish">완료</button></div>`;
-    if (review) $('#oRun').onclick = runResult;
+    if (review) $('#oRun').onclick = () => current() && runResult(p.id);
     $('#oSend').onclick = () => {
+      if (!current()) return;
       const w = document.querySelector('input[name=works]:checked'), works = w ? w.value : 'unknown', text = $('#oText').value.trim();
       if (review && works === 'unknown' && !text) return notice('바꾸고 싶은 점을 적거나, 작동 여부를 선택해 주세요.');
-      act('review', {works, text}).then(() => { box.dataset.mode = ''; });
+      send('review', {works, text}).then(() => {
+        delete S.ownerDrafts[revision];
+        if (current()) { box.dataset.mode = ''; refreshProject(); }
+      }).catch(() => {});
     };
-    $('#oFinish').onclick = finishDialog;
+    $('#oFinish').onclick = () => current() && finishDialog(p.id);
+    restore();
   }
-  async function act(action, body) {
-    try { await api(`project/${S.pid}/${action}`, body || {}); await refreshProject(); refreshOverview().catch(() => {}); }
+  async function act(action, body, pid = S.pid) {
+    try { await api(`project/${pid}/${action}`, body || {}); if (pid === S.pid) await refreshProject(); refreshOverview().catch(() => {}); }
     catch (e) { fail(e); throw e; }
   }
-  async function runResult() {
+  async function runResult(pid = S.pid) {
+    const navigation = S.navigation;
     try {
-      const r = await api(`project/${S.pid}/result`, {});
+      const r = await api(`project/${pid}/result`, {});
+      if (pid !== S.pid || navigation !== S.navigation || S.view !== 'project') return;
       if (r.text !== undefined) { $('#modalBody').innerHTML = `<h3>${esc(r.title)}</h3><div class="result"><pre>${esc(r.text)}</pre></div>`; $('#modal').showModal(); }
       else notice(`${r.how === 'run' ? '실행함' : '열었음'}: ${r.path} (검증된 버전)`);
     } catch (e) { fail(e); }
   }
-  async function finishDialog() {
-    try { await api(`project/${S.pid}/close`, {}); } catch (e) { return fail(e); }
+  async function finishDialog(pid = S.pid) {
+    const navigation = S.navigation;
+    try { await api(`project/${pid}/close`, {}); } catch (e) { return fail(e); }
+    if (pid !== S.pid || navigation !== S.navigation || S.view !== 'project') return;
     $('#modalBody').innerHTML = `<h3>淸月 AI CEO</h3><p>프로젝트를 마칩니다. 이 프로젝트의 지식을 저장할까요?</p>
       <div class="row">만족도(%) <input id="cSat" type="number" min="0" max="100" value="90" style="width:70px"> 이유(선택) <input id="cWhy" style="flex:1"></div>
       <div class="row"><button class="primary" data-c="save">A. 저장하고 닫기</button><button class="ghost" data-c="pause">B. 일시중지</button><button class="ghost" data-c="discard">C. 저장하지 않고 닫기</button></div>`;
@@ -223,7 +256,8 @@
     m.querySelectorAll('[data-c]').forEach(b => b.onclick = async () => {
       const choice = b.dataset.c; let confirm = false;
       if (choice === 'discard' && !(confirm = window.confirm('저장하지 않고 닫으면 이 프로젝트의 지식과 Agent 컨텍스트가 영구히 버려집니다. 계속할까요?'))) return;
-      m.close(); act('close', {choice, confirm, satisfaction: Number($('#cSat').value), why: $('#cWhy').value}).catch(() => {});
+      if (pid !== S.pid || navigation !== S.navigation || S.view !== 'project') return;
+      m.close(); act('close', {choice, confirm, satisfaction: Number($('#cSat').value), why: $('#cWhy').value}, pid).catch(() => {});
     });
   }
   $('#resume').onclick = () => act('resume').catch(() => {});
@@ -289,6 +323,7 @@
   document.querySelectorAll('.nav').forEach(b => b.onclick = () => show(b.dataset.view));
   $('#newWork').onclick = () => { show('home'); goal.focus(); };
   window.AXB.show = show; window.AXB.api = api; window.AXB.notice = notice; window.AXB.esc = esc;
+  window.AXB.openProject = openProject;
 
   // ---- polling (stops while the tab is hidden; reading never starts work) ----
   async function tick() {

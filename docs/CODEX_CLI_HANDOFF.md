@@ -1,3 +1,10 @@
+## Codex 착수 — 2026-10-25 12:03 KST
+- 브랜치 `dev/web-ui`, HEAD `1a8df78408931fb7fb3edc5d4402c5ea2ceb40fd`, 착수 전 작업 트리 clean. 인계 기준과 일치.
+- START HERE와 공유 CODEX_REVIEW.md(07:53 KST) 확인. 완료된 화면 수정은 반복하지 않음.
+- 첫 작업: W1 프로젝트별 승인/피드백 폼 및 지연 응답 분리. 이어서 W2 제출 복구, W3 뉴스, 텍스트 수정 E2E 순서.
+- 기존 DB/산출물 보존, main 병합/푸시 없음. 사용자 Chrome/마우스 사용 없음.
+- 현재 셸에서 인계에 적힌 Python 실행 경로를 찾지 못함. 실행 환경 확인 중이며 이전 테스트는 이번 검증으로 사용하지 않음.
+
 # Codex CLI handoff — AX Branch (Claude usage at 8%: handed over 2026-10-25 ~12:00 KST)
 
 ## START HERE (Owner order of 2026-10-25, step 2 done by Claude, step 3 is yours)
@@ -164,3 +171,8 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
 
 ## Running processes
 - None started by Claude.
+
+## Codex W1 checkpoint — 2026-10-25 12:06 KST
+- 프로젝트·판정별 폼, 각 프로젝트 초안 보존, 지연 프로젝트/기록 응답과 오래된 폼 액션 차단 구현.
+- 새 코드: node --check 및 Node DOM 회귀 10/10. 실제 Chrome은 GPU subprocess 접근 거부로 종료(통과 아님). Python/새 EXE 빌드/실제 모델 E2E는 접근 제한으로 미실행.
+- 다음 W2 제출 ID 복구. 기존 서버는 변경하지 않음.

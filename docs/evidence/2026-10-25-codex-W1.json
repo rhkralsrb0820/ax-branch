@@ -1,0 +1,12 @@
+{
+  "passed": 0,
+  "total": 1,
+  "finished": true,
+  "checks": [
+    {
+      "name": "Chrome stayed running",
+      "ok": false,
+      "detail": "2147483651 Cache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[54200:49104:1025/120508.550:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[54200:12364:1025/120508.553:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\AppData\\Local\\Temp\\axb-regression-q7a9Cm\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[54200:49104:1025/120508.593:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[54200:52044:1025/120508.617:ERROR:services\\device\\public\\cpp\\geolocation\\system_geolocation_source_win.cc:124] Failed to create IAppCapability: 액세스가 거부되었습니다. (0x80070005)\r\n[54200:12052:1025/120508.650:ERROR:components\\viz\\host\\persistent_cache_sandboxed_file_factory.cc:153] Failed to open persistent cache files in directory \"C:\\Users\\HP\\AppData\\Local\\Temp\\axb-regression-q7a9Cm\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\", error: 0: 다른 프로세스가 파일을 사용 중이기 때문에 프로세스가 액세스 할 수 없습니다. (0x20)\r\n[54200:49104:1025/120508.653:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1043] GPU process exited unexpectedly: exit_code=-1073741790\r\n[54200:49104:1025/120508.653:FATAL:content\\browser\\gpu\\gpu_data_manager_impl_private.cc:389] GPU process isn't usable. Goodbye.\r\n"
+    }
+  ]
+}
