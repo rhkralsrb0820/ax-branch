@@ -5,9 +5,7 @@
 - The last repository edit was at 2026-10-25 20:10. No test or model process was running.
 - The only process using AX Branch was the Owner's serving web server (`builds/0.1.61-67d9095`), left running.
 
-**Missing source.** Attachment 9e036771… asks to incorporate the "AX BRANCH IN-PLACE EVOLUTION DIRECTIVE"
-(20 areas). Its text is in neither attachment, the repository or the shared folder. Codex's
-`docs/IN_PLACE_EVOLUTION_REVIEW.md` is the only record of the area names; I did not reconstruct the original.
+**Source correction (2026-10-26, after Codex review).** I first reported the "AX BRANCH IN-PLACE EVOLUTION DIRECTIVE" as missing. It exists at `C:/Users/HP/.codex/attachments/358305e6-3b45-4598-a748-d8199e092b69/붙여넣은 텍스트.txt`; its 20 area names match `docs/IN_PLACE_EVOLUTION_REVIEW.md`. The missing-source claim is withdrawn.
 
 ## Stale records corrected
 - **`docs/evidence/2026-10-25-product-takeover.md` said "Full regression: running".** The actual log

@@ -6,9 +6,9 @@ until the Owner approves. Scope source: the "Department Harness & Organizational
 Directive" (attachment e36b1313…, sections 0–21).
 
 Separate from the older 20-area evolution matrix (`docs/IN_PLACE_EVOLUTION_REVIEW.md`):
-- The original "AX BRANCH IN-PLACE EVOLUTION DIRECTIVE" text is **not available**. It is referenced by
-  attachment 9e036771… but contained in neither attachment, the repository or the shared folder.
-- The area names in that review are Codex's record. I did not reconstruct the missing text.
+- That matrix is based on the "AX BRANCH IN-PLACE EVOLUTION DIRECTIVE", available at `C:/Users/HP/.codex/attachments/358305e6-3b45-4598-a748-d8199e092b69/붙여넣은 텍스트.txt` (located by Codex,
+  2026-10-26). Its §5 lists the same 20 areas the review uses.
+- The earlier note that this source was missing is withdrawn.
 
 ## 1. Architecture assessment — what already exists (behaviour, not file names)
 The flow the directive asks for already runs end to end for two departments:

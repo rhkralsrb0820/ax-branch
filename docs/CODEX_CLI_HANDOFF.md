@@ -1,6 +1,31 @@
-## START HERE — Desktop takeover (2026-10-25 evening KST)
+# Codex CLI handoff — AX Branch
 
-## START HERE — Claude takeover round, 2026-10-26 02:22 KST (review checkpoint; NOT a usage-limit stop)
+## CURRENT CHECKPOINT — the only active instructions (Claude, 2026-10-26, after Codex review of bf6da8d)
+- Branch `dev/web-ui`. Code commit 786834f (review fixes) plus a docs commit on top. Not merged into main; not
+  pushed. The Owner's server is unchanged (`builds/0.1.61-67d9095`).
+- Codex review P1/P2 fixed in 786834f:
+  - historical stage evidence only through a valid edit lineage (fail closed otherwise);
+  - experience levels from the recorded producer/verifier provenance.
+- The P2 documentation finding is resolved by this section and the HISTORICAL markers below.
+- **Original evolution directive:** found at `C:/Users/HP/.codex/attachments/358305e6-3b45-4598-a748-d8199e092b69/붙여넣은 텍스트.txt` (located by Codex). Its 20 area names match
+  `docs/IN_PLACE_EVOLUTION_REVIEW.md`. My earlier "missing source" statement is withdrawn.
+- **Evidence limits that stay true:**
+  - b7e96f0 full single-process suite: 455/457, two Edge timeouts, not a clean pass;
+  - e62d440 scoped tests: 134/134, not a full-suite result;
+  - the packaged web text-rework E2E used same-provider verification fallback and a harness interruption, so it
+    is not cross-engine independent;
+  - the product A/B was never started, and no improvement is established.
+- **Next, in order:**
+  1. Full regression on the frozen current code.
+  2. Check provider availability once (actual call).
+  3. If both providers are available: a preserved candidate build, then ONE bounded A/B comparison (new root).
+  4. H1–H4 and switching the server wait for the Owner.
+- Status of this round's validation: see the newest entry of the shared `IMPLEMENTATION_STATUS.md`.
+
+# ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
+
+
+## [HISTORICAL — superseded, do not act on] START HERE — Claude takeover round, 2026-10-26 02:22 KST (review checkpoint; NOT a usage-limit stop)
 **Claude usage at checkpoint.** 5-hour window 36% remaining (resets ~05:00 KST); 7-day window 91% remaining.
 
 **Git.** Branch `dev/web-ui`, HEAD = the commit containing this section (code e62d440). Not merged into main; not
@@ -66,6 +91,7 @@ stopped.
 Do not switch the serving build without Owner authorization.
 
 
+## [HISTORICAL — superseded, do not act on] START HERE — Desktop takeover (2026-10-25 evening KST)
 - Owner authorized Codex desktop to continue development before handing back to Claude after 22:00. Do not assume the older CLI is still developing: its latest turn ended at the usage limit. Preserve the inherited product-planning changes.
 - Base `dev/web-ui` / `5f70f97`; this continuation is not a release or main merge. Serving web build and user databases are unchanged.
 - Python works here with scoped approved execution. The earlier CLI denial and legacy hook failure are NOT shown to be repaired globally. Do not repeat the same environment investigation in this working session.
@@ -86,7 +112,7 @@ Do not switch the serving build without Owner authorization.
 - 다음: 관련 Python 검사 → 실제 headless Chrome → 전체 회귀 → 보존 빌드 → 텍스트 수정 E2E. 통과 전 서버 전환/오너 개발실 갱신 없음. 이번 `docs/devroom/status.json`은 변경하지 않음.
 - 사용자 DB/산출물/Chrome/마우스 보존. main 병합/푸시 없음. 아래는 이전 checkpoint.
 
-## START HERE — Codex checkpoint 2026-10-25 12:16:36 KST
+## [HISTORICAL — superseded, do not act on] START HERE — Codex checkpoint 2026-10-25 12:16:36 KST
 - 브랜치 `dev/web-ui`, 코드 `83a17dd` (이후 문서 상태 커밋). 시작 기준 `1a8df78`, clean 확인.
 - W1/W2/W3는 순서대로 수정·로컬 커밋. 현재 코드 Node DOM 35/35 및 JS 구문 통과. 실제 브라우저/서버/모델 검증 아님.
 - **4번 실제 텍스트 수정 E2E는 미실행**. `--text-rework` 검증 절차만 준비됨. Python 실행 경로 접근 거부, headless Chrome GPU subprocess 시작 실패.
@@ -104,7 +130,7 @@ Do not switch the serving build without Owner authorization.
 
 # Codex CLI handoff — AX Branch (Claude usage at 8%: handed over 2026-10-25 ~12:00 KST)
 
-## START HERE (Owner order of 2026-10-25, step 2 done by Claude, step 3 is yours)
+## [HISTORICAL — superseded, do not act on] START HERE (Owner order of 2026-10-25, step 2 done by Claude, step 3 is yours)
 - Repo `C:\Users\HP\Desktop\AX-Branch\ax-branch`, branch `dev/web-ui`, HEAD = this commit (code 67d9095).
   Not merged into main; do not merge.
 - **Step 2 is DONE.** Codex's screen fix (devroom `.recommendation` card, sidebar saved titles) was reviewed and
@@ -138,7 +164,7 @@ Do not switch the serving build without Owner authorization.
 
 # Codex CLI handoff — AX Branch (kept current by Claude)
 
-## LATEST (2026-10-25 06:50): HEAD ad9b3f4 (code 7fae36f), F161b 441/441
+## [HISTORICAL — superseded, do not act on] LATEST (2026-10-25 06:50): HEAD ad9b3f4 (code 7fae36f), F161b 441/441
 - Added since 02:40:
   - web artifact library + 이어서 개발 (`actions.develop`);
   - 오너 개발실 redesign (`status.json` schema 2);
@@ -150,7 +176,7 @@ Do not switch the serving build without Owner authorization.
 - **Codex review loop:** read `outputs/ceo-demo-review/CODEX_REVIEW.md`; write results to `IMPLEMENTATION_STATUS.md`
   there.
 
-## CURRENT (2026-10-25 02:40): branch `dev/web-ui`, version 0.1.61, final code 7884507, NOT merged into main
+## [HISTORICAL — superseded, do not act on] CURRENT (2026-10-25 02:40): branch `dev/web-ui`, version 0.1.61, final code 7884507, NOT merged into main
 - The single structured status record is `docs/devroom/status.json`, shown in the web UI's 오너 개발실. Update it
   at each work unit; never mark code as verified without evidence.
 - Done (all tested on 7884507; F161 439/439, hash list in the Codex evidence folder `tested-code-161.sha256`):
