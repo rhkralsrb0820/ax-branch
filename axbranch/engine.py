@@ -977,13 +977,28 @@ class Engine:
         """The current plan's recorded notes-stage results, so department criteria about earlier stages can be judged
         (E2E P-20261025-9f78e5: without them they were 'unverifiable' by construction)."""
         pv, out = self.store.project(pid)['plan_version'], []
+        row = lambda o, name, dep, version: {
+            'stage': name, 'department': dep, 'plan_version': version, 'output': str(o.get('output', ''))[:limit],
+            'key_points': o.get('key_points', [])[:20], 'evidence': o.get('evidence', [])[:30],
+            'counterpoints': o.get('counterpoints', [])[:10]}
         for idx, stage in enumerate(plan.get('pipeline', [])[:-1]):
             done = self.store.output(pid, idx, pv)
             if done:
-                o = done['output']
-                out.append({'stage': stage['name'], 'department': stage.get('department') or '',
-                            'output': str(o.get('output', ''))[:limit], 'key_points': o.get('key_points', [])[:20],
-                            'evidence': o.get('evidence', [])[:30], 'counterpoints': o.get('counterpoints', [])[:10]})
+                out.append(row(done['output'], stage['name'], stage.get('department') or '', pv))
+        if out or len(plan.get('pipeline', [])) > 1:
+            return out
+        # A rework plan that only edits the deliverable (E2E P-20261026-53b987: the Owner's text request re-planned to
+        # one operations stage): the evidence the artifact was built from is the latest earlier plan version's stages.
+        for earlier in range(pv - 1, 0, -1):
+            staffed = [e['detail'] for e in self.store.events(pid, {'department_delegation', 'temporary_agent'})
+                       if e['detail'].get('plan_version') == earlier]
+            first = min((d.get('iteration', 0) for d in staffed), default=0)   # one staffing pass = pipeline order
+            names = [d for d in staffed if d.get('iteration', 0) == first][:-1]   # the last stage is the deliverable
+            found = [(i, self.store.output(pid, i, earlier)) for i in range(len(names))]
+            found = [(i, d) for i, d in found if d]
+            if found:
+                return [row(d['output'], names[i].get('stage', f'stage {i}'), names[i].get('department', ''), earlier)
+                        for i, d in found]
         return out
 
     def _department_gate(self, pid, p, expected, result):
@@ -1111,6 +1126,7 @@ class Engine:
                                      agent_role=stage['agent_role'], why=stage.get('why', ''))
                 elif specs:   # departments are attached but none fits: a temporary agent, recorded and shown
                     self.store.event(pid, 'temporary_agent', stage=stage['name'], agent_role=stage['agent_role'],
+                                     iteration=p['iteration'], plan_version=p['plan_version'],
                                      why=stage.get('why', ''), attached=sorted(specs),
                                      tools=stage.get('capabilities', []), web=bool(stage.get('web')))
             staffed = {(a['role'], a['provider']) for a in self.store.agents(pid)}

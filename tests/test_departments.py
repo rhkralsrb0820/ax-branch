@@ -410,5 +410,19 @@ class DepartmentTests(unittest.TestCase):
         self.assertEqual(checks[0]['problems'], [f"다른 프로젝트 참조: ['{other}']"])     # only the real other project
         self.assertFalse(any(s_ is E.BUILD for s_, _ in script.contexts))            # nothing handed on
 
+    def test_a_rework_plan_that_only_edits_gets_the_evidence_it_was_built_from(self):
+        # E2E P-20261026-53b987: the Owner's text request re-planned to ONE operations stage; the verifier saw no
+        # stage results and judged "cites the earlier stage" unverifiable. It must see plan v1's recorded results.
+        script = DepartmentScript()
+        pid = self.project('research', 'operations')
+        eng = self.engine(script)
+        self.assertEqual(eng.run(pid)['state'], 'OWNER_REVIEW')
+        p = self.store.project(pid)
+        plan = dict(p['plan'], pipeline=[dict(p['plan']['pipeline'][-1], instructions='add one heading line')])
+        self.store.update(pid, plan=plan, plan_version=p['plan_version'] + 1)
+        results = eng._recorded_stage_results(pid, plan)
+        self.assertEqual([(r['stage'], r['department'], r['plan_version']) for r in results], [('analyse', 'research', 1)])
+        self.assertEqual(results[0]['evidence'], ['inputs row 3'])
+
 if __name__ == '__main__':
     unittest.main()
