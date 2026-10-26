@@ -1164,6 +1164,9 @@ class Engine:
             why = departments.check_stage(stage, specs, library, final=stage is plan['pipeline'][-1])
             if why:
                 return self._delegation_refused(pid, why)
+        conflicts = departments.preflight(plan, specs)
+        if conflicts:
+            return self._delegation_refused(pid, '; '.join(conflicts))
         with self.store.tx():
             for stage in plan['pipeline']:
                 dep = stage.get('department') or ''
@@ -1306,6 +1309,9 @@ class Engine:
                    'execution_check': (EXEC_CONTRACT.replace('<file>', plan['artifact_filename'])
                                        if plan['artifact_kind'] != 'markdown' else 'document must be substantive'),
                    'runtime_acceptance': runtime.normalize(plan.get('runtime'))[0], **self._department_brief(final, specs)}
+        documents = departments.document_contracts(specs, {s.get('department') for s in plan['pipeline']})
+        if documents:
+            context['required_document'] = {'contracts': documents, 'rule': departments.DOCUMENT_RULE}
         system = WORKER_SYSTEM.format(role=final['agent_role'])
         history = self.store.verifications(pid)
         if plan.get('owner_rework'):
@@ -1625,6 +1631,11 @@ class Engine:
                          'project criterion; say which) with evidence from the artifact or stage_results (the recorded '
                          'results of the earlier stages). '
                          "A department's own report of success is not evidence.")}
+        documents = departments.document_contracts(self._attached_departments(pid),
+                                                   {s.get('department') for s in plan.get('pipeline', [])})
+        if documents:
+            context['required_document'] = {'contracts': documents, 'rule': departments.DOCUMENT_RULE,
+                                            'deterministic_result': checks.get('department_documents', [])}
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))

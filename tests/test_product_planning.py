@@ -58,7 +58,7 @@ class ProductPlanningTests(unittest.TestCase):
         changed['product-planning']['version'] = '2.0.0'
         changed['product-planning']['permissions']['network'] = True
         pinned = D.resolve(self.store, pid, changed)['product-planning']
-        self.assertEqual(pinned['version'], '1.0.0')
+        self.assertEqual(pinned['version'], self.specs['product-planning']['version'])
         self.assertFalse(pinned['permissions']['network'])
         legacy = self.store.new_project('legacy')
         self.store.event(legacy, 'department_attached', department='product-planning', version='0.1.0')
@@ -97,7 +97,44 @@ class ProductPlanningTests(unittest.TestCase):
         self.assertNotIn('PRIVATE-DO-NOT-COPY', json.dumps(records))
         self.assertTrue(all(e['detail']['improvement'] == 'UNKNOWN' for e in records))
         self.assertEqual(knowledge.department_experience(self.store, 'product planning cost scenario', 'other',
-                         [{'id': 'product-planning', 'version': '1.0.0'}]), [])  # scripted != subscription execution
+                         [{'id': 'product-planning', 'version': self.specs['product-planning']['version']}]), [])  # scripted != subscription execution
+        # The same required headings and JSON block reach planning, production and verification.
+        want = D.document_contracts({'product-planning': self.specs['product-planning']})
+        plan_ctx = next(c for s, c in script.contexts if s is E.PLAN)
+        planned = {d['id']: d for d in plan_ctx['attached_departments']}
+        self.assertEqual(planned['product-planning']['document_contract']['headings'], want[0]['headings'])
+        self.assertNotIn('document_contract', planned['research'])
+        for schema in (E.BUILD, E.VERDICT):
+            ctx = next(c for s, c in script.contexts if s is schema)
+            self.assertEqual(ctx['required_document']['contracts'], want, schema)
+        self.assertTrue(all(h[3:] in document() for h in want[0]['headings']))   # what check_document enforces
+
+    def test_preflight_refuses_a_non_document_plan_before_any_agent_call(self):
+        class CodeScript(DepartmentScript):
+            def __call__(script, prompt, schema, **kw):
+                result, used, notes = super().__call__(prompt, schema, **kw)
+                if schema is E.PLAN:
+                    result.update(artifact_kind='python', artifact_filename='plan.py')
+                return result, used, notes
+        stages = [dict(name='plan', agent_role='Product planner', instructions='Decide', department='product-planning',
+                       provider='claude', web=False, why='planning owns the decision')]
+        script = CodeScript(pipeline=stages)
+        pid = self.store.new_project('product planning cost scenario')
+        D.attach(self.store, pid, 'product-planning', self.specs)
+        eng = E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'vault', gai_db=self.tmp / 'none', llm=script)
+        result = eng.run(pid)
+        self.assertEqual(result['state'], 'PAUSED')
+        self.assertIn('markdown document', result['pause_reason'])
+        self.assertFalse([s for s, _ in script.contexts if s in (E.WORK, E.BUILD, E.VERDICT)])
+        self.assertEqual(D.preflight({'artifact_kind': 'markdown', 'pipeline': stages}, self.specs), [])
+        self.assertEqual(D.preflight({'artifact_kind': 'python', 'pipeline': [dict(stages[0], department='research')]},
+                                     self.specs), [])
+
+    def test_source_criterion_is_conditional_in_1_0_1(self):
+        spec = self.specs['product-planning']
+        self.assertEqual(spec['version'], '1.0.1')
+        self.assertIn('제공되지 않았으면 제공된 것이 없다고 명시한다', spec['acceptance_criteria'][-1])
+        self.assertIn('## 고객과 문제', spec['agent']['instructions'])
 
     def source(self):
         pid = self.store.new_project('product planning cost scenario')

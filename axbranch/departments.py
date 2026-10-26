@@ -251,12 +251,44 @@ def detach(store, pid, dep_id):
                 applies='from the next delegation; a stage already running finishes; results and records are kept')
 
 
+DOCUMENT_RULE = ('The deliverable must be a markdown document containing each required heading line exactly as given '
+                 '(any heading level; the text unchanged: no translation, numbering or additions) and, when '
+                 'product_plan_json is true, exactly one ```json fenced block whose top-level key is product_plan. '
+                 'This is a department contract checked deterministically at verification; it takes precedence over '
+                 'differing section names in stage instructions, and any length limit must leave room for it.')
+
+
+def document_contracts(specs, delegated=None):
+    """The document structure each (delegated) department requires, in the form planner, producer and verifier
+    all see: the same headings check_document enforces."""
+    out = []
+    for dep, spec in specs.items():
+        c = spec.get('contract') or {}
+        if c.get('document_sections') and (delegated is None or dep in delegated):
+            out.append({'department': dep, 'version': spec['version'],
+                        'headings': [f'## {s}' for s in c['document_sections']],
+                        'product_plan_json': bool(c.get('product_plan'))})
+    return out
+
+
+def preflight(plan, specs):
+    """Conflicts between a plan and its delegated departments' contracts, found before any agent is called."""
+    delegated = {s.get('department') for s in plan.get('pipeline', [])}
+    return [f"department {d['department']!r} requires a markdown document with its headings, but the plan delivers "
+            f"artifact_kind {plan.get('artifact_kind')!r}; re-plan as markdown or detach the department"
+            for d in document_contracts(specs, delegated) if plan.get('artifact_kind') != 'markdown']
+
+
 def summary(spec):
     """What 淸月 CEO needs to plan with a department (not its prompt text)."""
-    return {k: spec[k] for k in ('id', 'version', 'name', 'role', 'provides', 'tools', 'inputs', 'outputs',
-                                 'acceptance_criteria')} | {'agent_role': spec['agent']['role'],
-                                                            'network': spec['permissions']['network'],
-                                                            'workflow': spec.get('workflow', [])}
+    out = {k: spec[k] for k in ('id', 'version', 'name', 'role', 'provides', 'tools', 'inputs', 'outputs',
+                                'acceptance_criteria')} | {'agent_role': spec['agent']['role'],
+                                                           'network': spec['permissions']['network'],
+                                                           'workflow': spec.get('workflow', [])}
+    contract = document_contracts({spec['id']: spec})
+    if contract:
+        out['document_contract'] = {**contract[0], 'rule': DOCUMENT_RULE}
+    return out
 
 
 def check_stage(stage, attached_specs, library=None, final=False):
