@@ -26,7 +26,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import sandbox
+from . import isolation, sandbox
 
 INT = {'type': 'integer'}
 STR = {'type': 'string'}
@@ -305,7 +305,11 @@ def _contains(text, needles):
     return missing
 
 
-def check(spec, entry_path, python, cwd, on_step=None, executable=None):
+ISOLATED_MODES = ('cli', 'gui')     # server/web need loopback into the program: AppContainers refuse it without an
+                                    # administrator-only exemption (not configured; Owner decision)
+
+
+def check(spec, entry_path, python, cwd, on_step=None, executable=None, isolate=False):
     """Run the spec against the artifact copied in cwd. Returns an evidence dict with 'ok'.
     executable: the file name (in cwd) of a built native program: every launch runs IT, never `python <entry>`."""
     spec, corrections = normalize(spec)
@@ -315,12 +319,16 @@ def check(spec, entry_path, python, cwd, on_step=None, executable=None):
     if mode == 'none':
         ev.update(ok=True, notes=corrections + ['no runtime surface declared (document or library)'])
         return ev
+    if isolate and mode not in ISOLATED_MODES:
+        ev.update(ok=False, isolation_blocked=(f'runtime mode {mode!r} needs loopback connections into the program, '
+                                              'which the isolated backend does not allow'))
+        return ev
     audit_dir = tempfile.mkdtemp(prefix='axb-net-')
     audit_log = os.path.join(audit_dir, 'audit.jsonl')
     if executable:
         # The Owner's real launch target. The audit hook cannot be injected into a frozen program: network evidence
         # for it is unknown, stated rather than implied. The clean environment keeps Python off its PATH.
-        base = Launch([str(Path(cwd) / executable)], {}, cwd, native=True)
+        base = Launch([str(Path(cwd) / executable)], {}, cwd, native=True, isolate=isolate and [audit_dir])
         ev['native_executable'] = executable
         # The delivery judgment asks for these (P-20261019-32a79d asked three times): which bytes ran, and that no
         # Python was reachable on the PATH they ran with. Measured here, not asserted.
@@ -333,9 +341,16 @@ def check(spec, entry_path, python, cwd, on_step=None, executable=None):
         ev['notes'] = ev['notes'] + [f'every launch ran the built {executable}, not the Python source; verified on '
                                      'this PC with a clean environment, NOT on a clean Windows machine']
     else:
-        base = Launch([python, '-E', '-s', '-X', 'utf8', '-c', AUDIT, entry_path], {'AXB_AUDIT_LOG': audit_log}, cwd)
+        base = Launch([python, '-E', '-s', '-X', 'utf8', '-c', AUDIT, entry_path], {'AXB_AUDIT_LOG': audit_log}, cwd,
+                      isolate=isolate and [audit_dir])
     try:
-        _check(spec, mode, base, cwd, ev, on_step)
+        try:
+            _check(spec, mode, base, cwd, ev, on_step)
+        except isolation.IsolationUnavailable as e:
+            ev.update(ok=False, isolation_blocked=str(e))
+            return ev
+        if isolate:
+            ev['isolation'] = base.manifests
         ev['network'] = network_summary(audit_log) if not executable else {
             'unknown': 'native executable: the in-process network audit hook cannot be injected'}
     finally:
@@ -346,16 +361,28 @@ def check(spec, entry_path, python, cwd, on_step=None, executable=None):
 class Launch:
     """How the artifact is started (the audit wrapper + the clean environment), and its record."""
 
-    def __init__(self, argv, env, cwd, native=False):
-        self.argv, self.env, self.cwd, self.native = argv, env, cwd, native
+    def __init__(self, argv, env, cwd, native=False, isolate=None):
+        """isolate: None, or the extra folders (e.g. the audit log's) each isolated launch may write."""
+        self.argv, self.env, self.cwd, self.native, self.isolate = argv, env, cwd, native, isolate
+        self.manifests = []
 
     def at(self, cwd):
         """The same launch from another folder (a native program runs ITS copy there)."""
         argv = [str(Path(cwd) / Path(self.argv[0]).name)] if self.native else self.argv
-        return Launch(argv, self.env, cwd, self.native)
+        other = Launch(argv, self.env, cwd, self.native, self.isolate)
+        other.manifests = self.manifests
+        return other
 
     def start(self, args, stdin_text='', split=False):
-        return sandbox.start(self.argv + list(args), self.cwd, stdin_text, extra_env=self.env, split=split)
+        manifest = None
+        if self.isolate is not None and self.isolate is not False:
+            manifest = isolation.Manifest(purpose='runtime acceptance', writes=list(self.isolate))
+            self.manifests.append(manifest.record() | {'pending': True})
+        proc = sandbox.start(self.argv + list(args), self.cwd, stdin_text, extra_env=self.env, split=split,
+                             isolate=manifest)
+        if manifest is not None:
+            self.manifests[-1] = manifest.record()
+        return proc
 
     def record(self, args):
         if self.native:

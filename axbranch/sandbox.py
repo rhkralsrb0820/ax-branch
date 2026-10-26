@@ -5,8 +5,10 @@
 - Windows Job Object: the whole process tree is capped (process count, memory) and killed when
   the check ends or times out — no orphaned grandchildren. Elsewhere: a new session + killpg.
 
-Not a security boundary against reading the user's files: same OS account. A separate
-low-privilege account is the upgrade path (see docs/DECISIONS.md D12).
+- isolate=Manifest (Windows): additionally an AppContainer (isolation.py): the OS denies the program every file,
+  registry key and network endpoint outside what the manifest grants, and child processes unless allowed. If the
+  boundary cannot be set up the run does NOT start (isolation.IsolationUnavailable); there is no silent fallback.
+Without isolate: not a security boundary against reading the user's files (same OS account).
 """
 import os
 import shutil
@@ -71,9 +73,9 @@ if os.name == 'nt':
         return job
 
 
-def run(args, cwd, timeout, stdin_text='', extra_env=None):
+def run(args, cwd, timeout, stdin_text='', extra_env=None, isolate=None):
     """Returns (returncode or None on timeout, combined output)."""
-    proc = start(args, cwd, stdin_text, extra_env=extra_env)
+    proc = start(args, cwd, stdin_text, extra_env=extra_env, isolate=isolate)
     try:
         code = proc.wait(timeout)
         proc.stop()
@@ -83,22 +85,23 @@ def run(args, cwd, timeout, stdin_text='', extra_env=None):
         proc.cleanup()
 
 
-def start(args, cwd, stdin_text='', env=None, caps=True, extra_env=None, split=False):
+def start(args, cwd, stdin_text='', env=None, caps=True, extra_env=None, split=False, isolate=None):
     """A contained process that keeps running (e.g. a server under test). Always call stop().
     env=None -> the clean environment for generated code (plus extra_env); provider CLIs pass their own
     (logged-in) environment and caps=False, keeping only kill-the-whole-tree.
     split: stderr goes to its own file (streams()); output() still returns stdout then stderr."""
-    return Contained(args, cwd, stdin_text, env, caps, extra_env, split)
+    return Contained(args, cwd, stdin_text, env, caps, extra_env, split, isolate)
 
 
 class Contained:
     # Output goes to a file, not a pipe: a grandchild inheriting a pipe would keep us waiting until
     # it finished its work. We wait for the main process only, then kill whatever is left.
-    def __init__(self, args, cwd, stdin_text, env=None, caps=True, extra_env=None, split=False):
+    def __init__(self, args, cwd, stdin_text, env=None, caps=True, extra_env=None, split=False, isolate=None):
         self.tmp = Path(tempfile.mkdtemp(prefix='axb-tmp-'))   # outside cwd: the program's folder stays as built
         self.log = self.tmp / 'output.txt'
         self.err_log = self.tmp / 'stderr.txt' if split else None
         self.proc = self.job = self._out = self._in = self._err = None
+        self.manifest = isolate
         try:
             stdin_path = self.tmp / 'stdin.txt'
             stdin_path.write_bytes((stdin_text or '').encode('utf-8'))
@@ -109,6 +112,19 @@ class Contained:
                 env = {**clean_env(str(self.tmp)), **(extra_env or {})}
             common = dict(cwd=cwd, env=env, stdin=self._in,
                           stdout=self._out, stderr=self._err or subprocess.STDOUT)
+            if isolate is not None:
+                from . import isolation
+                self.job = _job(caps)
+                isolate.writes = list(dict.fromkeys([*isolate.writes, str(self.tmp), str(cwd)]))
+                isolate.reads = list(dict.fromkeys([*isolate.reads, *isolate.writes]))
+                isolation.check_grants(isolate)
+                self.proc = isolation.launch(isolation.isolated_args(args), cwd, env, self._in, self._out,
+                                             self._err or self._out, isolate)
+                if not _k32.AssignProcessToJobObject(self.job, int(self.proc._handle)):
+                    self.proc.kill()
+                    raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject failed')
+                self.proc.resume()
+                return
             if os.name != 'nt':
                 self.proc = subprocess.Popen(args, start_new_session=True, **common)
                 return
@@ -181,6 +197,8 @@ class Contained:
         for f in (self._out, self._in, self._err):
             if f is not None and not f.closed:
                 f.close()
+        if hasattr(self.proc, 'close'):          # isolated: release handles, delete the per-run AppContainer profile
+            self.proc.close()
         return code
 
     def cleanup(self):

@@ -17,7 +17,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, kindex, knowledge, library, metrics, native,
+from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, isolation, kindex, knowledge, library, metrics, native,
                departments, permissions, providers, runtime, sandbox, sources, supervisor, training)
 from . import __version__
 from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
@@ -810,12 +810,13 @@ class Engine:
         except Exception as e:
             self.store.event(pid, 'call_failed', who=who, preferred=prefer,
                              seconds=round(time.monotonic() - started), error=str(e)[:500],
-                             notes=getattr(e, 'notes', []))
+                             failures=[providers.failure_category(n) for n in getattr(e, 'notes', [])])
             raise
         finally:
             _status_remove(activity)
-        if notes:
-            self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, notes=notes)
+        self.last_failures = [providers.failure_category(n) for n in notes or []]
+        if notes:      # sanitized categories only: raw CLI output can echo prompt text
+            self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, failures=self.last_failures)
         # Least privilege, auditable: the authority this turn had on the provider that ACTUALLY ran it (failover).
         call = self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started),
                                 capability_grant=context['capability_grant'],
@@ -1449,12 +1450,12 @@ class Engine:
             self.store.add_artifact(pid, it, path, sha, plan['artifact_kind'], agent, manifest)
             self.store.set_state(pid, 'VERIFYING', reason=f'artifact v{it} built')
 
-    def checks(self, path, kind, entry=None, rejected=(), python=None):
+    def checks(self, path, kind, entry=None, rejected=(), python=None, isolate=True):
         """Deterministic evidence. A model's opinion can never override these.
         path: the file, or for a bundle its folder (entry = relative path of the file to run).
         python: the interpreter for the self-test (a training project's own stack), else this one."""
         if kind == 'bundle':
-            return self._bundle_checks(Path(path), entry, rejected, python)
+            return self._bundle_checks(Path(path), entry, rejected, python, isolate)
         text = Path(path).read_text(encoding='utf-8')
         if kind != 'python':
             ok = len(text.strip()) >= 200
@@ -1471,8 +1472,22 @@ class Engine:
         with tempfile.TemporaryDirectory(prefix='axb-check-', ignore_cleanup_errors=True) as cwd:
             (Path(cwd) / Path(path).name).write_bytes(Path(path).read_bytes())
             self._copy_inputs(path, cwd)
-            code, output = sandbox.run([python, '-I', '-X', 'utf8', Path(path).name, '--self-test'], cwd, gov.CHECK_TIMEOUT)
-        return self._result(['compile', 'self-test'], code, output)
+            return self._contained_run([python, '-I', '-X', 'utf8', Path(path).name, '--self-test'], cwd,
+                                       ['compile', 'self-test'], isolate, artifacts.sha(Path(path).read_bytes()))
+
+    @staticmethod
+    def _contained_run(args, cwd, ran, isolate, sha):
+        """A generated program's check run. isolate: inside an OS boundary (AppContainer, isolation.py) or not at
+        all - never a silent fallback. False only under a recorded Owner exception (labelled in the evidence)."""
+        manifest = isolation.Manifest(purpose='self-test', artifact_sha256=sha,
+                                      lifetime_seconds=gov.CHECK_TIMEOUT) if isolate else None
+        try:
+            code, output = sandbox.run(args, cwd, gov.CHECK_TIMEOUT, isolate=manifest)
+        except isolation.IsolationUnavailable as e:
+            return {'ok': False, 'ran': ran, 'output': f'ISOLATION_BLOCKED: {e}', 'isolation_blocked': str(e)}
+        result = Engine._result(ran, code, output)
+        result['isolation'] = manifest.record() if manifest else {'backend': 'job_object_only', 'owner_exception': True}
+        return result
 
     @staticmethod
     def _result(ran, code, output):
@@ -1480,7 +1495,7 @@ class Engine:
             return {'ok': False, 'ran': ran, 'output': f'self-test timed out ({gov.CHECK_TIMEOUT}s); process tree killed'}
         return {'ok': code == 0, 'ran': ran, 'exit_code': code, 'output': output[-3000:]}
 
-    def _bundle_checks(self, folder, entry, rejected, python=None):
+    def _bundle_checks(self, folder, entry, rejected, python=None, isolate=True):
         ran = ['paths']
         if rejected:
             return {'ok': False, 'ran': ran, 'output': 'refused files: ' + '; '.join(rejected)}
@@ -1501,8 +1516,8 @@ class Engine:
             self._copy_inputs(folder, cwd)
             # -E -s, not -I: isolated mode drops the script folder from sys.path, so a bundle
             # could not import its own modules. Environment and user site-packages stay ignored.
-            code, output = sandbox.run([python, '-E', '-s', '-X', 'utf8', entry, '--self-test'], cwd, gov.CHECK_TIMEOUT)
-        return self._result(ran, code, output)
+            return self._contained_run([python, '-E', '-s', '-X', 'utf8', entry, '--self-test'], cwd, ran, isolate,
+                                       isolation.sha256_dir(folder))
 
     def _actual_producer(self, pid, artifact):
         """Return (provider, is_fallback) for the artifact's final production stage."""
@@ -1549,7 +1564,10 @@ class Engine:
                 return
         with capabilities.lease(self.store, pid, 'deterministic checks', ['python_checks']
                                 if artifact['kind'] != 'markdown' else [], kind='harness'):
-            checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected, python)
+            checks = self.checks(artifact['path'], artifact['kind'], plan['artifact_filename'], rejected, python,
+                                 isolate=self._isolate(pid))
+        if checks.get('isolation_blocked'):
+            return self._isolation_blocked(pid, checks['isolation_blocked'])
         specs = self._attached_departments(pid)
         delegated = {s.get('department') for s in plan.get('pipeline', [])}
         for dep, spec in specs.items():
@@ -1585,6 +1603,8 @@ class Engine:
                           'output': f"native build failed: {built['output'][-1500:]}"}
         selftest_ok = checks['ok']
         checks['runtime'] = self.runtime_evidence(artifact, plan.get('runtime'), plan['artifact_filename'])
+        if checks['runtime'].get('isolation_blocked'):
+            return self._isolation_blocked(pid, checks['runtime']['isolation_blocked'])
         failing = [s for s in checks['runtime']['steps'] if not s['ok']]
         if failing and all(all(pr.startswith('browser did not finish') for pr in s.get('problems', [])) for s in failing):
             # The verification harness itself failed (headless browser hang), not the artifact. 2026-10-05:
@@ -1674,10 +1694,23 @@ class Engine:
             result['claim_checks'] = sources.merge_reused(result.get('claim_checks') or [], reused, recheck)
         verifier_retrievals = self.last_retrievals
         if used == producer:
+            causes = [f for f in getattr(self, 'last_failures', []) if f.get('provider') == _other(producer)]
+            cause = ', '.join(f"{f['category']}" + (f" ({f['evidence']})" if f['evidence'] else '') for f in causes) \
+                or 'no failure recorded for the other provider'
+            if self._cross_provider_required(pid):
+                # Same-provider review cannot satisfy an explicit cross-provider requirement: no acceptance.
+                self.store.event(pid, 'independent_verification_unavailable', iteration=p['iteration'], producer=producer,
+                                 verifier=used, failures=causes)
+                self.store.pause(pid, (f'Independent verification unavailable: this project requires a verifier on a '
+                                       f'different provider than the producer ({producer}); {_other(producer)}: {cause}. '
+                                       'The same-provider verdict was NOT accepted. Resume when the other provider is '
+                                       'available.')[:600], resume_state='VERIFYING')
+                return
             self.store.event(pid, 'decision', what="verification ran on the producer's engine",
                              actual_producer=producer,
                              producer_source='configured fallback' if fallback else 'recorded',
-                             why=f'{_other(producer)} unavailable (usage limit or not installed); the Verification '
+                             failures=causes, level='SAME_PROVIDER_ROLE_SEPARATED',
+                             why=f'{_other(producer)} unavailable ({cause}); the Verification '
                                  f'Agent is still a separate role with its own prompt and no production context, '
                                  f'but engine diversity was lost for round {p["iteration"]}', by='engine')
         # Gate = approved criteria + deterministic checks. A finding outside the approved criteria is a
@@ -2568,6 +2601,24 @@ class Engine:
                     if e['detail'].get('artifact') == artifact['id'] and e['detail'].get('ok')), None) if pid else None
         return Path(rec['dir']) if rec and Path(rec['dir']).is_dir() else None
 
+    def _cross_provider_required(self, pid):
+        """An explicit project requirement (Owner CLI or a pre-registered experiment): only a verifier on another
+        provider than the producer may accept. Absent = the existing labelled same-provider fallback is allowed."""
+        found = self.store.events(pid, {'verification_policy'})
+        return bool(found and found[-1]['detail'].get('cross_provider') == 'required')
+
+    def _isolate(self, pid):
+        """Generated programs run inside the OS boundary unless the Owner recorded an exception for this project."""
+        found = self.store.events(pid, {'isolation_exception'}) if pid else []
+        return not (found and found[-1]['detail'].get('allow'))
+
+    def _isolation_blocked(self, pid, why):
+        self.store.event(pid, 'isolation_blocked', reason=why[:500])
+        self.store.pause(pid, (f'Owner action needed: isolated execution unavailable - {why}. Generated code was NOT run. '
+                               f'To run this project\'s checks with process containment only (no file/network '
+                               f'boundary): python -m axbranch isolation {pid} --allow-unisolated --reason "..."')[:600],
+                         resume_state='VERIFYING')
+
     def runtime_evidence(self, artifact, spec, entry):
         """Launch the artifact the way the Owner will (Runtime Acceptance) in a contained temp copy."""
         if artifact['kind'] not in ('python', 'bundle'):
@@ -2600,7 +2651,8 @@ class Engine:
                                         capabilities.harness_requests(spec or runtime.DEFAULT, nb), kind='harness',
                                         browser_available=bool(runtime.browser())):
                     return runtime.check(spec or runtime.DEFAULT, rel, python, cwd,
-                                         on_step=lambda detail: self.beat(pid, detail), executable=exe and exe.name)
+                                         on_step=lambda detail: self.beat(pid, detail), executable=exe and exe.name,
+                                         isolate=self._isolate(pid))
             return runtime.check(spec or runtime.DEFAULT, rel, python, cwd, executable=exe and exe.name)
 
     def _replan_knowledge(self, pid, stage, focus):

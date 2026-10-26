@@ -56,6 +56,11 @@ def main(argv=None):
     lc = sub.add_parser('lifecycle', help='Owner: department registry state; a transition is recorded with reason and evidence')
     lc.add_argument('dep', nargs='?'); lc.add_argument('--status', choices=('candidate', 'verified', 'quarantined', 'retired'))
     lc.add_argument('--reason', default=''); lc.add_argument('--evidence', action='append', default=[])
+    iso = sub.add_parser('isolation', help='Owner: show OS isolation status, or record a per-project exception')
+    iso.add_argument('id', nargs='?'); iso.add_argument('--allow-unisolated', action='store_true')
+    iso.add_argument('--revoke', action='store_true'); iso.add_argument('--reason', default='')
+    vp = sub.add_parser('verification', help='Owner: require (or allow) a verifier on a different provider than the producer')
+    vp.add_argument('id'); vp.add_argument('--cross-provider', choices=('required', 'allowed'), required=True)
     sub.add_parser('result').add_argument('id')      # the verified result, as [결과 실행] / [결과 보기] does        # (re)create the pinned training stack a trained result needs
     ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
     sv = sub.add_parser('supervise'); sv.add_argument('--watch', action='store_true')
@@ -107,6 +112,11 @@ def _dispatch(a):
             print(web.stop_running())
             return 0
         return web.main(a.port, test_mode=a.test_mode)
+    if a.cmd == 'isolation' and not a.id:
+        from . import isolation
+        ok, why = isolation.available()
+        print('AppContainer isolation: ' + ('available' if ok else f'UNAVAILABLE - {why}'))
+        return 0 if ok else 1
     if a.cmd == 'lifecycle':
         from . import departments
         if a.status:
@@ -229,6 +239,17 @@ def _dispatch(a):
             return 1
         print(', '.join(d['id'] + (' (필수)' if d['mode'] == 'required' else '')
                         for d in departments.attached(store, a.id)) or '(연결된 부서 없음)')
+    elif a.cmd == 'verification':
+        store.event(a.id, 'verification_policy', cross_provider=a.cross_provider, by='owner-cli')
+        print(f'cross-provider verification: {a.cross_provider}')
+    elif a.cmd == 'isolation':
+        if a.allow_unisolated or a.revoke:
+            if a.allow_unisolated and not a.reason.strip():
+                print('거부: 예외에는 이유가 필요합니다 (--reason)')
+                return 1
+            store.event(a.id, 'isolation_exception', allow=bool(a.allow_unisolated), reason=a.reason[:300], by='owner-cli',
+                        scope='generated-program checks of this project only; Job Object containment remains')
+        print('이 프로젝트의 생성 프로그램 검사: ' + ('OS 격리' if engine._isolate(a.id) else 'Owner 예외 - 프로세스 격리만 (파일·네트워크 경계 없음)'))
     elif a.cmd == 'training-env':
         from . import training
         env = training.ensure_env(os.getcwd())

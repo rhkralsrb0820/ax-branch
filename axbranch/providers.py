@@ -11,6 +11,7 @@ is npm's cmd.exe wrapper, and the real node/codex.exe/claude kept running (prove
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -273,6 +274,24 @@ def authority(name, web):
             'session_persistence': False, 'workdir': 'empty temp dir, deleted after the turn',
             'enforced_by': {'claude': '--restricted, --tools/--disallowedTools, empty MCP config, no session persistence',
                             'codex': '--sandbox read-only, shell_tool/unified_exec off, --ephemeral, web_search flag'}[name]}
+
+
+_CATEGORIES = (('cli_not_installed', r'CLI not installed'),
+               ('usage_limit', r'usage limit|rate limit|quota|limit reached|429|too many requests|hit your limit'),
+               ('auth', r'not logged in|log ?in required|unauthori[sz]ed|401|authentication'),
+               ('timeout', r'timed? ?out|시간 초과'))
+
+
+def failure_category(note):
+    """A provider failure as a sanitized category plus the matched phrase only: never the raw CLI output, which can
+    echo prompt text."""
+    text = str(note)
+    name = text.split(':', 1)[0].strip() if ':' in text else ''
+    for category, pattern in _CATEGORIES:
+        m = re.search(pattern, text, re.I)
+        if m:
+            return {'provider': name, 'category': category, 'evidence': m.group(0)[:40]}
+    return {'provider': name, 'category': 'unknown', 'evidence': ''}
 
 
 def call(prompt, schema, prefer='claude', web=False, cancel=None, on_tick=None):

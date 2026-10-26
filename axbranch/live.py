@@ -188,7 +188,8 @@ def view(workspace, store, pid):
         elif kind == 'call_failed':
             actor, text = who, 'failed: ' + str(d.get('error', ''))[:80]
         elif kind == 'provider_handoff':
-            actor, text = who, f"engine switched {d.get('preferred', '-')} → {d.get('used', '-')}"
+            why = ', '.join(f.get('category', '') for f in d.get('failures', []))
+            actor, text = who, f"engine switched {d.get('preferred', '-')} → {d.get('used', '-')}" + (f' ({why})' if why else '')
         elif kind == 'state':
             actor, text = 'STATE', f"{d.get('frm', '-')} → {d.get('to', '-')}"
             if d.get('reason'):

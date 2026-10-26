@@ -273,7 +273,7 @@ class EngineTests(unittest.TestCase):
                 self.assertEqual(len(failed), 1)
                 self.assertEqual(failed[0]['detail'], {
                     'who': 'Developer', 'preferred': 'claude', 'seconds': 1800,
-                    'error': str(error)[:500], 'notes': error.notes})
+                    'error': str(error)[:500], 'failures': [providers.failure_category(n) for n in error.notes]})
                 self.assertIsNone(E.activity(self.tmp / 'ws', pid))
                 self.assertEqual(len(self.store.events(pid, {'call_start'})), 3)
                 calls = self.store.events(pid, {'call'})
