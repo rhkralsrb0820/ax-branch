@@ -31,7 +31,7 @@
     `test_rendered_page_is_checked_not_just_served`. That test does not use isolation, and it ran concurrently with
     other suites.
 - **NOT done yet, in order:**
-  1. B3: confirm historical-evidence reuse regressions still pass (no code change expected).
+  1. B3: DONE 00:58 — lineage regressions (positive edit-only + negative cases in tests/test_departments.py) pass on 2058648; no code change.
   2. B5: H1/H2 packaged denial checks.
   3. B6: bounded browser-stall diagnostics (single test, phase/process record; no timeout increase).
   4. Full regression on frozen code, preserved candidate build, then B4: one packaged web text-rework E2E on it.
