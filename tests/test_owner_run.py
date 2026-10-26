@@ -1,6 +1,5 @@
-"""What is actually enforced when a generated Python program runs: the audit-hook launcher refuses every non-local
-connection during verification and, for the Owner's [결과 실행], everything but loopback and approved domains.
-Best effort inside Python (not an OS firewall); files are not restricted. These tests run real child processes."""
+"""Owner execution uses AppContainer by default. Legacy audit-hook probes below describe only
+the explicitly reduced-protection path; they are not evidence of an OS filesystem boundary."""
 import json
 import shutil
 import subprocess
@@ -10,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from axbranch import engine as E, runtime
-from axbranch.state import Store
+from axbranch import engine as E, runtime, sandbox, isolation
+from axbranch.state import Store, Rejected
 from tests.test_engine import BROKEN, GOOD, Script
 
 PROBE = r'''import socket, sys
@@ -78,14 +77,52 @@ class OwnerRunTests(unittest.TestCase):
         pid = self.store.new_project('make an add tool')
         eng.run(pid)
         popen = mock.Mock()
-        path, _ = eng.launch_verified(pid, popen=popen)
-        args, kwargs = popen.call_args
-        self.assertEqual(args[0][-2:], ['_axb_launch.py', path.name])
-        self.assertTrue((path.parent / '_axb_launch.py').is_file())
-        self.assertEqual(kwargs['env']['AXB_ALLOW_HOSTS'], '')                 # nothing approved: loopback only
+        shown = []
+        with mock.patch.object(sandbox, 'run', return_value=(0, 'VISIBLE RESULT')) as launch:
+            _, path = eng.open_result(pid, show_text=lambda *a: shown.append(a), popen=popen)
+        self.assertIsInstance(launch.call_args.kwargs['isolate'], isolation.Manifest)
+        self.assertIn('VISIBLE RESULT', shown[0][1])
+        popen.assert_not_called()
         run = self.store.events(pid, {'owner_run'})[-1]['detail']
-        self.assertIn('not an OS firewall', run['network']['enforced_by'])
-        self.assertIn('not restricted', run['files'])
+        self.assertEqual(run['network']['enforced_by'], 'AppContainer')
+        self.assertEqual(run['isolation']['purpose'], 'Owner result execution')
+
+    def verified(self):
+        eng = E.Engine(self.store, workspace=self.tmp / 'ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x',
+                       llm=Script([GOOD], ['PASS']))
+        pid = self.store.new_project('make an add tool')
+        eng.run(pid)
+        return eng, pid
+
+    def test_owner_result_backend_failure_never_falls_back(self):
+        eng, pid = self.verified()
+        popen = mock.Mock()
+        with mock.patch.object(sandbox, 'run', side_effect=isolation.IsolationUnavailable('unavailable')):
+            with self.assertRaisesRegex(Rejected, 'no unrestricted fallback'):
+                eng.launch_verified(pid, popen=popen)
+        popen.assert_not_called()
+        self.assertFalse(self.store.events(pid, {'owner_run'}))
+        self.assertTrue(self.store.events(pid, {'owner_run_blocked'}))
+
+    def test_unsupported_owner_web_launch_is_blocked_before_execution(self):
+        eng, pid = self.verified()
+        plan = self.store.project(pid)['plan']
+        plan['runtime']['mode'] = 'web'
+        self.store.update(pid, plan=plan)
+        with mock.patch.object(sandbox, 'run') as launch:
+            with self.assertRaisesRegex(Rejected, 'no program started'):
+                eng.launch_verified(pid)
+        launch.assert_not_called()
+
+    def test_owner_exception_does_not_inherit_credentials(self):
+        eng, pid = self.verified()
+        self.store.event(pid, 'isolation_exception', allow=True, reason='synthetic test only')
+        popen = mock.Mock()
+        with mock.patch.dict('os.environ', {'AXB_SYNTHETIC_TOKEN': 'not-a-real-secret'}):
+            eng.launch_verified(pid, popen=popen)
+        self.assertNotIn('AXB_SYNTHETIC_TOKEN', popen.call_args.kwargs['env'])
+        self.assertEqual(self.store.events(pid, {'owner_run'})[-1]['detail']['isolation']['backend'],
+                         'external_unisolated')
 
 
 

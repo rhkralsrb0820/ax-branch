@@ -3,6 +3,13 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## Unreleased — Owner execution isolation (2026-10-27)
+
+- Route in-app CLI/native result execution through AppContainer with the existing project lock; show bounded output in-app and export bounded regular output files.
+- Block unsupported protected launch modes before execution. Explicit reduced-protection launches use a clean environment and accurate external_unisolated labels.
+- Separate access-denied errors from loopback timeout observations in real-backend tests; add actual Owner-run canary/token coverage.
+- Validation and current limitations: docs/evidence/2026-10-27-owner-isolation.md. Full final regression and package integration still pending.
+
 ## Unreleased — Product Planning alignment, H1, H2 (2026-10-26, dev/web-ui, on top of 0.1.62)
 
 - Product Planning 1.0.1: conditional source criterion; the exact headings / `product_plan` JSON contract

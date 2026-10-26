@@ -2444,6 +2444,9 @@ class Engine:
         how, docs = self.result_info(pid)
         if how == 'run':
             path, _ = self.launch_verified(pid, popen)
+            output = getattr(self, 'last_owner_output', None)
+            if show_text and output is not None:
+                show_text('실행 결과', output, path)
             return 'run', path
         run = self._fresh_copy(pid)
         path = run / docs[0]
@@ -2469,6 +2472,13 @@ class Engine:
         return run
 
     def launch_verified(self, pid, popen=subprocess.Popen):
+        # A result-button launch is still generated-code execution. Serialize it with the
+        # project's worker, including the materialization and evidence writes.
+        with run_lock(self.workspace / 'projects' / pid / 'run.lock', wait=2):
+            self.last_owner_output = None
+            return self._launch_verified(pid, popen)
+
+    def _launch_verified(self, pid, popen):
         """Run the latest verified (PASS) version the way the Owner launches it (the runtime contract's exact
         launch: `python <entry>` with no arguments, a console of its own), from a fresh copy in
         projects/<id>/run/v<N> so the recorded version is never touched. Documents open in their app.
@@ -2492,12 +2502,16 @@ class Engine:
         if exe is None and (p['plan'].get('native_build') or {}).get('tool') == 'pyinstaller':
             raise Rejected('The verified .exe of this version is missing, changed or built with other settings; '
                            'the Python source is not run in its place.')
+        if self._isolate(pid):
+            return self._launch_owner_isolated(pid, p, artifact, run, entry, exe)
         if exe is not None:                  # the Owner runs the built program, exactly what was verified
             shutil.copyfile(exe, run / exe.name)
             self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(run / exe.name),
                              network={'enforced_by': 'none: a native executable is not covered by the audit hook'},
-                             files='not restricted (same Windows account)')
+                             files='not restricted (same Windows account)',
+                             isolation={'backend': 'external_unisolated', 'owner_exception': True})
             return run / exe.name, popen([str(run / exe.name)], cwd=str(run),
+                                         env=sandbox.clean_env(str(run)),
                                          creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
         if artifact['kind'] not in ('python', 'bundle'):
             os.startfile(entry) if os.name == 'nt' else popen(['xdg-open', str(entry)])
@@ -2525,9 +2539,87 @@ class Engine:
         self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(entry),
                          network={'enforced_by': 'python audit hook (best effort, not an OS firewall)',
                                   'allowed': ['loopback', *allowed], 'log': str(run / 'network-audit.jsonl')},
-                         files='not restricted (same Windows account)')
-        env = {**os.environ, 'AXB_AUDIT_LOG': str(run / 'network-audit.jsonl'), 'AXB_ALLOW_HOSTS': ','.join(allowed)}
+                         files='not restricted (same Windows account)',
+                         isolation={'backend': 'external_unisolated', 'owner_exception': True})
+        env = {**sandbox.clean_env(str(run)), 'AXB_AUDIT_LOG': str(run / 'network-audit.jsonl'),
+               'AXB_ALLOW_HOSTS': ','.join(allowed)}
         return entry, popen(cmd, cwd=str(entry.parent), creationflags=flags, env=env)
+
+    def _launch_owner_isolated(self, pid, project, artifact, run, entry, exe):
+        """Bounded CLI execution with the same OS boundary as verification; output is shown in-app.
+        Web/GUI/foreign-interpreter launches must not silently become unrestricted desktop processes.
+        The temporary grant never includes the Owner workspace. Copy bounded regular output files back.
+        """
+        mode = (project['plan'].get('runtime') or {}).get('mode', 'cli')
+        why = None
+        if mode not in ('cli', 'none'):
+            why = f'Owner launch mode {mode!r} is not supported by the isolated result runner'
+        elif self._trained(artifact) is not None:
+            why = 'the trained artifact requires an interpreter not available in the isolated runtime'
+        if why:
+            self.store.event(pid, 'owner_run_blocked', reason=why, isolation_required=True)
+            raise Rejected(why + '; no program started. An explicit project isolation exception is required '
+                           'for reduced-protection execution.')
+        python = None if exe else self._python()
+        if not exe and not python:
+            raise Rejected('No Python interpreter found to run the result.')
+        manifest = isolation.Manifest(purpose='Owner result execution', artifact_sha256=artifact['sha256'])
+        if exe:
+            shutil.copyfile(exe, run / exe.name)
+            entry = run / exe.name
+        try:
+            with tempfile.TemporaryDirectory(prefix='axb-owner-isolated-', ignore_cleanup_errors=True) as cwd:
+                target = Path(cwd)
+                artifacts.materialize(artifact, target)
+                self._copy_inputs(artifact['path'], target)
+                name = exe.name if exe else entry.name
+                if exe:
+                    shutil.copyfile(exe, target / name)
+                args = [str(target / name)] if exe else [python, '-E', '-s', '-B', name]
+                self.store.event(pid, 'owner_run_start', version=artifact['iteration'],
+                                 artifact_sha256=artifact['sha256'], run_id=manifest.run_id, mode=mode)
+                code, output = sandbox.run(args, cwd, manifest.lifetime_seconds, isolate=manifest)
+                copied = self._owner_output_files(target, run)
+                self.last_owner_output = (f'종료 코드: {code if code is not None else "시간 제한 초과"}\n'
+                                          f'보호: AppContainer · 네트워크/하위 프로세스 차단\n\n{output}')
+                self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(entry),
+                                 exit_code=code, timed_out=code is None, output=output[:200000],
+                                 output_files=copied, isolation=manifest.record(),
+                                 network={'enforced_by': 'AppContainer', 'allowed': []},
+                                 files='OS-restricted to the isolated run; bounded regular outputs copied back')
+                return entry, None
+        except (isolation.IsolationUnavailable, OSError, Rejected) as exc:
+            self.store.event(pid, 'owner_run_blocked', reason=str(exc)[:500], isolation_required=True)
+            raise Rejected(f'Isolated result execution failed: {exc}; no unrestricted fallback.') from exc
+
+    @staticmethod
+    def _owner_output_files(source, destination):
+        """Export changed regular files only. Never follow a generated symlink/junction into host paths."""
+        copied, total = [], 0
+        for base, dirs, files in os.walk(source, followlinks=False):
+            def regular(path):
+                info = path.lstat()
+                return not path.is_symlink() and not (getattr(info, 'st_file_attributes', 0) & 0x400)
+            dirs[:] = [d for d in dirs if regular(Path(base) / d)]
+            for name in files:
+                path = Path(base) / name
+                if not regular(path) or not path.is_file():
+                    continue
+                rel = path.relative_to(source)
+                dest = destination / rel
+                size = path.stat().st_size
+                if size > 32 * 1024 * 1024:
+                    raise Rejected('Result output exceeds the 32 MB export limit.')
+                data = path.read_bytes()
+                if dest.is_file() and dest.read_bytes() == data:
+                    continue
+                total += len(data)
+                if total > 32 * 1024 * 1024 or len(copied) >= 200:
+                    raise Rejected('Result output exceeds the export limit (200 files / 32 MB).')
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(data)
+                copied.append({'path': rel.as_posix(), 'sha256': artifacts.sha(data), 'bytes': len(data)})
+        return copied
 
     def _approved_domains(self, pid):
         """Domains of the delivered program the Owner approved (or reusable public read-only approvals)."""

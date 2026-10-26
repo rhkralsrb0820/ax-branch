@@ -1664,11 +1664,13 @@ class GateAndImmutabilityTests(unittest.TestCase):
         eng.run(pid)
         verified = self.store.artifacts(pid)[-1]                 # v2 passed; v1 failed
         popen = mock.Mock()
-        path, _ = eng.launch_verified(pid, popen=popen)
-        args, kwargs = popen.call_args
+        with mock.patch.object(E.sandbox, 'run', return_value=(0, 'result')) as isolated:
+            path, _ = eng.launch_verified(pid, popen=popen)
+        args, kwargs = isolated.call_args
         self.assertEqual(args[0][-1], Path(verified['path']).name)       # the Owner's launch: no arguments
-        self.assertEqual(args[0][:2], ['cmd', '/k'])                      # a CLI result stays on screen
-        self.assertEqual(Path(kwargs['cwd']), self.tmp / 'ws' / 'projects' / pid / 'run' / f"v{verified['iteration']}")
+        self.assertIsInstance(kwargs['isolate'], E.isolation.Manifest)
+        self.assertNotEqual(Path(args[1]), path.parent)             # temporary isolated copy, not Owner workspace
+        popen.assert_not_called()
         self.assertEqual(path.read_bytes(), Path(verified['path']).read_bytes())
         self.assertEqual(artifacts.problems(verified), [])
         self.assertEqual(self.store.events(pid, {'owner_run'})[-1]['detail']['version'], verified['iteration'])

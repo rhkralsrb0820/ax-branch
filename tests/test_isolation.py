@@ -1,6 +1,7 @@
 """Phase A: OS-enforced isolation of generated programs (real AppContainer backend + adapter tests).
 Canaries are synthetic; no Owner file, credential or network endpoint is used."""
 import os
+import json
 import shutil
 import socket
 import subprocess
@@ -18,12 +19,15 @@ REAL = os.name == 'nt' and I.available()[0]
 
 
 def probe(code):
-    return ('import os, socket, subprocess, sys\n'
+    return ('import os, socket, subprocess, sys, json\n'
             'def t(name, f):\n'
             '    try:\n'
             '        f(); print(name, "ALLOWED")\n'
             '    except Exception as e:\n'
-            '        print(name, "DENIED", type(e).__name__)\n' + code)
+            '        outcome = "DENIED" if isinstance(e, PermissionError) or getattr(e, "winerror", None) in (367, 1260) '
+            'else "UNREACHABLE" if isinstance(e, TimeoutError) else "ERROR"\n'
+            '        print(name, outcome, json.dumps({"type": type(e).__name__, '
+            '"errno": getattr(e, "errno", None), "winerror": getattr(e, "winerror", None)}))\n' + code)
 
 
 @unittest.skipUnless(REAL, 'AppContainer backend not available on this machine')
@@ -51,6 +55,13 @@ class RealBackendTests(unittest.TestCase):
         srv.bind(('127.0.0.1', 0))
         srv.listen(1)
         srv.settimeout(8)
+        # The exact synthetic canary and local endpoint work without isolation. A timeout
+        # or missing fixture must not masquerade as evidence of OS policy enforcement.
+        self.assertEqual(self.canary.read_text(encoding='utf-8'), 'SYNTHETIC-CANARY')
+        control = socket.create_connection(srv.getsockname(), timeout=3)
+        peer, _ = srv.accept()
+        peer.close()
+        control.close()
         accepted = []
         def accept():
             try:
@@ -74,8 +85,25 @@ class RealBackendTests(unittest.TestCase):
             srv.close()
         self.assertEqual(rc, 0, out)
         self.assertIn('own_write ALLOWED', out)
-        for denied in ('outside_read', 'outside_write', 'profile_list', 'loopback', 'internet', 'child'):
+        for denied in ('outside_read', 'outside_write', 'profile_list', 'internet', 'child'):
             self.assertIn(f'{denied} DENIED', out)
+            line = next(line for line in out.splitlines() if line.startswith(f'{denied} DENIED '))
+            error = json.loads(line.split(' DENIED ', 1)[1])
+            if denied == 'internet':
+                self.assertEqual(error['winerror'], 10013, (denied, error, out))   # WSAEACCES, not timeout/offline
+            elif denied == 'child':
+                self.assertIn(error['winerror'], (5, 367, 1260), (denied, error, out))
+            else:
+                self.assertEqual(error['type'], 'PermissionError', (denied, error, out))
+        # Windows can silently drop isolated loopback packets rather than return WSAEACCES.
+        # Record that as observed unreachability, NOT an explicit OS access-denied error.
+        loopback = next(line for line in out.splitlines() if line.startswith('loopback '))
+        self.assertTrue(loopback.startswith(('loopback DENIED ', 'loopback UNREACHABLE ')), loopback)
+        loop_error = json.loads(loopback.split(' ', 2)[2])
+        if ' DENIED ' in loopback:
+            self.assertEqual(loop_error['winerror'], 10013, loop_error)
+        else:
+            self.assertEqual(loop_error['type'], 'TimeoutError', loop_error)
         self.assertIn('token_visible False', out)
         self.assertFalse((self.outside / 'evil.txt').exists())
         self.assertEqual(accepted, [])
@@ -128,6 +156,39 @@ class RealBackendTests(unittest.TestCase):
         self.assertFalse(server['ok'])
         self.assertIn('loopback', server['isolation_blocked'])
         self.assertEqual(server['steps'], [])                     # nothing was launched
+
+    def test_owner_result_launch_is_isolated_and_exports_safe_outputs(self):
+        from axbranch import artifacts
+        store = Store(self.tmp / 'owner-ws' / 'axbranch.sqlite3')
+        try:
+            eng = E.Engine(store, workspace=self.tmp / 'owner-ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x')
+            pid = store.new_project('synthetic protected Owner launch')
+            entry = self.tmp / 'fixture.py'
+            entry.write_text('import os\n'
+                             f'try:\n    open(r"{self.canary}").read()\n    print("LEAK")\n'
+                             'except PermissionError:\n    print("OUTSIDE_DENIED")\n'
+                             'print("TOKEN_VISIBLE", "AXB_TEST_FAKE_TOKEN" in os.environ)\n'
+                             'open("answer.txt", "w").write("allowed output")\n', encoding='utf-8')
+            aid = store.add_artifact(pid, 1, entry, artifacts.sha(entry.read_bytes()), 'python', None)
+            store.add_verification(pid, aid, 1, 'PASS', {}, {'ok': True}, 'codex')
+            store.update(pid, plan={'artifact_filename': 'fixture.py', 'runtime': {'mode': 'cli'}})
+            shown = []
+            os.environ['AXB_TEST_FAKE_TOKEN'] = 'SYNTHETIC-CREDENTIAL'
+            try:
+                how, path = eng.open_result(pid, show_text=lambda title, text, path: shown.append(text))
+            finally:
+                os.environ.pop('AXB_TEST_FAKE_TOKEN', None)
+            self.assertEqual(how, 'run')
+            self.assertIn('OUTSIDE_DENIED', shown[0])
+            self.assertIn('TOKEN_VISIBLE False', shown[0])
+            self.assertNotIn('LEAK', shown[0])
+            self.assertEqual((path.parent / 'answer.txt').read_text(), 'allowed output')
+            event = store.events(pid, {'owner_run'})[-1]['detail']
+            self.assertEqual(event['isolation']['backend'], 'appcontainer')
+            self.assertEqual(event['exit_code'], 0)
+            self.assertIn('answer.txt', [f['path'] for f in event['output_files']])
+        finally:
+            store.close()
 
 
 class AdapterTests(unittest.TestCase):
