@@ -61,20 +61,24 @@
     $('#groups').innerHTML = S.ov.groups.map(g => `<div class="group" style="background:${g.color}22"><div>${esc(g.label)}</div><div class="n">${g.count}</div></div>`).join('');
     updateOrb();
   }
+  const LC = {legacy: '기존 부서(행동 검증 미판정)', candidate: '후보', verified: '검증됨', quarantined: '격리됨', retired: '폐기됨'};
   function depName(id) { const d = S.ov.departments.find(x => x.id === id); return d ? d.name : id; }
   function buildLibrary() {
     S.libraryBuilt = true;
     const lib = $('#library'); lib.innerHTML = '';
     const menu = $('#depMenu');
     for (const d of S.ov.departments) {
-      const c = document.createElement('div'); c.className = 'chip'; c.draggable = true; c.dataset.dep = d.id;
-      c.textContent = '▣ ' + d.name; c.title = d.role;
+      const lc = d.lifecycle || {status: 'legacy'}, usable = ['verified', 'legacy'].includes(lc.status);
+      const c = document.createElement('div'); c.className = 'chip' + (usable ? '' : ' blocked'); c.draggable = usable; c.dataset.dep = d.id;
+      c.textContent = '▣ ' + d.name + (lc.status === 'legacy' ? '' : ` · ${LC[lc.status] || lc.status}`);
+      c.title = usable ? d.role : `${LC[lc.status] || lc.status}: ${lc.reason || ''}`;
       c.addEventListener('dragstart', e => { S.dropped = false; e.dataTransfer.setData('text/axb-dep', d.id); e.dataTransfer.effectAllowed = 'copy'; });
       c.addEventListener('dragend', e => {
         if (!S.dropped) notice(`연결되지 않았습니다: ${d.name} — 놓은 곳이 목표 입력 영역이나 프로젝트의 '연결된 부서' 칸이 아니었습니다. 부서를 클릭해 상세 화면의 버튼을 사용하세요.`);
       });
       c.addEventListener('click', () => departmentDetail(d.id));
       lib.appendChild(c);
+      if (!usable) continue;                       // quarantined/retired/candidate: visible, never attachable
       const o = document.createElement('option'); o.value = d.id; o.textContent = `${d.name} — ${d.provides.slice(0, 2).join(', ')}`; menu.appendChild(o);
     }
     $('#refused').textContent = S.ov.refused.length ? '명세 오류로 제외: ' + S.ov.refused.join(', ') : '';
@@ -103,13 +107,17 @@
   function departmentDetail(id) {
     const d = S.ov.departments.find(x => x.id === id); if (!d) return;
     const li = a => a.map(x => `<li>${esc(x)}</li>`).join('');
+    const lc = d.lifecycle || {status: 'legacy'}, usable = ['verified', 'legacy'].includes(lc.status);
     $('#modalBody').innerHTML = `<h3>▣ ${esc(d.name)} <span class="muted">v${esc(d.version)}</span></h3><p>${esc(d.role)}</p>
+      <div class="kv">상태: <b>${esc(LC[lc.status] || lc.status)}</b> — ${esc(lc.reason || '')}</div>
+      ${(lc.evidence || []).length ? `<div class="kv">근거</div><ul>${li(lc.evidence)}</ul>` : ''}
+      ${(lc.history || []).length ? `<details><summary>상태 변경 기록 ${lc.history.length}건</summary><ul>${li(lc.history.map(h => `${h.at} ${h.from} → ${h.to}: ${h.reason} (${h.by})`))}</ul></details>` : ''}
       <div class="kv">제공 기능</div><ul>${li(d.provides)}</ul>
       <div class="kv">도구: <b>${esc(d.tools.join(', '))}</b> · 네트워크: <b>${d.network ? '허용' : '없음'}</b> · 에이전트: <b>${esc(d.agent_role)}</b></div>
       <div class="kv">입력 (계획용 설명)</div><ul>${li(d.inputs)}</ul><div class="kv">출력 (계획용 설명)</div><ul>${li(d.outputs)}</ul>
       <div class="kv">수용 기준 (에이전트에게 전달)</div><ul>${li(d.acceptance_criteria)}</ul>
       <div class="muted">부서 연결은 기능 연결만 기록합니다. 결제·인증정보·게시·연락 승인은 바뀌지 않습니다.</div>
-      <div class="row end">${S.view === 'project' && S.pid ? '<button class="primary" id="mAttach">프로젝트에 추가</button>' : '<button class="primary" id="mPend">목표에 첨부</button>'}</div>`;
+      <div class="row end">${!usable ? '<span class="muted">이 상태에서는 새로 연결할 수 없습니다 (Owner의 기록된 결정 필요).</span>' : S.view === 'project' && S.pid ? '<button class="primary" id="mAttach">프로젝트에 추가</button>' : '<button class="primary" id="mPend">목표에 첨부</button>'}</div>`;
     const m = $('#modal'); m.showModal();
     const a = $('#mAttach'), pn = $('#mPend');
     if (a) a.onclick = () => { m.close(); attachToProject(id); };

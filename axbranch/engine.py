@@ -1265,6 +1265,9 @@ class Engine:
                         stage_context['contract_feedback'] = {
                             'problems': failed[-1]['problems'],
                             'rule': 'Your previous result for this stage was NOT handed on: fix exactly these problems.'}
+                why = departments.blocked(stage.get('department'))      # recheck at the call: quarantine may land mid-run
+                if why:
+                    return self._delegation_refused(pid, why)
                 out, used = self._ask(pid, stage['agent_role'], WORKER_SYSTEM.format(role=stage['agent_role']),
                                       stage['instructions'], stage_context,
                                       WORK, prefer=stage['provider'], web=stage['web'], required=self._agent_caps(pid, stage))
@@ -1348,6 +1351,9 @@ class Engine:
                                     + context['edit_rule'].split('. Return the complete')[0] + '. Add new code by '
                                     'replacing an existing anchor snippet with that snippet plus the new code. Use '
                                     'find="" (whole-file replace) only for a file that changes almost entirely.')
+        why = departments.blocked(final.get('department'))
+        if why:
+            return self._delegation_refused(pid, why)
         build, used = self._ask(pid, final['agent_role'], system, final['instructions'], context,
                                 BUILD_EDITS if edits_only else BUILD, prefer=final['provider'], web=final['web'],
                                 required=self._agent_caps(pid, final))

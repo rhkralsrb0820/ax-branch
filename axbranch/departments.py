@@ -199,6 +199,63 @@ def catalog(root=None):
     return valid, refused
 
 
+# Registry lifecycle (H1). Kept beside the package (departments/<id>/lifecycle.json), never inside department.json:
+# a status change must not alter the spec digest that projects pinned. A packaged build reads its bundled files.
+STATUSES = ('candidate', 'verified', 'quarantined', 'retired')
+USABLE = ('verified', 'legacy')               # may be newly attached and receive new delegation
+LEGACY = {'status': 'legacy', 'validation': 'schema_valid',
+          'reason': 'lifecycle 도입 전 부서: 명세 형식 검증만 통과했고 행동 검증은 판정되지 않았습니다. 기존처럼 연결할 수 있습니다.',
+          'provenance': {'source': 'ax-native'}, 'evidence': [], 'history': []}
+MIN_VERIFIED_EVIDENCE = 2                      # one favourable result is never a verified capability
+
+
+def lifecycle(dep_id, root=None):
+    """Registry state, read fresh each time. Absent = legacy; unreadable or invalid = quarantined (fail closed)."""
+    f = (Path(root) if root else ROOT) / dep_id / 'lifecycle.json'
+    try:
+        data = json.loads(f.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return dict(LEGACY)
+    except (OSError, ValueError) as e:
+        return {'status': 'quarantined', 'reason': f'lifecycle.json을 읽을 수 없습니다: {e}', 'evidence': [], 'history': []}
+    if not isinstance(data, dict) or data.get('status') not in STATUSES:
+        return {'status': 'quarantined', 'reason': 'lifecycle.json 상태가 올바르지 않습니다', 'evidence': [], 'history': []}
+    return data
+
+
+def blocked(dep_id, root=None):
+    """Why new delegation to this department is refused now (None = allowed). Checked at every boundary."""
+    if not dep_id:
+        return None
+    state = lifecycle(dep_id, root)
+    if state['status'] in USABLE:
+        return None
+    return f"department {dep_id!r} is {state['status']}: Owner decision needed ({state.get('reason', '')})"
+
+
+def set_lifecycle(dep_id, status, reason, evidence=(), by='owner-cli', root=None, when=None):
+    """Owner-only recorded transition (the CLI; agents have no shell). Verified needs independent evidence."""
+    import time
+    if status not in STATUSES:
+        raise Rejected(f'알 수 없는 상태: {status} ({", ".join(STATUSES)})')
+    if not str(reason).strip():
+        raise Rejected('상태 변경에는 이유가 필요합니다')
+    evidence = [str(e) for e in evidence if str(e).strip()]
+    if status == 'verified' and len(evidence) < MIN_VERIFIED_EVIDENCE:
+        raise Rejected(f'verified에는 근거가 {MIN_VERIFIED_EVIDENCE}개 이상 필요합니다 (형식 검증이나 한 번의 성공만으로는 부족)')
+    f = (Path(root) if root else ROOT) / dep_id / 'department.json'
+    if not f.is_file():
+        raise Rejected(f'라이브러리에 없는 부서입니다: {dep_id}')
+    spec = json.loads(f.read_text(encoding='utf-8'))
+    old = lifecycle(dep_id, root)
+    entry = {'at': when or time.strftime('%Y-%m-%d %H:%M:%S'), 'from': old['status'], 'to': status, 'reason': reason,
+             'evidence': evidence, 'by': by, 'version': spec.get('version'), 'spec_sha256': spec_digest(spec)}
+    new = {'status': status, 'reason': reason, 'evidence': evidence, 'version': spec.get('version'),
+           'provenance': old.get('provenance') or {'source': 'ax-native'}, 'history': [*old.get('history', []), entry]}
+    f.with_name('lifecycle.json').write_text(json.dumps(new, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    return new
+
+
 def attached(store, pid):
     """[{id, version}] attached to this project now, in attach order (replayed from its own events)."""
     current = {}
@@ -215,6 +272,9 @@ def attach(store, pid, dep_id, specs):
         raise Rejected(f'부서 {dep_id!r}는 라이브러리에 없거나 명세 검증에 실패했습니다.')
     if any(d['id'] == dep_id for d in attached(store, pid)):
         raise Rejected(f"이미 연결된 부서입니다: {specs[dep_id]['name']}")
+    state = lifecycle(dep_id)
+    if state['status'] not in USABLE:
+        raise Rejected(f"{specs[dep_id]['name']} 부서는 {state['status']} 상태라 새로 연결할 수 없습니다: {state.get('reason', '')}")
     spec = specs[dep_id]
     store.event(pid, 'department_attached', department=dep_id, version=spec['version'],
                 spec=spec, spec_sha256=spec_digest(spec),
@@ -298,30 +358,36 @@ def check_stage(stage, attached_specs, library=None, final=False):
     may declare code_generation either way: producing the deliverable is the engine's build contract."""
     build = {'reasoning', 'code_generation'} if final else {'reasoning'}
     dep = stage.get('department') or ''
+    usable = {d: s for d, s in attached_specs.items() if not blocked(d)}   # quarantined/retired lend nothing
     if not dep:
         if not attached_specs:
             return None                                      # no departments: the pre-department rules apply
         name = stage.get('name')
-        allowed = build | {t for s in attached_specs.values() for t in s['tools']}
+        if not usable:
+            return (f"temporary agent for stage {name!r}: no attached department is usable (candidate, quarantined or retired) "
+                    '(Owner decision needed)')
+        allowed = build | {t for s in usable.values() for t in s['tools']}
         extra = sorted(set(stage.get('capabilities', [])) - allowed)
         if extra:
             return (f"temporary agent for stage {name!r} asks {extra}, which no attached department provides; "
                     'attach a department that provides it')
-        if stage.get('web') and not any(s['permissions']['network'] for s in attached_specs.values()):
+        if stage.get('web') and not any(s['permissions']['network'] for s in usable.values()):
             return f"temporary agent for stage {name!r} needs web access but no attached department has network permission"
         requested = set(stage.get('capabilities', [])) - build
         if not any(requested <= set(s['tools']) and (not stage.get('web') or s['permissions']['network'])
-                   for s in attached_specs.values()):
+                   for s in usable.values()):
             return f"temporary agent for stage {name!r} combines tools/permissions from different departments"
         role = str(stage.get('agent_role', '')).strip().lower()
-        for other, spec in (library or {}).items():
-            if other not in attached_specs and spec['agent']['role'].strip().lower() == role:
+        for other, spec in {**(library or {}), **attached_specs}.items():
+            if other not in usable and spec['agent']['role'].strip().lower() == role:
                 return (f"temporary agent for stage {name!r} takes the agent role of department {other!r}, "
-                        'which is not attached')
+                        'which is not attached or not usable')
         return None
     spec = attached_specs.get(dep)
     if spec is None:
         return f"stage {stage.get('name')!r} was delegated to department {dep!r}, which is not attached to this project"
+    if dep not in usable:
+        return f"stage {stage.get('name')!r}: {blocked(dep)}"
     extra = sorted(set(stage.get('capabilities', [])) - set(spec['tools']) - build)
     if extra:
         return f"stage {stage.get('name')!r} asks {extra} beyond department {dep!r}'s tools {spec['tools']}"

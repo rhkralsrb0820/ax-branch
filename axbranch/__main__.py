@@ -52,6 +52,9 @@ def main(argv=None):
     wb.add_argument('--test-mode', action='store_true', help=argparse.SUPPRESS)   # browser self-test / E2E only
     dp = sub.add_parser('department', help='departments of a project: list / attach / detach (same as the window)')
     dp.add_argument('id'); dp.add_argument('action', choices=('list', 'attach', 'detach')); dp.add_argument('dep', nargs='?')
+    lc = sub.add_parser('lifecycle', help='Owner: department registry state; a transition is recorded with reason and evidence')
+    lc.add_argument('dep', nargs='?'); lc.add_argument('--status', choices=('candidate', 'verified', 'quarantined', 'retired'))
+    lc.add_argument('--reason', default=''); lc.add_argument('--evidence', action='append', default=[])
     sub.add_parser('result').add_argument('id')      # the verified result, as [결과 실행] / [결과 보기] does        # (re)create the pinned training stack a trained result needs
     ef = sub.add_parser('effort'); ef.add_argument('id', nargs='?')
     sv = sub.add_parser('supervise'); sv.add_argument('--watch', action='store_true')
@@ -103,6 +106,18 @@ def _dispatch(a):
             print(web.stop_running())
             return 0
         return web.main(a.port, test_mode=a.test_mode)
+    if a.cmd == 'lifecycle':
+        from . import departments
+        if a.status:
+            try:
+                departments.set_lifecycle(a.dep, a.status, a.reason, a.evidence)
+            except departments.Rejected as e:
+                print(f'거부: {e}')
+                return 1
+        for dep in [a.dep] if a.dep else sorted(departments.catalog()[0]):
+            s = departments.lifecycle(dep)
+            print(f"{dep}: {s['status']} — {s.get('reason', '')} (근거 {len(s.get('evidence', []))}개)")
+        return 0
     engine = open_engine(log=lambda m: print('  ·', m, flush=True))
     store = engine.store
     if a.cmd == 'new':

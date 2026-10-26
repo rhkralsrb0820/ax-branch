@@ -81,7 +81,8 @@ class App:
                     delegated.append(name)
         return {'version': __version__, 'projects': rows, 'orb': orb, 'delegated': delegated,
                 'groups': [{'label': l, 'count': n, 'color': c} for l, n, c in home.state_groups(store.projects())],
-                'departments': [dict(departments.summary(s), knowledge=s['knowledge']) for s in self.specs.values()],
+                'departments': [dict(departments.summary(s), knowledge=s['knowledge'], lifecycle=departments.lifecycle(s['id']))
+                                for s in self.specs.values()],
                 'refused': sorted(self.refused), 'settings': self.settings(), 'test_mode': self.test_mode,
                 'orb_text': _orb_text()}
 
