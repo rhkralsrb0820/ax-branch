@@ -29,6 +29,8 @@
       $('#goal').focus(); $('#goal').value = '자가 테스트 목표'; $('#goal').dispatchEvent(new Event('input'));
       await report('input reaction is labelled as input', !$('#orbInput').hidden);
       await report('drop on goal area attaches', drag(chip('research'), $('#composer')) && /리서치/.test($('#pendingDeps').textContent));
+      $('#pendingDeps [data-req="research"]').click();
+      await report('composer marks a department required', /필수/.test($('#pendingDeps').textContent), $('#pendingDeps').textContent);
       drag(chip('research'), $('#composer'));
       await report('duplicate on goal area refused', /이미 첨부한 부서/.test($('#notice').textContent), $('#notice').textContent);
       drag(chip('operations'), null);
@@ -39,6 +41,7 @@
       await sleep(600); await window.AXB.api('overview').then(o => { window.AXB.ov = o; });
       await report('double submit creates one project', window.AXB.ov.projects.length === before + 1, `${before} -> ${window.AXB.ov.projects.length}`);
       await report('goal departments attached at start', window.AXB.project.attached.map(d => d.id).join() === 'research', JSON.stringify(window.AXB.project.attached));
+      await report('required choice recorded at start', window.AXB.project.attached[0].mode === 'required', JSON.stringify(window.AXB.project.attached));
       await report('project view shows banner and pipeline', $('#banner').textContent.length > 0);
       drag(chip('operations'), $('#projectDeps'));
       await until(() => window.AXB.project.attached.length === 2);
@@ -46,6 +49,12 @@
       drag(chip('operations'), $('#projectDeps'));
       await until(() => /이미 연결된 부서/.test($('#notice').textContent));
       await report('duplicate on project refused', /이미 연결된 부서/.test($('#notice').textContent), $('#notice').textContent);
+      await report('required department has no detach button', !document.querySelector('[data-detach="research"]'));
+      window.prompt = () => '자가 테스트: 필수 해제';      // the Owner's typed reason
+      document.querySelector('[data-mode="research"]').click();
+      await until(() => window.AXB.project.attached[0].mode === 'available');
+      await report('lowering required records the reason', window.AXB.project.attached[0].mode === 'available', JSON.stringify(window.AXB.project.attached));
+      await until(() => document.querySelector('[data-detach="research"]'));
       document.querySelector('[data-detach="research"]').click();
       await until(() => window.AXB.project.attached.length === 1);
       await report('detach via ×', window.AXB.project.attached.map(d => d.id).join() === 'operations');
