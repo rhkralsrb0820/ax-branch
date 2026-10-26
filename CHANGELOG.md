@@ -14,8 +14,10 @@ Semantic versioning. Every release needs an entry with all five sections (enforc
 - H2: attachment mode available / required. Required = a stage delegated to that department in the plan,
   valid recorded work in the current plan version and all its criteria met; checked at planning, execution,
   acceptance; removal needs an explicit, reasoned, recorded Owner change. Web chips and toggles.
-- Validation: deterministic tests (test_lifecycle 5, test_required 9, product planning additions) and the
-  browser self-test 27/27. No real model run for these changes.
+- Validation: full single-process suite 479/479 on 85f8f00 (hashes matched); browser self-test 27/27;
+  preserved candidate build 0.1.62-85f8f00 (packaged smoke). One real-model run of the fulfilled required path
+  reached OWNER_REVIEW with Codex verification (7 calls, 92,851 tokens). The blocking paths are deterministic
+  tests only.
 
 ## Unreleased — Codex continuation (2026-10-25)
 

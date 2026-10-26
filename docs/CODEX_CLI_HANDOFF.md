@@ -22,11 +22,17 @@
     - Detaching needs a reasoned lowering first.
     - Web chips/toggles; browser self-test 27/27.
 - **A/B experiment: paused.** It needs a new Owner-approved pre-registration (task text); no budget increase.
-- **Next, in order:**
-  1. Full single-process regression on the frozen commit.
-  2. Preserved candidate build.
-  3. One small real-model H2 flow in an isolated root.
-  4. Owner decisions: A/B pre-registration, publication.
+- **Validated (23:55 KST):**
+  - Full single-process suite on 85f8f00: 479/479 OK, hashes matched
+    (`outputs/0.1.40-evidence/FULL-85f8f00-single-process.log`).
+  - Candidate build preserved: `demo-2026-11/builds/0.1.62-85f8f00` (BUILD.json; packaged smoke on an isolated
+    AXB_ROOT).
+  - One real-model H2 run P-20261026-3973d8: OWNER_REVIEW, Codex verification, 92,851 tokens
+    (`docs/evidence/2026-10-26-h2-required-real-run.md`).
+  - Pushed origin/dev/web-ui up to 85f8f00; this docs commit is pushed after it.
+- **Next:**
+  - Owner decisions: A/B pre-registration, publication (4 findings), any server switch to the candidate.
+  - Optional: a real-model run of the blocking path.
 - H3/H4, training, paid services and the server switch stay out of scope.
 
 # ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
