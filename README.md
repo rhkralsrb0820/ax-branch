@@ -1,49 +1,199 @@
 # AX Branch
 
-Owner-governed autonomous AI execution. The Owner gives a Goal; **淸月 AI CEO** interprets it,
-designs a pipeline, hires temporary specialist agents, runs them on the Claude Code / Codex CLI
-subscriptions, and only receives artifacts the independent **Verification Agent** has passed.
-Failed artifacts go back to the production agents and are rebuilt until they pass. The bar is
-never lowered.
+**Goal-driven autonomous organizational execution under human governance.**
 
-```sh
-python -m axbranch                         # Owner window (or dist/AXBranch/AXBranch.exe)
-python -m axbranch new "goal..." --run     # CLI
-python -m axbranch status [<id>]
-python -m axbranch run <id>                # continue any project from SQLite (Claude or Codex session)
-python -m axbranch resume <id> [--rounds N]
-python -m axbranch review <id> [--works | --broken "..."] [--request "..."] [--finish]   # Owner review
-python -m axbranch approve <id> --network yes|no      # external connections the program would make
-python -m axbranch replan <id> --reason "..."         # recovery: CEO strategy review
-python -m axbranch effort [<id>]                      # Owner Effort KPI
-python -m axbranch finish <id> [--save | --pause | --discard --confirm] [--satisfaction N]
+AX Branch is a local workspace where an Owner hands over a goal and AX Branch's AI CEO, **淸月 (Cheongwol)**, does the rest. The CEO plans the work, splits it across the departments the Owner attached, and runs temporary specialist agents on the Owner's Claude Code / Codex CLI subscriptions. Each result is checked by a separate verification step and reworked until it passes. Only then does it reach the Owner for review. The Owner sets the goal and the limits; AX Branch handles the AI work inside them.
+
+> 상태: 개발 중인 개인 프로젝트입니다. 현재 소스는 **0.1.62 후보**이고, Owner가 실제로 쓰는 서버는 이전 빌드 **0.1.61-67d9095**입니다. 두 버전은 같지 않습니다(아래 [버전](#버전-현재-소스와-사용-중인-빌드)).
+
+![AX Branch 웹 홈 — 목표 입력, 부서 첨부, 진행 현황](docs/images/web-home.png)
+
+## 무엇을 해결하나
+
+AI 도구로 일을 맡기면 결국 사람이 계획을 쪼개고, 도구를 고르고, 결과를 검사하고, 다시 시키는 일을 반복하게 됩니다. AX Branch는 이 관리 업무를 대신합니다. Owner는 목표와 자료를 주고, 결과가 실제로 쓸 만한지만 판단합니다.
+
+**구체적인 흐름 예시**
+
+1. Owner가 웹 화면에 목표를 적습니다. 예: "첨부한 문의 기록으로 팀별 문의 건수 보고서를 만들어 줘". CSV를 첨부하고, 부서 라이브러리에서 **리서치**와 **운영**을 끌어다 붙입니다.
+2. 淸月 CEO가 계획을 세웁니다. 리서치 단계는 수치와 근거를 정리하고, 운영 단계는 권고안을 만듭니다. 단계마다 그 부서의 역할·도구·권한·수용 기준을 가진 임시 에이전트를 만듭니다.
+3. 결과물은 별도의 검증 단계를 거칩니다. 부서 수용 기준(예: "모든 수치에 출처가 있다")을 하나라도 못 지키면 재작업으로 돌아갑니다.
+4. 통과한 결과만 Owner 검토에 올라옵니다. Owner가 "제목을 바꿔 줘"처럼 글로 요청하면 **같은 프로젝트**에서 재작업·재검증을 거쳐 고친 버전이 다시 올라옵니다.
+5. 기록된 실행·검증 결과는 다음 업무에서 범위를 제한해 참고 자료로 다시 쓰입니다. 이것은 "경험의 재사용"이지 학습이 아닙니다.
+
+## 구조
+
+### 전체 흐름
+
+거버넌스·정책은 마지막 단계가 아니라 계획부터 결과 전달까지 전 과정을 둘러싼 **권한 경계**입니다.
+
+```mermaid
+flowchart TB
+    subgraph OWNER["Owner"]
+        G["목표 + 파일 + 부서 첨부"]
+        FB["Owner 검토 · 피드백<br/>(작동함 / 고장 / 글 수정 요청)"]
+    end
+
+    subgraph GOV["거버넌스 · 정책 경계 (전 단계에 적용)<br/>유료 API 차단 · 부서 권한 · 네트워크 승인 · 예산 · 수용 기준 고정"]
+        CEO["淸月 CEO<br/>계획 · 업무 배분"]
+        DH["부서 하네스<br/>(고정된 버전의 재사용 패키지)"]
+        AG["임시 전문 에이전트<br/>(Claude Code / Codex CLI)"]
+        EX["실행<br/>(단계별 산출물)"]
+        VR["독립 검증<br/>(실패 시 재작업)"]
+        AR["결과물 · 근거<br/>(버전별 폴더, SQLite 이벤트)"]
+        XP["경험 검색<br/>(범위 제한 · 잠정 자료)"]
+    end
+
+    G --> CEO
+    CEO --> DH --> AG --> EX --> VR
+    VR -- "불합격" --> EX
+    VR -- "합격" --> AR --> FB
+    FB -- "재작업 요청" --> CEO
+    AR -. "기록" .-> XP
+    XP -. "관련 사례만 참고" .-> CEO
 ```
 
-Product principle: *you manage the goal; AX Branch manages the AI work* — planning, agents, engine
-choice, verification (incl. running the result the way you will), recovery and handoffs between
-Claude Code and Codex.
+### 부서 구성
 
-Requirements: Python 3.11+, `claude` and/or `codex` CLI logged in with a subscription,
-and the sibling `../cheongwol` repo (its provider layer is reused). No paid API is used;
-a paid API key in the environment stops the run.
+```mermaid
+flowchart LR
+    L["부서 라이브러리<br/>리서치 · 운영 · 상품기획"] --> A["Owner가 프로젝트에 첨부<br/>(사용 가능 / 필수 — 필수 구분은 H2 계획)"]
+    A --> C["CEO가 첨부된 부서로<br/>업무 흐름 구성"]
+    C --> S["필요한 단계에만<br/>임시 전문 에이전트 생성"]
+```
 
-Where things live (all under the AX-Branch folder):
+### 경험의 수명 주기
 
-| What | Where |
+실선은 구현된 단계, 점선은 계획된 단계입니다.
+
+```mermaid
+flowchart LR
+    E1["실행"] --> E2["결과"] --> E3["검증"] --> E4["Owner 피드백"] --> E5["경험 기록"] --> E6["관련 경험 검색"]
+    E6 -.-> P1["개선 후보 (계획)"] -.-> P2["격리 평가 (계획)"] -.-> P3["승격 / 거절 (계획)"]
+```
+
+### 용어 구분
+
+| 구분 | 의미 |
 |---|---|
-| Runtime state (Source of Truth) | `workspace/axbranch.sqlite3` |
-| Artifacts, per version | `workspace/projects/<id>/artifacts/v<N>/` |
-| Handoff for any engine | `workspace/projects/<id>/HANDOFF.md` |
-| Long-term knowledge (Save & Close only) | `obsidian/AX-Branch-Vault/Branch_DB/Projects/` |
-| AI intelligence (read-only) | `Desktop/AI-Trend-Collector/data/ai_intelligence.db` (`AXB_GAI_DB` to override) |
+| **하네스 ≠ 에이전트** | 부서 하네스(`departments/<id>/department.json`)는 역할·도구·권한·입출력·수용 기준을 담은 **재사용 패키지**입니다. 에이전트는 한 단계를 위해 하네스로 만들어졌다가 사라지는 **임시 실행자**입니다. |
+| **능력 ≠ 권한** | 에이전트가 할 수 있는 일과 해도 되는 일은 다릅니다. 부서가 네트워크 권한을 선언하지 않으면 웹 조사 단계는 계획 단계에서 거절됩니다. 에이전트에게 셸 권한은 주어지지 않습니다. |
+| **경험 저장 ≠ 학습** | 경험은 기존 SQLite 이벤트 저장소에 기록되고 다음 업무에서 참고 자료로 검색될 뿐입니다. 모델 가중치는 바뀌지 않습니다(파인튜닝 없음). |
+| **검색된 경험 ≠ 검증된 개선** | 검색된 경험에는 "잠정(PROVISIONAL)" 표시가 붙습니다. 경험이 결과를 실제로 좋게 하는지는 아직 측정되지 않았습니다(아래 한계 참고). |
 
-Tests: `python -X utf8 -m unittest discover -s tests -t .` · Build exe: `python -X utf8 build_exe.py`
+### 부서
 
-Isolated orchestration demo (source 0.1.37): `python -X utf8 -m axbranch.demo --root <new-folder>`.
-Default: scripted model decisions with real engine/program execution (failure → changed pipeline → pass,
-capability gap, interruption recovery), no subscription calls. Add `--live` in a different folder for a real
-subscription smoke. Evidence, SQLite and artifacts stay in that folder. The existing packaged EXE was not rebuilt.
-See [Capability lifecycle and limits](docs/CAPABILITY_LIFECYCLE.md).
+현재 있는 부서는 **리서치**(1.1.0), **운영**(1.1.0), **상품기획**(1.0.0) 세 개입니다. 프로젝트에 붙일 때 그 버전으로 고정되므로 나중에 부서 정의가 바뀌어도 진행 중인 프로젝트에는 몰래 반영되지 않습니다. 재무·법무·마케팅 같은 부서는 같은 형식으로 추가할 수 있는 **향후 예시**이며, 지금은 없습니다.
 
-Docs: [Architecture](docs/ARCHITECTURE.md) · [Phase 0 audit & reuse map](docs/AUDIT.md) ·
-[Decisions](docs/DECISIONS.md) · [Changelog](CHANGELOG.md) · agent rules [AGENTS.md](AGENTS.md)
+## 구현 현황
+
+| 기능 | 상태 | 확인 수준 |
+|---|---|---|
+| 목표·파일·부서 첨부 → CEO 계획 → 단계 실행 | 구현 | 자동 테스트 · 실제 모델 실행 |
+| 부서 하네스 3종, 버전 고정, 계획 시 권한 검사 | 구현 | 자동 테스트 · 실제 모델 실행 |
+| 독립 검증과 재작업 루프 (수용 기준은 낮추지 않음) | 구현 | 자동 테스트 · 실제 모델 실행 |
+| Owner 글 수정 요청 → 같은 프로젝트에서 재작업·재검증 | 구현 | 실제 웹 E2E (빌드 0.1.62-e62d440) |
+| 검증 출처 기록 (다른 엔진 검증 / 같은 엔진·역할 분리 / 불명) | 구현 | 자동 테스트 |
+| 범위를 제한한 경험 검색 (잠정 표시) | 구현 | 자동 테스트 |
+| 결과물 라이브러리, 완성된 결과물을 이어서 개발 | 구현 | 자동 테스트 |
+| 로컬 웹 화면 · Tk 창 · CLI (같은 동작 공유) | 구현 | 자동 테스트 · 헤드리스 브라우저 |
+| Owner 개발실 (AX Branch 자체의 개발 현황) | 구현 | 자동 테스트 |
+| 경험 활용 효과 비교 (상품기획 A/B) | **결과 없음** | 1회 실행, 과제 A에서 정지 |
+| H1: 경험 상태(후보·검증·격리·폐기), 출처, 격리 강제 | 계획 | — |
+| H2: 부서 "사용 가능 / 필수" 구분과 강제 | 계획 | — |
+
+![Owner 개발실 — 현재 상태, 진행 중 작업, 다음 할 일](docs/images/web-devroom.png)
+
+## 확인 수준과 한계
+
+**확인 수준**은 네 가지로 구분합니다.
+
+- **자동 테스트**: 단일 프로세스 전체 회귀 463/463 통과 (커밋 b088cdf).
+- **실제 모델 실행**: 실제 구독 모델을 호출한 실행입니다. 근거는 [`docs/evidence/`](docs/evidence/)에 있습니다.
+- **빌드 후보**: 보존된 패키지로 확인한 것입니다.
+- **미확인**: 위 어느 것으로도 확인하지 않은 것입니다.
+
+**알려진 한계**
+
+- **OS 수준 격리는 없습니다.** 결과 실행 시 Python 네트워크 제한만 있고(최선 노력), 파일·exe·하위 프로그램 실행은 막지 못합니다.
+- **자동 자기 개선은 없습니다.** 경험은 기록되고 참고될 뿐이며, 개선 후보 생성·격리 평가·승격은 계획 단계입니다.
+- **다른 엔진의 검증이 항상 보장되지는 않습니다.** 독립 검증은 원래 생산과 다른 엔진(Codex)이 맡아야 합니다. 그러나 사용량 한도 때문에 같은 엔진으로 대신 검증한 실행이 있으며, 각 실행에 어느 쪽이었는지 기록됩니다.
+- **경험 활용 A/B 비교는 결과가 없습니다.** 승인된 축소 실험을 1회 실행했지만 과제 A에서 멈췄습니다. 과제 문구가 상품기획 부서 계약(필수 한국어 제목·JSON 블록)과 맞지 않았기 때문입니다([근거](docs/evidence/2026-10-26-product-ab-compact-run.md)).
+- **글 수정 재작업의 웹 E2E 범위.** 이 E2E는 빌드 e62d440으로 통과했습니다. 그 뒤 해당 경로를 "근거가 없으면 실패" 방식으로 바꿨고, 바뀐 버전은 자동 테스트로만 확인했습니다.
+- **간헐적 테스트 문제.** 브라우저 자체 검사가 가끔 90초 안에 끝나지 않으며, 원인은 확인되지 않았습니다. 한 번의 전체 실행에서 시간 민감 테스트 4건이 실패했고, 재발하지 않았지만 원인 미확인으로 남아 있습니다.
+- 상용 제품과 같은 수준이라고 주장하지 않습니다.
+
+## 실행 방법 (로컬 웹)
+
+**필요 조건**
+
+- Python 3.11 이상 (3.12.10에서 확인).
+- 이 저장소 옆에 `cheongwol` 저장소가 있어야 합니다. 그 provider 계층을 재사용합니다.
+- 실제로 업무를 실행하려면 `claude` 또는 `codex` CLI가 구독 계정으로 로그인되어 있어야 합니다. 화면을 여는 것만으로는 모델을 호출하지 않습니다.
+- 유료 API는 쓰지 않습니다. 환경에 유료 API 키가 있으면 실행이 멈춥니다.
+
+```text
+AX-Branch/
+├── ax-branch/     ← 이 저장소
+├── cheongwol/     ← 필수 (cheongwol/ceo 를 불러옴)
+├── workspace/     ← 있으면 런타임 데이터가 여기에 저장됨
+└── obsidian/      ← workspace/ 와 함께 있을 때 이 폴더가 작업 루트로 쓰임
+```
+
+```sh
+cd ax-branch
+python -X utf8 -m axbranch web              # http://127.0.0.1:8765/ (브라우저는 직접 엽니다)
+python -X utf8 -m axbranch web --port 8799  # 다른 포트
+python -X utf8 -m axbranch web --stop       # 실행 중인 웹 서버 종료
+```
+
+- 서버는 `127.0.0.1`에서만 열립니다. 화면의 API는 시작 시 발급된 토큰이 있어야 응답합니다.
+- 상위 폴더에 `workspace/`와 `obsidian/`이 **둘 다** 없으면 저장소 안의 `workspace/`를 씁니다.
+- 위 명령은 격리된 복사본에서 서버 시작 → 페이지 응답(200) → `--stop` 종료까지 확인했습니다.
+- 데스크톱 창은 `python -X utf8 -m axbranch`로 엽니다. 패키지 빌드에서는 `AXBranch.exe`, 웹은 `AXBranch.exe web`입니다.
+- 그 밖의 CLI 명령(new / run / status / review / finish 등)은 `python -m axbranch --help`에서 볼 수 있습니다.
+
+테스트와 빌드:
+
+```sh
+python -X utf8 -m unittest discover -s tests -t .
+python -X utf8 build_exe.py
+```
+
+## 결과와 근거는 어디에 있나
+
+| 무엇 | 위치 |
+|---|---|
+| 런타임 상태 (기준 데이터) | `workspace/axbranch.sqlite3` |
+| 결과물 (버전별) | `workspace/projects/<id>/artifacts/v<N>/` |
+| 엔진 간 인계 기록 | `workspace/projects/<id>/HANDOFF.md` |
+| 장기 지식 (저장하고 닫기 시에만) | `obsidian/AX-Branch-Vault/Branch_DB/Projects/` |
+| 개발 근거 (실험·E2E·감사) | [`docs/evidence/`](docs/evidence/) |
+| Owner 개발실 데이터 | [`docs/devroom/status.json`](docs/devroom/status.json) — 웹 화면 [오너 개발실]에서 표시 |
+| 개발 인계 (Claude Code ↔ Codex) | [`docs/CODEX_CLI_HANDOFF.md`](docs/CODEX_CLI_HANDOFF.md) |
+
+## 로드맵
+
+- **H1 — 경험의 수명 주기.** 경험에 후보·검증·격리·폐기 상태와 출처를 붙입니다. 격리된 경험은 검색에서 강제로 빠집니다.
+- **H2 — 사용 가능 / 필수 부서.** 필수로 붙인 부서는 다음 각 단계에서 실제로 쓰였는지 강제합니다:
+  - 계획;
+  - 실행·재작업;
+  - 결과 수용;
+  - 부서 분리 시점.
+
+설계는 [Department Harness Proposal](docs/DEPARTMENT_HARNESS_PROPOSAL.md)을 참고하세요. H3/H4, 모델 학습, 유료 서비스는 현재 범위 밖입니다.
+
+## 버전: 현재 소스와 사용 중인 빌드
+
+| | 버전 | 비고 |
+|---|---|---|
+| 이 브랜치의 소스 | 0.1.62 후보 (`dev/web-ui`) | 전체 회귀 463/463 (b088cdf) |
+| Owner가 쓰는 서버 | 0.1.61-67d9095 빌드 | 이전 빌드. 이 README의 일부 기능(검증 출처 기록 등)은 포함되지 않음 |
+| `main` 브랜치 | 0.1.59 시점 | 이전 README가 표시됨 |
+
+## 문서
+
+- [문서 안내](docs/README.md) — 사용자용·개발용 문서 구분
+- [Architecture](docs/ARCHITECTURE.md) · [Decisions](docs/DECISIONS.md) · [Changelog](CHANGELOG.md)
+- 에이전트 작업 규칙: [AGENTS.md](AGENTS.md)
+
+라이선스 파일은 아직 없습니다(모든 권리 보유).

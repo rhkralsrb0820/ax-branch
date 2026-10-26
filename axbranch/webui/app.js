@@ -393,7 +393,8 @@
   }
   setInterval(tick, 2000);
   refreshOverview().then(async () => {
-    show('home');
+    const start = decodeURIComponent(location.hash.slice(1));   // e.g. #devroom, #library (read-only views)
+    show(['library', 'devroom'].includes(start) ? start : 'home');
     if (submission) await recoverSubmission();
     const q = new URLSearchParams(location.search);
     if (S.ov.test_mode && q.has('selftest')) { const s = document.createElement('script'); s.src = '/selftest.js'; document.body.appendChild(s); }
