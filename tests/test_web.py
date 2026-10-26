@@ -9,8 +9,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from axbranch import web
-from axbranch.state import Store
+from axbranch import web, departments
+from axbranch.state import Store, run_lock
 
 
 class WebTests(unittest.TestCase):
@@ -105,6 +105,30 @@ class WebTests(unittest.TestCase):
             self.assertEqual([e['detail']['channel'] for e in s.events(first['id'], {'owner_action'})], ['web'])
         finally:
             s.close()
+
+    def test_recommendation_acceptance_is_explicit_durable_and_never_launches(self):
+        store = Store(self.ws / 'axbranch.sqlite3')
+        try:
+            pid = store.new_project('check supplied product evidence')
+            departments.record_recommendations(store, pid, [{'id': 'research', 'reason': 'inspect supplied evidence'}])
+            code, page = self.call('/api/project/' + pid)
+            self.assertEqual(code, 200)
+            item = page['recommendations'][0]
+            self.assertEqual(page['attached'], [])
+            body = {'id': item['id'], 'decision': 'accepted'}
+            with run_lock(self.ws / 'projects' / pid / 'run.lock'):
+                code, _ = self.call('/api/project/' + pid + '/recommendation', body)
+                self.assertNotEqual(code, 200)        # a worker's lock is authoritative
+            code, first = self.call('/api/project/' + pid + '/recommendation', body)
+            self.assertEqual((code, first['changed']), (200, True))
+            code, again = self.call('/api/project/' + pid + '/recommendation', body)
+            self.assertEqual((code, again['changed']), (200, False))
+            code, reloaded = self.call('/api/project/' + pid)
+            self.assertEqual(reloaded['recommendations'][0]['status'], 'accepted')
+            self.assertEqual([d['id'] for d in reloaded['attached']], ['research'])
+            self.assertEqual(self.launched, [])
+        finally:
+            store.close()
         self.assertEqual(self.call('/api/projects', {'goal': 'x'})[0], 400)                   # request id required
         self.assertEqual(self.call('/api/projects', {'goal': ' ', 'request_id': 'req-0002-abcd'})[0], 400)
 

@@ -4,7 +4,7 @@
 
 AX Branch is a local workspace where an Owner hands over a goal and AX Branch's AI CEO, **淸月 (Cheongwol)**, does the rest. The CEO plans the work, splits it across the departments the Owner attached, and runs temporary specialist agents on the Owner's Claude Code / Codex CLI subscriptions. Each result is checked by a separate verification step and reworked until it passes. Only then does it reach the Owner for review. The Owner sets the goal and the limits; AX Branch handles the AI work inside them.
 
-> 상태: 개발 중인 개인 프로젝트입니다. 현재 소스는 **0.1.62 후보**이고, Owner가 실제로 쓰는 서버는 이전 빌드 **0.1.61-67d9095**입니다. 두 버전은 같지 않습니다(아래 [버전](#버전-현재-소스와-사용-중인-빌드)).
+> 상태: 개발 중인 개인 프로젝트입니다. 현재 소스는 **0.1.63 후보**이고, Owner가 실제로 쓰는 서버는 이전 빌드 **0.1.61-67d9095**입니다. 두 버전은 같지 않습니다(아래 [버전](#버전-현재-소스와-사용-중인-빌드)).
 
 
 ## 무엇을 해결하나
@@ -114,7 +114,7 @@ flowchart LR
 
 **알려진 한계**
 
-- **OS 수준 격리는 없습니다.** 결과 실행 시 Python 네트워크 제한만 있고(최선 노력), 파일·exe·하위 프로그램 실행은 막지 못합니다.
+- **OS 격리의 지원 범위가 제한됩니다.** 현재 소스는 AppContainer로 생성 프로그램 검사와 앱 내부의 제한된 CLI/단일 프로세스 결과 실행을 보호합니다. 실제 미끼 파일·토큰으로 차단을 확인했습니다. 웹/서버·학습 인터프리터 및 보호된 GUI 결과 실행은 지원하지 않아 차단하며, 명시적 Owner 예외 실행과 외부 수동 실행은 이 보호 범위 밖입니다. 허용된 시스템 읽기 권한까지 전부 차단한다고 주장하지 않습니다. 실행 중인 이전 서버에는 아직 적용되지 않았습니다.
 - **자동 자기 개선은 없습니다.** 경험은 기록되고 참고될 뿐이며, 개선 후보 생성·격리 평가·승격은 계획 단계입니다.
 - **다른 엔진의 검증이 항상 보장되지는 않습니다.** 독립 검증은 원래 생산과 다른 엔진(Codex)이 맡아야 합니다. 그러나 사용량 한도 때문에 같은 엔진으로 대신 검증한 실행이 있으며, 각 실행에 어느 쪽이었는지 기록됩니다.
 - **경험 활용 A/B 비교는 결과가 없습니다.** 승인된 축소 실험을 1회 실행했지만 과제 A에서 멈췄습니다. 과제 문구가 상품기획 부서 계약(필수 한국어 제목·JSON 블록)과 맞지 않았기 때문입니다([근거](docs/evidence/2026-10-26-product-ab-compact-run.md)).
@@ -184,7 +184,9 @@ python -X utf8 build_exe.py
   - 상품기획 A/B 비교를 다시 사전 등록합니다(Owner 승인 필요).
   - 경험 수명 주기 중 개선 후보·격리 평가·승격 단계는 계획 상태입니다.
 
-설계는 [Department Harness Proposal](docs/DEPARTMENT_HARNESS_PROPOSAL.md)을 참고하세요. H3/H4, 모델 학습, 유료 서비스는 현재 범위 밖입니다.
+**H3 부서 추천도 구현했습니다.** 청월의 기존 계획 호출에서 최대 세 부서를 이유와 함께 제안하고, Owner가 수락해야 연결됩니다. 추천만으로 실행·권한·필수 조건을 바꾸지 않으며, 현재 계획을 자동 재시작하지 않습니다. 모의 모델·실제 HTTP·headless Chrome으로 확인했고 실제 모델의 추천 품질은 아직 검증하지 않았습니다.
+
+설계는 [Department Harness Proposal](docs/DEPARTMENT_HARNESS_PROPOSAL.md)을 참고하세요. H4, 추가 모델 학습, 유료 서비스는 현재 범위 밖입니다.
 
 ## 버전: 현재 소스와 사용 중인 빌드
 

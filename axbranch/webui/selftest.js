@@ -67,6 +67,23 @@
       await report('reload creates no project', window.AXB.ov.projects.length === Number(sessionStorage.getItem('axb-st-count')));
       const p = await api('project/' + pid);
       await report('attachment restored after reload', p.attached.map(d => d.id).join() === 'operations', JSON.stringify(p.attached));
+      const fixture = window.AXB.ov.projects.find(p => p.goal === 'H3 browser fixture (scripted recommendation data, no model)');
+      if (fixture) {
+        await window.AXB.openProject(fixture.id);
+        await until(() => document.querySelector('#recommendations [data-decision="accepted"]'));
+        await report('H3 recommendations do not attach on display', window.AXB.project.attached.length === 0);
+        document.querySelector('#recommendations [data-decision="accepted"]').click();
+        await until(() => window.AXB.project.attached.some(d => d.id === 'research'));
+        await report('H3 explicit acceptance connects only the selected capability',
+          window.AXB.project.attached.map(d => d.id).join() === 'research' && window.AXB.project.state === 'CREATED');
+        document.querySelector('#recommendations [data-decision="dismissed"]').click();
+        await until(() => window.AXB.project.recommendations.some(d => d.status === 'dismissed'));
+        const saved = await api('project/' + fixture.id);
+        await report('H3 decisions persist without starting a project', saved.state === 'CREATED' &&
+          saved.recommendations.map(d => d.status).join() === 'accepted,dismissed');
+        await window.AXB.openProject(pid);
+        await report('H3 project switching clears unrelated suggestions', document.getElementById('recommendations').hidden);
+      }
       window.AXB.show('devroom');
       await until(() => document.getElementById('copyTop'));
       const card = document.getElementById('copyTop').closest('.dcard');

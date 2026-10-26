@@ -128,6 +128,33 @@ class RealBackendTests(unittest.TestCase):
         alive = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'], capture_output=True).stdout.decode(errors='replace')
         self.assertNotIn(str(pid), alive)
 
+    def test_native_two_process_profile_cannot_start_a_third_process(self):
+        child = ('import subprocess,sys\n'
+                 'try:\n p=subprocess.Popen([sys.executable,"-c","print(123)"]); p.wait(); print("THIRD_ALLOWED")\n'
+                 'except OSError as e:\n print("THIRD_BLOCKED",getattr(e,"winerror",None))\n')
+        rc, out, _ = self.run_isolated(
+            f'p=subprocess.run([sys.executable,"-c",{child!r}],capture_output=True,text=True)\n'
+            'print(p.stdout); print(p.stderr); print("CHILD_EXIT",p.returncode)\n',
+            child_processes=True, max_processes=2)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('CHILD_EXIT 0', out)
+        self.assertIn('THIRD_BLOCKED', out)
+        self.assertNotIn('THIRD_ALLOWED', out)
+
+    def test_native_bootloader_profile_keeps_outside_file_and_network_denials(self):
+        rc, out, _ = self.run_isolated(
+            f't("outside",lambda:open(r"{self.canary}").read())\n'
+            't("network",lambda:socket.create_connection(("1.1.1.1",443),timeout=3))\n'
+            'open("inside.txt","w").write("allowed")\nprint("INSIDE_OK")\n',
+            child_processes=True, max_processes=2, allow_custom_acl=True)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('INSIDE_OK', out)
+        for name in ('outside', 'network'):
+            line = next(line for line in out.splitlines() if line.startswith(name + ' '))
+            self.assertIn(' DENIED ', line)
+            error = json.loads(line.split(' DENIED ', 1)[1])
+            self.assertEqual(error['type'], 'PermissionError', line)
+
     def test_verification_self_test_runs_inside_the_boundary(self):
         store = Store(self.tmp / 'ws' / 'axbranch.sqlite3')
         eng = E.Engine(store, workspace=self.tmp / 'ws', vault=self.tmp / 'v', gai_db=self.tmp / 'x', llm=None)

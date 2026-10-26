@@ -59,13 +59,13 @@ if os.name == 'nt':
     CREATE_SUSPENDED, CREATE_NO_WINDOW = 0x4, 0x08000000
     KILL_ON_JOB_CLOSE, ACTIVE_PROCESS, JOB_MEMORY = 0x2000, 0x8, 0x200
 
-    def _job(caps=True):
+    def _job(caps=True, process_limit=MAX_PROCESSES):
         job = _k32.CreateJobObjectW(None, None)
         if not job:
             raise OSError(ctypes.get_last_error(), 'CreateJobObject failed')
         info = _Extended()
         info.BasicLimitInformation.LimitFlags = KILL_ON_JOB_CLOSE | ((ACTIVE_PROCESS | JOB_MEMORY) if caps else 0)
-        info.BasicLimitInformation.ActiveProcessLimit = MAX_PROCESSES
+        info.BasicLimitInformation.ActiveProcessLimit = process_limit
         info.JobMemoryLimit = MAX_MEMORY
         if not _k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
             _k32.CloseHandle(job)
@@ -114,7 +114,8 @@ class Contained:
                           stdout=self._out, stderr=self._err or subprocess.STDOUT)
             if isolate is not None:
                 from . import isolation
-                self.job = _job(caps)
+                isolation.check_grants(isolate)
+                self.job = _job(True, process_limit=isolate.max_processes)
                 isolate.writes = list(dict.fromkeys([*isolate.writes, str(self.tmp), str(cwd)]))
                 isolate.reads = list(dict.fromkeys([*isolate.reads, *isolate.writes]))
                 isolation.check_grants(isolate)

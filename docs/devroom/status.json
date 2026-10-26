@@ -1,718 +1,717 @@
 {
- "schema": 2,
- "updated_at": "2026-10-26 23:55 KST",
- "version": "0.1.62 이후 (후보 빌드 0.1.62-85f8f00, 미적용)",
- "branch": "dev/web-ui",
- "commit": "85f8f00",
- "now": {
-  "can_do": "목표와 파일을 맡기고 부서(리서치·운영·상품기획)를 붙이면 淸月 CEO가 계획하고 부서별로 나눠 만들어 검증한 결과를 Owner 검토로 넘깁니다. 부서를 \"필수\"로 지정하면 그 부서가 실제로 일하고 수용 기준을 통과해야만 검토로 넘어갑니다(계획·실행·수용·분리에서 강제). 격리·폐기된 부서는 새로 연결하거나 일을 맡길 수 없습니다. 검토 단계의 글 수정 요청은 같은 프로젝트에서 재작업·재검증됩니다.",
-  "limits": [
-   "독립 검증은 다른 엔진(Codex)이 해야 하지만, 이번 실제 검증에서는 Codex 사용량 한도로 Claude가 대신했습니다(기록됨).",
-   "상품기획 경험 활용 비교(A/B)는 아직 결과가 없습니다(일시 중지). 실패 원인이던 계약 불일치는 엔진에서 고쳤지만(상품기획 1.0.1), 새 사전 등록과 실행은 Owner 승인 후입니다.",
-   "결과 실행 시 파일·.exe·하위 프로그램은 막지 못합니다(Python 네트워크 제한만, 최선 노력).",
-   "브라우저 검사가 가끔 90초 안에 끝나지 않습니다(페이지 로드 후 멈춤까지 확인, 원인 미확인).",
-   "필수 부서(H2)는 실제 모델로 충족 경로 1회만 확인했습니다(검토 도달, Codex 검증). 필수 부서가 빠졌을 때 막히는 경로와 부서 상태(H1)는 자동 테스트로만 확인했습니다. 현재 세 부서는 상태 도입 전(legacy)으로 행동 검증이 판정되지 않았습니다."
+  "schema": 2,
+  "updated_at": "2026-10-27 (Codex development in progress)",
+  "version": "0.1.63 candidate — not serving",
+  "branch": "dev/web-ui",
+  "commit": "working tree after 61294a5",
+  "now": {
+    "can_do": "목표와 파일을 맡기고 부서(리서치·운영·상품기획)를 붙이면 淸月 CEO가 계획하고 부서별로 나눠 만들어 검증한 결과를 Owner 검토로 넘깁니다. 부서를 \"필수\"로 지정하면 그 부서가 실제로 일하고 수용 기준을 통과해야만 검토로 넘어갑니다(계획·실행·수용·분리에서 강제). 격리·폐기된 부서는 새로 연결하거나 일을 맡길 수 없습니다. 검토 단계의 글 수정 요청은 같은 프로젝트에서 재작업·재검증됩니다.",
+    "limits": [
+      "현재 소스에 AppContainer 검증·제한된 CLI/EXE 결과 실행을 연결했습니다. 기존 사용 중 서버에는 적용하지 않았습니다.",
+      "웹/서버의 격리 통신과 보호된 GUI/학습 인터프리터 실행은 미지원으로 차단합니다. 명시적 예외만 축소 보호로 실행됩니다.",
+      "H3는 모의 계획 1회·실제 HTTP·Chrome으로 확인했습니다. 실제 모델 추천 품질과 경험 활용 효과는 미검증입니다.",
+      "DNS·HKCU 차단 시험 근거는 확인되지 않았습니다. 루프백은 접근 거부 오류가 아닌 제한 시간 내 연결 불가로 관측했습니다."
+    ]
+  },
+  "current_work": {
+    "state": "검증 중",
+    "basis": "H3 Chrome 31/31, recommendations 7/7; final frozen regression pending",
+    "title": "결과 실행 격리 보완·H3 구현 후 전체 회귀 준비",
+    "why": "사용자 목표 → 기존 청월 계획 → 명시적 부서 연결 → 권한 안의 실행·검증을 실제 사용 경로까지 일치시킵니다.",
+    "after": "현재 코드의 전체 회귀와 후보 패키지 확인, 조건이 맞으면 승인된 A/B 1회"
+  },
+  "next": [
+    {
+      "id": "ab-compare",
+      "source": "owner",
+      "title": "상품기획 A/B: 과제 문구를 부서 계약에 맞춰 다시 사전 등록",
+      "why": "이번 정지는 과제 크기가 아니라 실험 설계 불일치(필수 제목·JSON 블록 미명시, 과제 A에 적용 불가능한 출처 기준) 때문입니다.",
+      "improves": "경험 재사용의 효과(또는 효과 없음)를 같은 과제·자료·평가표·예산으로 처음 측정합니다.",
+      "scope": "엔진 쪽 정렬은 완료(상품기획 1.0.1, 계약을 계획·제작·검증에 전달, 사전 충돌 검사). 남은 것: 새 사전 등록(과제 문구), 예산 증액 없음",
+      "done_when": "새 사전 등록으로 1회 실행해 A·B-대조·B-경험·블라인드 평가가 한도 안에서 끝나거나, 멈추면 원인 기록",
+      "verify": "사전 등록 해시와 결과 해시 대조, 평가자 독립성 확인",
+      "approval": "필요: 새 사전 등록·실행 (Owner)",
+      "evidence": [
+        "docs/evidence/2026-10-26-product-ab-compact-run.md"
+      ]
+    },
+    {
+      "id": "edge-cause",
+      "source": "dev",
+      "title": "브라우저 검사 90초 초과 원인",
+      "why": "페이지 로드 후 virtual-time 대기에서 멈추는 것까지 확인했습니다.",
+      "improves": "불필요한 검증 실패 감소",
+      "scope": "같은 페이지로 Chrome 대비, 남은 타이머/연결 확인",
+      "done_when": "원인 근거 확보",
+      "verify": "기록 분석 (제한 연장 금지)",
+      "approval": "불필요",
+      "evidence": [
+        "docs/evidence/2026-10-26-claude-takeover.md"
+      ]
+    }
+  ],
+  "owner_todo": [
+    {
+      "action": "A/B 새 사전 등록 승인 여부 (예산 증액 없음)",
+      "why": "계약 불일치는 엔진에서 고쳤습니다(상품기획 1.0.1). 실험은 일시 중지 상태입니다.",
+      "how": "docs/evidence/2026-10-26-product-ab-compact-run.md 참고"
+    },
+    {
+      "action": "공개 전환 결정 4가지 (이메일 이력, 로펌 프로젝트 언급, 이력 속 스크린샷, 라이선스)",
+      "why": "공개 감사에서 발견되어 공개를 멈췄습니다. 저장소는 비공개 그대로입니다.",
+      "how": "Codex 작업 폴더 outputs/ceo-demo-review/PUBLICATION_AUDIT_2026-10-26.md"
+    },
+    {
+      "action": "웹 화면 확인 3가지 (기존과 동일)",
+      "why": "시각 품질·손 드래그는 자동 확인 불가",
+      "how": "http://127.0.0.1:8765/ (현재 서버는 0.1.61-67d9095 그대로)"
+    }
+  ],
+  "recent": [
+    {
+      "title": "H2: 사용 가능 / 필수 부서",
+      "change": "필수 부서는 계획·실행·수용에서 실제 작업과 기준 충족을 확인하고, 분리는 이유를 남긴 필수 해제 후에만 가능 — 실제 실행 P-20261026-3973d8: 운영(필수)이 일하고 기준 6/6 충족, Codex 검증 PASS(v2)",
+      "level": "전체 회귀 479/479 · 브라우저 27/27 · 실제 모델 1회(충족 경로)"
+    },
+    {
+      "title": "H1: 부서 레지스트리 상태",
+      "change": "후보·검증됨·격리됨·폐기됨, 이유·근거·변경 기록. 격리·폐기는 연결·위임·각 호출 직전에 차단, 기록은 보존",
+      "level": "자동 테스트"
+    },
+    {
+      "title": "상품기획 계약 정렬 (1.0.1)",
+      "change": "필수 제목·JSON 계약을 계획·제작·검증에 같은 형태로 전달, 문서가 아닌 계획은 호출 전에 거부, 출처 기준은 조건부로",
+      "level": "자동 테스트"
+    }
+  ],
+  "areas": [
+    {
+      "id": "owner",
+      "level": 1,
+      "name": "Owner와 화면 (기존 창 · 웹)",
+      "role": "목표를 맡기고, 진행·결과·근거를 보고, 승인·피드백·중단·재개·결과 실행을 하는 곳.",
+      "implemented": [
+        "기존 창(EXE)",
+        "웹 화면: 홈·목표·첨부·파이프라인·기록·검토·결과 실행·결과물 라이브러리·이어서 개발·오너 개발실",
+        "두 화면이 같은 Owner 동작(actions.py) 사용"
+      ],
+      "missing": [
+        "웹 화면 Owner 확인"
+      ],
+      "evidence": [
+        "axbranch/web.py",
+        "axbranch/actions.py",
+        "tests/test_web.py"
+      ]
+    },
+    {
+      "id": "ceo",
+      "level": 2,
+      "name": "淸月 CEO의 계획과 재계획",
+      "role": "목표 해석, 단계·담당 부서 결정, 실패 진단과 재계획, 최종 수락.",
+      "implemented": [
+        "계획·진단·재작업 라운드 제한",
+        "부서 기준 충돌 시 기록 후 재계획"
+      ],
+      "missing": [],
+      "evidence": [
+        "axbranch/engine.py"
+      ]
+    },
+    {
+      "id": "departments",
+      "level": 2,
+      "name": "부서 라이브러리와 프로젝트 연결",
+      "role": "버전 있는 기능 패키지를 프로젝트에 연결.",
+      "implemented": [
+        "연결·해제·중복 방지·복원",
+        "연결된 부서에만 위임",
+        "부서 결과 형식 계약",
+        "부서 수용 기준을 독립 검증에 연결"
+      ],
+      "missing": [
+        "부서별 산출 형식(JSON 스키마)의 세부 검증"
+      ],
+      "evidence": [
+        "axbranch/departments.py",
+        "docs/evidence/2026-10-24-department-enforcement.md"
+      ]
+    },
+    {
+      "id": "agents",
+      "level": 3,
+      "name": "전문 에이전트 (Claude/Codex)",
+      "role": "단계마다 필요한 데이터만 받아 결과를 반환. 셸·파일 쓰기 없음.",
+      "implemented": [
+        "CLI 플래그로 셸·파일 쓰기 차단",
+        "사용량 한도 시 대체",
+        "호출별 토큰 기록"
+      ],
+      "missing": [
+        "운영체제 수준 격리"
+      ],
+      "evidence": [
+        "axbranch/providers.py"
+      ]
+    },
+    {
+      "id": "capabilities",
+      "level": 3,
+      "name": "기능·권한 관리",
+      "role": "기능 임대, 외부 연결 사전 승인, Owner 전용 승인(결제·인증정보·게시·연락).",
+      "implemented": [
+        "외부 연결 사전 승인",
+        "결과 실행 시 승인 도메인만 허용(Python 최선 노력)"
+      ],
+      "missing": [
+        "파일·.exe·하위 프로그램 제한"
+      ],
+      "evidence": [
+        "tests/test_owner_run.py"
+      ]
+    },
+    {
+      "id": "verification",
+      "level": 2,
+      "name": "결과물 검사와 독립 검증",
+      "role": "결정적 검사, 실행 검사, 다른 엔진의 독립 검증.",
+      "implemented": [
+        "실행 검사(네트워크 차단 최선 노력)",
+        "기준별 판정",
+        "브라우저 검사 단계 기록"
+      ],
+      "missing": [
+        "브라우저 90초 초과 원인"
+      ],
+      "evidence": [
+        "axbranch/runtime.py"
+      ]
+    },
+    {
+      "id": "state",
+      "level": 1,
+      "name": "저장·재개·기억·감사 기록",
+      "role": "SQLite 기록, 이벤트 감사, 재개와 복구.",
+      "implemented": [
+        "상태·이벤트 기록",
+        "재계획 후 변경 없는 결과 재사용과 이유 기록",
+        "실행 중 작업 중복 시작 방지"
+      ],
+      "missing": [
+        "웹 서버는 멈춘 작업 자동 복구를 하지 않음(보기만으로 재개 방지)"
+      ],
+      "evidence": [
+        "axbranch/state.py",
+        "axbranch/supervisor.py"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "dept-harness",
+      "title": "부서를 연결하고 연결된 부서에만 일을 맡기기",
+      "impl": "구현 완료",
+      "verify": "실제 E2E 확인",
+      "solves": "업무를 기능 패키지로 나눠 맡기고 결과를 다음 부서로 넘김",
+      "scope": "연결·해제·중복 방지·복원, 위임 범위, 임시 에이전트 정책",
+      "auto": "tests.test_departments",
+      "e2e": "P-20261024-304eb4, P-20261025-1d2aec",
+      "verified_at": "7884507 (F161)",
+      "evidence": [
+        "docs/evidence/2026-10-24-departments.md"
+      ],
+      "limits": [
+        "임시 에이전트·거부·해제는 실제 모델 미확인"
+      ],
+      "done_when": "현재 완료"
+    },
+    {
+      "id": "dept-contract",
+      "title": "부서 결과가 잘못되면 다음 작업으로 넘어가지 않도록 검사",
+      "impl": "구현 완료",
+      "verify": "실제 E2E 확인",
+      "solves": "빈 결과·필수 항목 누락·다른 프로젝트 산출물 참조의 전파",
+      "scope": "형식 계약 v1, 실패 시 같은 부서 1회 재작업 후 Owner 정지",
+      "auto": "실패·재작업·정지·입력 자료 ID 허용·다른 프로젝트 차단 (tests.test_departments)",
+      "e2e": "P-20261025-1d2aec: 실패→재작업→통과 (오탐 1건 발견, 7884507에서 수정)",
+      "verified_at": "7884507 (F161)",
+      "evidence": [
+        "docs/evidence/2026-10-25-e2e-161.md"
+      ],
+      "limits": [
+        "형식만 검사, 내용 정확성은 독립 검증 몫",
+        "2회 실패 정지는 실제 모델 미확인"
+      ],
+      "done_when": "현재 완료"
+    },
+    {
+      "id": "dept-acceptance",
+      "title": "부서 기준을 못 맞추면 통과시키지 않기",
+      "impl": "구현 완료",
+      "verify": "실제 E2E 확인",
+      "solves": "부서 자기 보고만으로 통과하는 위험",
+      "scope": "부서 기준을 프로젝트 기준과 따로 검증, met이 아니면 PASS 불가, 충돌 기록",
+      "auto": "met·미판정·unmet·conflict (tests.test_departments)",
+      "e2e": "P-20261025-1d2aec (met), P-20261025-5387b7 (unmet→FAIL→재작업→met→PASS)",
+      "verified_at": "7fae36f",
+      "evidence": [
+        "docs/evidence/2026-10-25-e2e-161.md",
+        "docs/evidence/2026-10-25-web-e2e.md"
+      ],
+      "limits": [
+        "충돌 경로는 실제 모델 미확인",
+        "의미 판정은 검증 모델에 의존"
+      ],
+      "done_when": "현재 완료"
+    },
+    {
+      "id": "partial-rework",
+      "title": "재작업 때 바뀌지 않은 결과는 다시 쓰고, 영향받는 단계만 다시 실행",
+      "impl": "구현 완료",
+      "verify": "자동 테스트 확인",
+      "solves": "불필요한 재실행과 오래된 결과 사용",
+      "scope": "재계획 후 재사용/폐기와 이유 기록, 중복 실행 방지",
+      "auto": "tests.test_departments, tests.test_web",
+      "e2e": "같은 계획 내 재사용만 실제 확인",
+      "verified_at": "7884507 (F161)",
+      "evidence": [],
+      "limits": [
+        "재계획 후 재사용/폐기는 실제 모델 미확인"
+      ],
+      "done_when": "실제 E2E로 재계획 경로 확인"
+    },
+    {
+      "id": "exec-permission",
+      "title": "검증된 결과를 실행할 때 승인한 곳에만 접속",
+      "impl": "구현 완료",
+      "verify": "자동 테스트 확인",
+      "solves": "결과 실행 시 승인하지 않은 외부 접속",
+      "scope": "Python 결과만, 최선 노력(운영체제 격리 아님)",
+      "auto": "실제 하위 프로세스로 차단 확인 (tests.test_owner_run)",
+      "e2e": "없음",
+      "verified_at": "7884507 (F161)",
+      "evidence": [
+        "docs/evidence/2026-10-24-department-enforcement.md"
+      ],
+      "limits": [
+        "파일 접근 제한 없음",
+        ".exe 결과·하위 프로그램 미적용",
+        "운영체제 수준 격리 미구현"
+      ],
+      "done_when": "OS 수준 격리는 Owner 승인 후 별도 단계"
+    },
+    {
+      "id": "browser-check",
+      "title": "브라우저 검사가 멈추면 어디서 멈췄는지 기록",
+      "impl": "구현 완료",
+      "verify": "자동 테스트 확인",
+      "solves": "90초 초과의 원인을 찾을 근거",
+      "scope": "단계별 시간·멈춘 단계 기록 (진단만, 원인 해결 아님)",
+      "auto": "단계 기록 단위 테스트",
+      "e2e": "없음",
+      "verified_at": "7884507 (F161)",
+      "evidence": [
+        "docs/evidence/2026-10-24-F160b-runtime-failure.md"
+      ],
+      "limits": [
+        "근본 원인 미확인"
+      ],
+      "done_when": "원인 근거 확보"
+    },
+    {
+      "id": "web-ui",
+      "title": "Chrome에서 쓰는 로컬 웹 화면",
+      "impl": "구현 완료",
+      "verify": "자동 테스트 확인",
+      "solves": "화면 품질·모션·사용성",
+      "scope": "기존 기능 + 결과물 라이브러리·이어서 개발 + 오너 개발실",
+      "auto": "83a17dd: Node DOM 35/35 및 JS 구문. Python/실제 Chrome은 미완료",
+      "e2e": "현재 코드 미실행. 과거 7fae36f의 웹 E2E는 텍스트 수정 완료를 입증하지 않음",
+      "verified_at": "83a17dd (Node DOM만)",
+      "evidence": [
+        "docs/evidence/2026-10-25-web-e2e.md",
+        "axbranch/webui/",
+        "docs/evidence/2026-10-25-codex-continuation.md"
+      ],
+      "limits": [
+        "시각 품질·사람 손 드래그는 Owner 확인 전",
+        "새 패키지/전체 회귀/텍스트 수정 실제 E2E 미실행"
+      ],
+      "done_when": "Owner 확인 3가지"
+    }
+  ],
+  "issues": [
+    {
+      "id": "codex-validation-pending",
+      "category": "현재 문제",
+      "title": "새 수정의 실제 서버·패키지·텍스트 재작업 검증이 남음",
+      "impact": "코드는 수정했지만 아직 실행 중인 데모에 적용하거나 실제 사용 통과로 판단할 수 없습니다.",
+      "status": "코드 수정 · 실행 환경 접근 복구 대기",
+      "priority": "높음",
+      "owner": "개발 담당",
+      "next": "환경 복구 후 전체 회귀·보존 빌드·격리 텍스트 수정 E2E",
+      "checked": "2026-10-25",
+      "detail": {
+        "evidence": [
+          "docs/evidence/2026-10-25-codex-continuation.md"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-25",
+          "change": "W1–W3 수정 및 Node DOM 35/35. Python 접근 거부/Chrome 시작 실패로 실제 검증 미실행."
+        }
+      ]
+    },
+    {
+      "id": "owner-run-limits",
+      "category": "현재 문제",
+      "title": "결과 실행 때 파일과 .exe 프로그램은 막지 못함",
+      "impact": "검증된 결과라도 실행 중 PC의 파일에 접근하거나, .exe 결과는 아무 곳에나 접속할 수 있습니다.",
+      "status": "일부 해결 · 남은 제한 있음",
+      "priority": "높음",
+      "owner": "Owner",
+      "next": "OS 수준 제한 방법(방화벽 규칙 또는 저권한 계정)을 쓸지 결정 — 관리자 권한 필요",
+      "checked": "2026-10-25",
+      "detail": {
+        "solved": "Python 결과의 네트워크: 승인 도메인·loopback만 허용(최선 노력)",
+        "remaining": "파일·.exe·하위 프로그램·운영체제 수준 격리",
+        "evidence": [
+          "tests/test_owner_run.py",
+          "docs/evidence/2026-10-24-department-enforcement.md"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-24",
+          "change": "제한 없음으로 기록"
+        },
+        {
+          "date": "2026-10-25",
+          "change": "Python 네트워크 허용 목록 구현 → 일부 해결"
+        }
+      ]
+    },
+    {
+      "id": "edge-timeout",
+      "category": "현재 문제",
+      "title": "브라우저 검사가 가끔 90초 안에 끝나지 않음",
+      "impact": "가끔 검증이 실패로 끝나 불필요한 재작업이 생길 수 있습니다.",
+      "status": "원인 미확인 · 멈춘 단계 확인됨",
+      "priority": "중간",
+      "owner": "개발 담당",
+      "next": "다음 발생 시 기록된 멈춘 단계로 원인 조사",
+      "checked": "2026-10-25",
+      "detail": {
+        "repro": "같은 브라우저 테스트 반복: 이 브랜치 8/10, main 9/10 통과(진단 전). 진단 추가 후 10/10, 최종 회귀 F161 439/439에서는 재발 없음 — 해결 근거 아님",
+        "evidence": [
+          "docs/evidence/2026-10-24-F160b-runtime-failure.md"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-24",
+          "change": "main에서도 재현 확인"
+        },
+        {
+          "date": "2026-10-25",
+          "change": "단계별 시간 기록 추가, 원인은 미확인 유지"
+        },
+        {
+          "date": "2026-10-26",
+          "change": "처음으로 멈춘 위치 기록: 페이지 요청 후(1.8–2.3초) 종료 안 함, virtual-time 대기 단계"
+        },
+        {
+          "date": "2026-10-26",
+          "change": "전체 회귀 460/460(786834f), 463/463(b088cdf)에서 재발 없음 — 해결 근거 아님"
+        }
+      ]
+    },
+    {
+      "id": "real-path-gap",
+      "category": "현재 문제",
+      "title": "재계획 후 재사용·계약 정지·기준 충돌은 실제 사용으로 확인되지 않음",
+      "impact": "기준 미충족→재작업은 실제로 확인됐지만, 재계획 후 재사용/폐기·계약 2회 실패 정지·기준 충돌은 아직 실제로 보지 못했습니다.",
+      "status": "일부 확인 · 남은 경로 있음",
+      "priority": "중간",
+      "owner": "개발 담당",
+      "next": "다음 추천 작업 1순위",
+      "checked": "2026-10-25",
+      "detail": {
+        "evidence": [
+          "tests/test_departments.py"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-25",
+          "change": "등록"
+        },
+        {
+          "date": "2026-10-25",
+          "change": "웹 E2E에서 기준 미충족→재작업→통과 실제 확인"
+        },
+        {
+          "date": "2026-10-26",
+          "change": "글 수정 → 재작업 → 재검증 → 결과 열기 실제 확인 (웹 경로)"
+        }
+      ]
+    },
+    {
+      "id": "web-owner-check",
+      "category": "Owner 확인",
+      "title": "웹 화면을 보기 좋고 쓰기 편한지 확인",
+      "impact": "자동 테스트로는 시각 품질과 손으로 끄는 느낌을 판단할 수 없습니다.",
+      "status": "Owner 확인 대기",
+      "priority": "높음",
+      "owner": "Owner",
+      "next": "체크리스트 3가지 확인 후 회신",
+      "checked": "2026-10-25",
+      "how_to_check": "Chrome에서 http://127.0.0.1:8765/ 를 열고(서버 재시작 후면 새로고침) demo-2026-11/package-0.1.61-web/README-WEB.txt의 1~3번을 확인",
+      "detail": {
+        "evidence": [
+          "docs/evidence/2026-10-24-web-selftest.json"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-25",
+          "change": "등록"
+        }
+      ]
+    },
+    {
+      "id": "drag-owner",
+      "category": "Owner 확인",
+      "title": "기존 창의 나머지 드래그 동작 확인",
+      "impact": "기존 창에서 홈 입력 영역 첨부만 확인됐습니다.",
+      "status": "일부 확인",
+      "priority": "낮음",
+      "owner": "Owner",
+      "next": "원하면 OWNER-DRAG-CHECKLIST.txt 2~5번",
+      "checked": "2026-10-24",
+      "how_to_check": "demo-2026-11/package-0.1.60/OWNER-DRAG-CHECKLIST.txt",
+      "detail": {},
+      "history": [
+        {
+          "date": "2026-10-24",
+          "change": "Owner가 홈 입력 영역 첨부 확인"
+        }
+      ]
+    },
+    {
+      "id": "contract-declared",
+      "category": "해결·과거 기록",
+      "title": "부서 입출력·기준이 설명에만 있던 문제",
+      "impact": "해결됨: 형식 계약과 부서 기준 검증이 실제로 동작합니다.",
+      "status": "해결 (남은 제한: 형식만 검사)",
+      "priority": "-",
+      "owner": "개발 담당",
+      "next": "없음",
+      "checked": "2026-10-25",
+      "detail": {
+        "evidence": [
+          "docs/evidence/2026-10-25-e2e-161.md"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-24",
+          "change": "선언에 그침으로 기록"
+        },
+        {
+          "date": "2026-10-25",
+          "change": "계약·기준 검증 구현, 실제 E2E 확인"
+        }
+      ]
+    },
+    {
+      "id": "contract-false-positive",
+      "category": "해결·과거 기록",
+      "title": "첨부 자료 안의 프로젝트 ID를 잘못 막던 문제",
+      "impact": "해결됨: 입력 자료의 ID는 허용, 실제 다른 프로젝트 참조는 계속 차단.",
+      "status": "해결",
+      "priority": "-",
+      "owner": "개발 담당",
+      "next": "없음",
+      "checked": "2026-10-25",
+      "detail": {
+        "repro": "P-20261025-1d2aec",
+        "evidence": [
+          "docs/evidence/2026-10-25-e2e-161.md",
+          "tests/test_departments.py"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-25",
+          "change": "E2E에서 발견 → 7884507 수정 → 다른 프로젝트 차단 회귀 테스트 추가(1279587)"
+        }
+      ]
+    },
+    {
+      "id": "package-overwritten",
+      "category": "해결·과거 기록",
+      "title": "E2E에 쓴 패키지가 다음 빌드로 덮어써진 일",
+      "impact": "과거 E2E 패키지(77db6aa9, 5a38799c)는 해시만 문서에 남아 있습니다.",
+      "status": "재발 방지 조치 완료",
+      "priority": "-",
+      "owner": "개발 담당",
+      "next": "없음 (demo-2026-11/builds/<버전>-<커밋>/ + BUILD.json)",
+      "checked": "2026-10-25",
+      "detail": {},
+      "history": [
+        {
+          "date": "2026-10-24",
+          "change": "77db6aa9 덮어씀"
+        },
+        {
+          "date": "2026-10-25",
+          "change": "5a38799c 덮어씀 → 빌드 보존 규칙 도입"
+        },
+        {
+          "date": "2026-10-25",
+          "change": "builds 폴더 4개 빌드 보존, BUILD.json으로 증거 연결"
+        }
+      ]
+    },
+    {
+      "id": "verifier-missing-stage-results",
+      "category": "해결·과거 기록",
+      "title": "검증 담당이 앞 단계 결과를 받지 못해 부서 기준을 판정 못 하던 문제",
+      "impact": "해결됨: 앞 단계 기록 결과를 함께 전달해 기준별 판정이 가능해짐",
+      "status": "해결",
+      "priority": "-",
+      "owner": "개발 담당",
+      "next": "없음",
+      "checked": "2026-10-25",
+      "detail": {
+        "repro": "P-20261025-9f78e5 (빌드 b5ab9fe): unverifiable 3건 → HARNESS_BLOCKED",
+        "evidence": [
+          "docs/evidence/2026-10-25-web-e2e.md"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-25",
+          "change": "웹 E2E에서 발견 → 7fae36f 수정 → 재실행 P-20261025-5387b7에서 기준별 판정 확인"
+        }
+      ]
+    },
+    {
+      "id": "codex-limit-verification",
+      "category": "현재 문제",
+      "title": "독립 검증 엔진(Codex) 사용량 한도로 같은 엔진이 검증함",
+      "impact": "이번 실제 확인의 검증은 만든 엔진(Claude)과 같은 엔진이 했습니다. 역할은 분리되지만 엔진 다양성이 없습니다.",
+      "status": "환경 제약 · 기록됨",
+      "priority": "높음",
+      "owner": "개발 담당",
+      "next": "Codex 사용량 회복(05:41 예정) 후 A/B 비교와 함께 독립 검증 재확인. 제공자 실패 사유를 이벤트에 남기도록 개선",
+      "checked": "2026-10-26",
+      "detail": {
+        "repro": "codex exec → \"You've hit your usage limit … try again at 5:41 AM\"",
+        "evidence": [
+          "docs/evidence/2026-10-26-web-text-rework-e2e.md"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-26",
+          "change": "웹 E2E 2회에서 확인"
+        },
+        {
+          "date": "2026-10-26",
+          "change": "경험 기록이 같은 엔진 검증을 독립 통과로 표시하던 문제 수정(786834f)"
+        }
+      ]
+    },
+    {
+      "id": "stale-evidence-lineage",
+      "category": "해결·과거 기록",
+      "title": "옛 계획의 결과가 조건 없이 현재 근거로 쓰일 수 있던 문제",
+      "impact": "해결됨: 수정 계보·입력·기준·부서가 그대로일 때만 사용, 아니면 근거 없음으로 처리(기록 남김)",
+      "status": "해결 (자동 테스트)",
+      "priority": "-",
+      "owner": "개발 담당",
+      "next": "다음 실제 재작업 E2E에서 기록 확인",
+      "checked": "2026-10-26",
+      "detail": {
+        "repro": "Codex 검토 P1 (bf6da8d)",
+        "evidence": [
+          "tests/test_departments.py"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-26",
+          "change": "e62d440 도입 → Codex 지적 → 786834f 수정"
+        }
+      ]
+    },
+    {
+      "id": "full-run-timing-failures",
+      "category": "현재 문제",
+      "title": "한 번의 전체 테스트에서 시간 민감 테스트 4건 실패 (원인 미확인)",
+      "impact": "잠금·결과 실행 차단·감독자 테스트가 한 실행에서만 실패했습니다.",
+      "status": "미해결 · 재발 안 함",
+      "priority": "중간",
+      "owner": "개발 담당",
+      "next": "재발 시 시스템 상태와 함께 기록; 원인 조사",
+      "checked": "2026-10-26",
+      "detail": {
+        "repro": "ad1d8cb 전체 실행(46,108초, 메모리 부족으로 셸 종료) — 확인된 사실; 절전/스왑은 추정. 해당 모듈 단독 25/25, b088cdf 전체 463/463",
+        "evidence": [
+          "outputs/0.1.40-evidence/FULL-ad1d8cb-single-process.log"
+        ]
+      },
+      "history": [
+        {
+          "date": "2026-10-26",
+          "change": "발생, 단독 재검사 통과, 안정 환경 전체 통과"
+        }
+      ]
+    }
+  ],
+  "changelog": [
+    {
+      "date": "2026-10-26",
+      "version": "0.1.62 이후 (미배포)",
+      "summary": "상품기획 1.0.1 계약 정렬, H1 부서 상태, H2 필수 부서, README 재작성"
+    },
+    {
+      "date": "2026-10-26",
+      "version": "0.1.62 (후보)",
+      "summary": "승인된 축소 A/B 1회 실행(과제 A에서 정지, 설계 불일치 진단), 최종 전체 회귀 463/463"
+    },
+    {
+      "date": "2026-10-26",
+      "version": "0.1.62 (후보)",
+      "summary": "A/B 축소안(c) 사전 등록·실행 가능성 검사(미시작), 지시문 압축 시도 후 되돌림, 175k 수치 정정(실측 234,981)"
+    },
+    {
+      "date": "2026-10-26",
+      "version": "0.1.62 (후보)",
+      "summary": "Codex 검토 반영(근거 계보·검증 엔진 기록·인계 정리), 전체 회귀 460/460, A/B 1차 시도(예산으로 정지)"
+    },
+    {
+      "date": "2026-10-26",
+      "version": "0.1.62 (후보)",
+      "summary": "상품기획 부서·버전 고정·경험 참고(Codex 구현 보존), 전체 테스트 Tcl 중단 해결, 웹 글 수정 재작업 E2E, 조직형 하네스 설계안"
+    },
+    {
+      "date": "2026-10-25",
+      "version": "0.1.61",
+      "summary": "결과물 라이브러리·이어서 개발(웹), 개발실 개편, 빌드 보존, 웹 E2E 2회(1회 결함 발견·수정)"
+    },
+    {
+      "date": "2026-10-25",
+      "version": "0.1.61",
+      "summary": "웹 화면, 오너 개발실, 부서 계약·기준 검증, 재사용 규칙, 결과 실행 네트워크 제한, 브라우저 진단, 결과물 라이브러리·이어서 개발"
+    },
+    {
+      "date": "2026-10-24",
+      "version": "0.1.60",
+      "summary": "부서 하네스, 임시 에이전트 정책, Tk 입자 구체"
+    }
   ]
- },
- "current_work": {
-  "state": "개발 대기",
-  "basis": "마지막 개발 보고 기준",
-  "title": "",
-  "why": "",
-  "after": ""
- },
- "next": [
-  {
-   "id": "ab-compare",
-   "source": "owner",
-   "title": "상품기획 A/B: 과제 문구를 부서 계약에 맞춰 다시 사전 등록",
-   "why": "이번 정지는 과제 크기가 아니라 실험 설계 불일치(필수 제목·JSON 블록 미명시, 과제 A에 적용 불가능한 출처 기준) 때문입니다.",
-   "improves": "경험 재사용의 효과(또는 효과 없음)를 같은 과제·자료·평가표·예산으로 처음 측정합니다.",
-   "scope": "엔진 쪽 정렬은 완료(상품기획 1.0.1, 계약을 계획·제작·검증에 전달, 사전 충돌 검사). 남은 것: 새 사전 등록(과제 문구), 예산 증액 없음",
-   "done_when": "새 사전 등록으로 1회 실행해 A·B-대조·B-경험·블라인드 평가가 한도 안에서 끝나거나, 멈추면 원인 기록",
-   "verify": "사전 등록 해시와 결과 해시 대조, 평가자 독립성 확인",
-   "approval": "필요: 새 사전 등록·실행 (Owner)",
-   "evidence": [
-    "docs/evidence/2026-10-26-product-ab-compact-run.md"
-   ]
-  },
-  {
-   "id": "edge-cause",
-   "source": "dev",
-   "title": "브라우저 검사 90초 초과 원인",
-   "why": "페이지 로드 후 virtual-time 대기에서 멈추는 것까지 확인했습니다.",
-   "improves": "불필요한 검증 실패 감소",
-   "scope": "같은 페이지로 Chrome 대비, 남은 타이머/연결 확인",
-   "done_when": "원인 근거 확보",
-   "verify": "기록 분석 (제한 연장 금지)",
-   "approval": "불필요",
-   "evidence": [
-    "docs/evidence/2026-10-26-claude-takeover.md"
-   ]
-  }
- ],
- "owner_todo": [
-  {
-   "action": "A/B 새 사전 등록 승인 여부 (예산 증액 없음)",
-   "why": "계약 불일치는 엔진에서 고쳤습니다(상품기획 1.0.1). 실험은 일시 중지 상태입니다.",
-   "how": "docs/evidence/2026-10-26-product-ab-compact-run.md 참고"
-  },
-  {
-   "action": "공개 전환 결정 4가지 (이메일 이력, 로펌 프로젝트 언급, 이력 속 스크린샷, 라이선스)",
-   "why": "공개 감사에서 발견되어 공개를 멈췄습니다. 저장소는 비공개 그대로입니다.",
-   "how": "Codex 작업 폴더 outputs/ceo-demo-review/PUBLICATION_AUDIT_2026-10-26.md"
-  },
-  {
-   "action": "웹 화면 확인 3가지 (기존과 동일)",
-   "why": "시각 품질·손 드래그는 자동 확인 불가",
-   "how": "http://127.0.0.1:8765/ (현재 서버는 0.1.61-67d9095 그대로)"
-  }
- ],
- "recent": [
-  {
-   "title": "H2: 사용 가능 / 필수 부서",
-   "change": "필수 부서는 계획·실행·수용에서 실제 작업과 기준 충족을 확인하고, 분리는 이유를 남긴 필수 해제 후에만 가능 — 실제 실행 P-20261026-3973d8: 운영(필수)이 일하고 기준 6/6 충족, Codex 검증 PASS(v2)",
-   "level": "전체 회귀 479/479 · 브라우저 27/27 · 실제 모델 1회(충족 경로)"
-  },
-  {
-   "title": "H1: 부서 레지스트리 상태",
-   "change": "후보·검증됨·격리됨·폐기됨, 이유·근거·변경 기록. 격리·폐기는 연결·위임·각 호출 직전에 차단, 기록은 보존",
-   "level": "자동 테스트"
-  },
-  {
-   "title": "상품기획 계약 정렬 (1.0.1)",
-   "change": "필수 제목·JSON 계약을 계획·제작·검증에 같은 형태로 전달, 문서가 아닌 계획은 호출 전에 거부, 출처 기준은 조건부로",
-   "level": "자동 테스트"
-  }
- ],
- "areas": [
-  {
-   "id": "owner",
-   "level": 1,
-   "name": "Owner와 화면 (기존 창 · 웹)",
-   "role": "목표를 맡기고, 진행·결과·근거를 보고, 승인·피드백·중단·재개·결과 실행을 하는 곳.",
-   "implemented": [
-    "기존 창(EXE)",
-    "웹 화면: 홈·목표·첨부·파이프라인·기록·검토·결과 실행·결과물 라이브러리·이어서 개발·오너 개발실",
-    "두 화면이 같은 Owner 동작(actions.py) 사용"
-   ],
-   "missing": [
-    "웹 화면 Owner 확인"
-   ],
-   "evidence": [
-    "axbranch/web.py",
-    "axbranch/actions.py",
-    "tests/test_web.py"
-   ]
-  },
-  {
-   "id": "ceo",
-   "level": 2,
-   "name": "淸月 CEO의 계획과 재계획",
-   "role": "목표 해석, 단계·담당 부서 결정, 실패 진단과 재계획, 최종 수락.",
-   "implemented": [
-    "계획·진단·재작업 라운드 제한",
-    "부서 기준 충돌 시 기록 후 재계획"
-   ],
-   "missing": [],
-   "evidence": [
-    "axbranch/engine.py"
-   ]
-  },
-  {
-   "id": "departments",
-   "level": 2,
-   "name": "부서 라이브러리와 프로젝트 연결",
-   "role": "버전 있는 기능 패키지를 프로젝트에 연결.",
-   "implemented": [
-    "연결·해제·중복 방지·복원",
-    "연결된 부서에만 위임",
-    "부서 결과 형식 계약",
-    "부서 수용 기준을 독립 검증에 연결"
-   ],
-   "missing": [
-    "부서별 산출 형식(JSON 스키마)의 세부 검증"
-   ],
-   "evidence": [
-    "axbranch/departments.py",
-    "docs/evidence/2026-10-24-department-enforcement.md"
-   ]
-  },
-  {
-   "id": "agents",
-   "level": 3,
-   "name": "전문 에이전트 (Claude/Codex)",
-   "role": "단계마다 필요한 데이터만 받아 결과를 반환. 셸·파일 쓰기 없음.",
-   "implemented": [
-    "CLI 플래그로 셸·파일 쓰기 차단",
-    "사용량 한도 시 대체",
-    "호출별 토큰 기록"
-   ],
-   "missing": [
-    "운영체제 수준 격리"
-   ],
-   "evidence": [
-    "axbranch/providers.py"
-   ]
-  },
-  {
-   "id": "capabilities",
-   "level": 3,
-   "name": "기능·권한 관리",
-   "role": "기능 임대, 외부 연결 사전 승인, Owner 전용 승인(결제·인증정보·게시·연락).",
-   "implemented": [
-    "외부 연결 사전 승인",
-    "결과 실행 시 승인 도메인만 허용(Python 최선 노력)"
-   ],
-   "missing": [
-    "파일·.exe·하위 프로그램 제한"
-   ],
-   "evidence": [
-    "tests/test_owner_run.py"
-   ]
-  },
-  {
-   "id": "verification",
-   "level": 2,
-   "name": "결과물 검사와 독립 검증",
-   "role": "결정적 검사, 실행 검사, 다른 엔진의 독립 검증.",
-   "implemented": [
-    "실행 검사(네트워크 차단 최선 노력)",
-    "기준별 판정",
-    "브라우저 검사 단계 기록"
-   ],
-   "missing": [
-    "브라우저 90초 초과 원인"
-   ],
-   "evidence": [
-    "axbranch/runtime.py"
-   ]
-  },
-  {
-   "id": "state",
-   "level": 1,
-   "name": "저장·재개·기억·감사 기록",
-   "role": "SQLite 기록, 이벤트 감사, 재개와 복구.",
-   "implemented": [
-    "상태·이벤트 기록",
-    "재계획 후 변경 없는 결과 재사용과 이유 기록",
-    "실행 중 작업 중복 시작 방지"
-   ],
-   "missing": [
-    "웹 서버는 멈춘 작업 자동 복구를 하지 않음(보기만으로 재개 방지)"
-   ],
-   "evidence": [
-    "axbranch/state.py",
-    "axbranch/supervisor.py"
-   ]
-  }
- ],
- "items": [
-  {
-   "id": "dept-harness",
-   "title": "부서를 연결하고 연결된 부서에만 일을 맡기기",
-   "impl": "구현 완료",
-   "verify": "실제 E2E 확인",
-   "solves": "업무를 기능 패키지로 나눠 맡기고 결과를 다음 부서로 넘김",
-   "scope": "연결·해제·중복 방지·복원, 위임 범위, 임시 에이전트 정책",
-   "auto": "tests.test_departments",
-   "e2e": "P-20261024-304eb4, P-20261025-1d2aec",
-   "verified_at": "7884507 (F161)",
-   "evidence": [
-    "docs/evidence/2026-10-24-departments.md"
-   ],
-   "limits": [
-    "임시 에이전트·거부·해제는 실제 모델 미확인"
-   ],
-   "done_when": "현재 완료"
-  },
-  {
-   "id": "dept-contract",
-   "title": "부서 결과가 잘못되면 다음 작업으로 넘어가지 않도록 검사",
-   "impl": "구현 완료",
-   "verify": "실제 E2E 확인",
-   "solves": "빈 결과·필수 항목 누락·다른 프로젝트 산출물 참조의 전파",
-   "scope": "형식 계약 v1, 실패 시 같은 부서 1회 재작업 후 Owner 정지",
-   "auto": "실패·재작업·정지·입력 자료 ID 허용·다른 프로젝트 차단 (tests.test_departments)",
-   "e2e": "P-20261025-1d2aec: 실패→재작업→통과 (오탐 1건 발견, 7884507에서 수정)",
-   "verified_at": "7884507 (F161)",
-   "evidence": [
-    "docs/evidence/2026-10-25-e2e-161.md"
-   ],
-   "limits": [
-    "형식만 검사, 내용 정확성은 독립 검증 몫",
-    "2회 실패 정지는 실제 모델 미확인"
-   ],
-   "done_when": "현재 완료"
-  },
-  {
-   "id": "dept-acceptance",
-   "title": "부서 기준을 못 맞추면 통과시키지 않기",
-   "impl": "구현 완료",
-   "verify": "실제 E2E 확인",
-   "solves": "부서 자기 보고만으로 통과하는 위험",
-   "scope": "부서 기준을 프로젝트 기준과 따로 검증, met이 아니면 PASS 불가, 충돌 기록",
-   "auto": "met·미판정·unmet·conflict (tests.test_departments)",
-   "e2e": "P-20261025-1d2aec (met), P-20261025-5387b7 (unmet→FAIL→재작업→met→PASS)",
-   "verified_at": "7fae36f",
-   "evidence": [
-    "docs/evidence/2026-10-25-e2e-161.md",
-    "docs/evidence/2026-10-25-web-e2e.md"
-   ],
-   "limits": [
-    "충돌 경로는 실제 모델 미확인",
-    "의미 판정은 검증 모델에 의존"
-   ],
-   "done_when": "현재 완료"
-  },
-  {
-   "id": "partial-rework",
-   "title": "재작업 때 바뀌지 않은 결과는 다시 쓰고, 영향받는 단계만 다시 실행",
-   "impl": "구현 완료",
-   "verify": "자동 테스트 확인",
-   "solves": "불필요한 재실행과 오래된 결과 사용",
-   "scope": "재계획 후 재사용/폐기와 이유 기록, 중복 실행 방지",
-   "auto": "tests.test_departments, tests.test_web",
-   "e2e": "같은 계획 내 재사용만 실제 확인",
-   "verified_at": "7884507 (F161)",
-   "evidence": [],
-   "limits": [
-    "재계획 후 재사용/폐기는 실제 모델 미확인"
-   ],
-   "done_when": "실제 E2E로 재계획 경로 확인"
-  },
-  {
-   "id": "exec-permission",
-   "title": "검증된 결과를 실행할 때 승인한 곳에만 접속",
-   "impl": "구현 완료",
-   "verify": "자동 테스트 확인",
-   "solves": "결과 실행 시 승인하지 않은 외부 접속",
-   "scope": "Python 결과만, 최선 노력(운영체제 격리 아님)",
-   "auto": "실제 하위 프로세스로 차단 확인 (tests.test_owner_run)",
-   "e2e": "없음",
-   "verified_at": "7884507 (F161)",
-   "evidence": [
-    "docs/evidence/2026-10-24-department-enforcement.md"
-   ],
-   "limits": [
-    "파일 접근 제한 없음",
-    ".exe 결과·하위 프로그램 미적용",
-    "운영체제 수준 격리 미구현"
-   ],
-   "done_when": "OS 수준 격리는 Owner 승인 후 별도 단계"
-  },
-  {
-   "id": "browser-check",
-   "title": "브라우저 검사가 멈추면 어디서 멈췄는지 기록",
-   "impl": "구현 완료",
-   "verify": "자동 테스트 확인",
-   "solves": "90초 초과의 원인을 찾을 근거",
-   "scope": "단계별 시간·멈춘 단계 기록 (진단만, 원인 해결 아님)",
-   "auto": "단계 기록 단위 테스트",
-   "e2e": "없음",
-   "verified_at": "7884507 (F161)",
-   "evidence": [
-    "docs/evidence/2026-10-24-F160b-runtime-failure.md"
-   ],
-   "limits": [
-    "근본 원인 미확인"
-   ],
-   "done_when": "원인 근거 확보"
-  },
-  {
-   "id": "web-ui",
-   "title": "Chrome에서 쓰는 로컬 웹 화면",
-   "impl": "구현 완료",
-   "verify": "자동 테스트 확인",
-   "solves": "화면 품질·모션·사용성",
-   "scope": "기존 기능 + 결과물 라이브러리·이어서 개발 + 오너 개발실",
-   "auto": "83a17dd: Node DOM 35/35 및 JS 구문. Python/실제 Chrome은 미완료",
-   "e2e": "현재 코드 미실행. 과거 7fae36f의 웹 E2E는 텍스트 수정 완료를 입증하지 않음",
-   "verified_at": "83a17dd (Node DOM만)",
-   "evidence": [
-    "docs/evidence/2026-10-25-web-e2e.md",
-    "axbranch/webui/",
-    "docs/evidence/2026-10-25-codex-continuation.md"
-   ],
-   "limits": [
-    "시각 품질·사람 손 드래그는 Owner 확인 전",
-    "새 패키지/전체 회귀/텍스트 수정 실제 E2E 미실행"
-   ],
-   "done_when": "Owner 확인 3가지"
-  }
- ],
- "issues": [
-  {
-   "id": "codex-validation-pending",
-   "category": "현재 문제",
-   "title": "새 수정의 실제 서버·패키지·텍스트 재작업 검증이 남음",
-   "impact": "코드는 수정했지만 아직 실행 중인 데모에 적용하거나 실제 사용 통과로 판단할 수 없습니다.",
-   "status": "코드 수정 · 실행 환경 접근 복구 대기",
-   "priority": "높음",
-   "owner": "개발 담당",
-   "next": "환경 복구 후 전체 회귀·보존 빌드·격리 텍스트 수정 E2E",
-   "checked": "2026-10-25",
-   "detail": {
-    "evidence": [
-     "docs/evidence/2026-10-25-codex-continuation.md"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-25",
-     "change": "W1–W3 수정 및 Node DOM 35/35. Python 접근 거부/Chrome 시작 실패로 실제 검증 미실행."
-    }
-   ]
-  },
-  {
-   "id": "owner-run-limits",
-   "category": "현재 문제",
-   "title": "결과 실행 때 파일과 .exe 프로그램은 막지 못함",
-   "impact": "검증된 결과라도 실행 중 PC의 파일에 접근하거나, .exe 결과는 아무 곳에나 접속할 수 있습니다.",
-   "status": "일부 해결 · 남은 제한 있음",
-   "priority": "높음",
-   "owner": "Owner",
-   "next": "OS 수준 제한 방법(방화벽 규칙 또는 저권한 계정)을 쓸지 결정 — 관리자 권한 필요",
-   "checked": "2026-10-25",
-   "detail": {
-    "solved": "Python 결과의 네트워크: 승인 도메인·loopback만 허용(최선 노력)",
-    "remaining": "파일·.exe·하위 프로그램·운영체제 수준 격리",
-    "evidence": [
-     "tests/test_owner_run.py",
-     "docs/evidence/2026-10-24-department-enforcement.md"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-24",
-     "change": "제한 없음으로 기록"
-    },
-    {
-     "date": "2026-10-25",
-     "change": "Python 네트워크 허용 목록 구현 → 일부 해결"
-    }
-   ]
-  },
-  {
-   "id": "edge-timeout",
-   "category": "현재 문제",
-   "title": "브라우저 검사가 가끔 90초 안에 끝나지 않음",
-   "impact": "가끔 검증이 실패로 끝나 불필요한 재작업이 생길 수 있습니다.",
-   "status": "원인 미확인 · 멈춘 단계 확인됨",
-   "priority": "중간",
-   "owner": "개발 담당",
-   "next": "다음 발생 시 기록된 멈춘 단계로 원인 조사",
-   "checked": "2026-10-25",
-   "detail": {
-    "repro": "같은 브라우저 테스트 반복: 이 브랜치 8/10, main 9/10 통과(진단 전). 진단 추가 후 10/10, 최종 회귀 F161 439/439에서는 재발 없음 — 해결 근거 아님",
-    "evidence": [
-     "docs/evidence/2026-10-24-F160b-runtime-failure.md"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-24",
-     "change": "main에서도 재현 확인"
-    },
-    {
-     "date": "2026-10-25",
-     "change": "단계별 시간 기록 추가, 원인은 미확인 유지"
-    },
-    {
-     "date": "2026-10-26",
-     "change": "처음으로 멈춘 위치 기록: 페이지 요청 후(1.8–2.3초) 종료 안 함, virtual-time 대기 단계"
-    },
-    {
-     "date": "2026-10-26",
-     "change": "전체 회귀 460/460(786834f), 463/463(b088cdf)에서 재발 없음 — 해결 근거 아님"
-    }
-   ]
-  },
-  {
-   "id": "real-path-gap",
-   "category": "현재 문제",
-   "title": "재계획 후 재사용·계약 정지·기준 충돌은 실제 사용으로 확인되지 않음",
-   "impact": "기준 미충족→재작업은 실제로 확인됐지만, 재계획 후 재사용/폐기·계약 2회 실패 정지·기준 충돌은 아직 실제로 보지 못했습니다.",
-   "status": "일부 확인 · 남은 경로 있음",
-   "priority": "중간",
-   "owner": "개발 담당",
-   "next": "다음 추천 작업 1순위",
-   "checked": "2026-10-25",
-   "detail": {
-    "evidence": [
-     "tests/test_departments.py"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-25",
-     "change": "등록"
-    },
-    {
-     "date": "2026-10-25",
-     "change": "웹 E2E에서 기준 미충족→재작업→통과 실제 확인"
-    },
-    {
-     "date": "2026-10-26",
-     "change": "글 수정 → 재작업 → 재검증 → 결과 열기 실제 확인 (웹 경로)"
-    }
-   ]
-  },
-  {
-   "id": "web-owner-check",
-   "category": "Owner 확인",
-   "title": "웹 화면을 보기 좋고 쓰기 편한지 확인",
-   "impact": "자동 테스트로는 시각 품질과 손으로 끄는 느낌을 판단할 수 없습니다.",
-   "status": "Owner 확인 대기",
-   "priority": "높음",
-   "owner": "Owner",
-   "next": "체크리스트 3가지 확인 후 회신",
-   "checked": "2026-10-25",
-   "how_to_check": "Chrome에서 http://127.0.0.1:8765/ 를 열고(서버 재시작 후면 새로고침) demo-2026-11/package-0.1.61-web/README-WEB.txt의 1~3번을 확인",
-   "detail": {
-    "evidence": [
-     "docs/evidence/2026-10-24-web-selftest.json"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-25",
-     "change": "등록"
-    }
-   ]
-  },
-  {
-   "id": "drag-owner",
-   "category": "Owner 확인",
-   "title": "기존 창의 나머지 드래그 동작 확인",
-   "impact": "기존 창에서 홈 입력 영역 첨부만 확인됐습니다.",
-   "status": "일부 확인",
-   "priority": "낮음",
-   "owner": "Owner",
-   "next": "원하면 OWNER-DRAG-CHECKLIST.txt 2~5번",
-   "checked": "2026-10-24",
-   "how_to_check": "demo-2026-11/package-0.1.60/OWNER-DRAG-CHECKLIST.txt",
-   "detail": {},
-   "history": [
-    {
-     "date": "2026-10-24",
-     "change": "Owner가 홈 입력 영역 첨부 확인"
-    }
-   ]
-  },
-  {
-   "id": "contract-declared",
-   "category": "해결·과거 기록",
-   "title": "부서 입출력·기준이 설명에만 있던 문제",
-   "impact": "해결됨: 형식 계약과 부서 기준 검증이 실제로 동작합니다.",
-   "status": "해결 (남은 제한: 형식만 검사)",
-   "priority": "-",
-   "owner": "개발 담당",
-   "next": "없음",
-   "checked": "2026-10-25",
-   "detail": {
-    "evidence": [
-     "docs/evidence/2026-10-25-e2e-161.md"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-24",
-     "change": "선언에 그침으로 기록"
-    },
-    {
-     "date": "2026-10-25",
-     "change": "계약·기준 검증 구현, 실제 E2E 확인"
-    }
-   ]
-  },
-  {
-   "id": "contract-false-positive",
-   "category": "해결·과거 기록",
-   "title": "첨부 자료 안의 프로젝트 ID를 잘못 막던 문제",
-   "impact": "해결됨: 입력 자료의 ID는 허용, 실제 다른 프로젝트 참조는 계속 차단.",
-   "status": "해결",
-   "priority": "-",
-   "owner": "개발 담당",
-   "next": "없음",
-   "checked": "2026-10-25",
-   "detail": {
-    "repro": "P-20261025-1d2aec",
-    "evidence": [
-     "docs/evidence/2026-10-25-e2e-161.md",
-     "tests/test_departments.py"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-25",
-     "change": "E2E에서 발견 → 7884507 수정 → 다른 프로젝트 차단 회귀 테스트 추가(1279587)"
-    }
-   ]
-  },
-  {
-   "id": "package-overwritten",
-   "category": "해결·과거 기록",
-   "title": "E2E에 쓴 패키지가 다음 빌드로 덮어써진 일",
-   "impact": "과거 E2E 패키지(77db6aa9, 5a38799c)는 해시만 문서에 남아 있습니다.",
-   "status": "재발 방지 조치 완료",
-   "priority": "-",
-   "owner": "개발 담당",
-   "next": "없음 (demo-2026-11/builds/<버전>-<커밋>/ + BUILD.json)",
-   "checked": "2026-10-25",
-   "detail": {},
-   "history": [
-    {
-     "date": "2026-10-24",
-     "change": "77db6aa9 덮어씀"
-    },
-    {
-     "date": "2026-10-25",
-     "change": "5a38799c 덮어씀 → 빌드 보존 규칙 도입"
-    },
-    {
-     "date": "2026-10-25",
-     "change": "builds 폴더 4개 빌드 보존, BUILD.json으로 증거 연결"
-    }
-   ]
-  },
-  {
-   "id": "verifier-missing-stage-results",
-   "category": "해결·과거 기록",
-   "title": "검증 담당이 앞 단계 결과를 받지 못해 부서 기준을 판정 못 하던 문제",
-   "impact": "해결됨: 앞 단계 기록 결과를 함께 전달해 기준별 판정이 가능해짐",
-   "status": "해결",
-   "priority": "-",
-   "owner": "개발 담당",
-   "next": "없음",
-   "checked": "2026-10-25",
-   "detail": {
-    "repro": "P-20261025-9f78e5 (빌드 b5ab9fe): unverifiable 3건 → HARNESS_BLOCKED",
-    "evidence": [
-     "docs/evidence/2026-10-25-web-e2e.md"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-25",
-     "change": "웹 E2E에서 발견 → 7fae36f 수정 → 재실행 P-20261025-5387b7에서 기준별 판정 확인"
-    }
-   ]
-  },
-  {
-   "id": "codex-limit-verification",
-   "category": "현재 문제",
-   "title": "독립 검증 엔진(Codex) 사용량 한도로 같은 엔진이 검증함",
-   "impact": "이번 실제 확인의 검증은 만든 엔진(Claude)과 같은 엔진이 했습니다. 역할은 분리되지만 엔진 다양성이 없습니다.",
-   "status": "환경 제약 · 기록됨",
-   "priority": "높음",
-   "owner": "개발 담당",
-   "next": "Codex 사용량 회복(05:41 예정) 후 A/B 비교와 함께 독립 검증 재확인. 제공자 실패 사유를 이벤트에 남기도록 개선",
-   "checked": "2026-10-26",
-   "detail": {
-    "repro": "codex exec → \"You've hit your usage limit … try again at 5:41 AM\"",
-    "evidence": [
-     "docs/evidence/2026-10-26-web-text-rework-e2e.md"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-26",
-     "change": "웹 E2E 2회에서 확인"
-    },
-    {
-     "date": "2026-10-26",
-     "change": "경험 기록이 같은 엔진 검증을 독립 통과로 표시하던 문제 수정(786834f)"
-    }
-   ]
-  },
-  {
-   "id": "stale-evidence-lineage",
-   "category": "해결·과거 기록",
-   "title": "옛 계획의 결과가 조건 없이 현재 근거로 쓰일 수 있던 문제",
-   "impact": "해결됨: 수정 계보·입력·기준·부서가 그대로일 때만 사용, 아니면 근거 없음으로 처리(기록 남김)",
-   "status": "해결 (자동 테스트)",
-   "priority": "-",
-   "owner": "개발 담당",
-   "next": "다음 실제 재작업 E2E에서 기록 확인",
-   "checked": "2026-10-26",
-   "detail": {
-    "repro": "Codex 검토 P1 (bf6da8d)",
-    "evidence": [
-     "tests/test_departments.py"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-26",
-     "change": "e62d440 도입 → Codex 지적 → 786834f 수정"
-    }
-   ]
-  },
-  {
-   "id": "full-run-timing-failures",
-   "category": "현재 문제",
-   "title": "한 번의 전체 테스트에서 시간 민감 테스트 4건 실패 (원인 미확인)",
-   "impact": "잠금·결과 실행 차단·감독자 테스트가 한 실행에서만 실패했습니다.",
-   "status": "미해결 · 재발 안 함",
-   "priority": "중간",
-   "owner": "개발 담당",
-   "next": "재발 시 시스템 상태와 함께 기록; 원인 조사",
-   "checked": "2026-10-26",
-   "detail": {
-    "repro": "ad1d8cb 전체 실행(46,108초, 메모리 부족으로 셸 종료) — 확인된 사실; 절전/스왑은 추정. 해당 모듈 단독 25/25, b088cdf 전체 463/463",
-    "evidence": [
-     "outputs/0.1.40-evidence/FULL-ad1d8cb-single-process.log"
-    ]
-   },
-   "history": [
-    {
-     "date": "2026-10-26",
-     "change": "발생, 단독 재검사 통과, 안정 환경 전체 통과"
-    }
-   ]
-  }
- ],
- "changelog": [
-  {
-   "date": "2026-10-26",
-   "version": "0.1.62 이후 (미배포)",
-   "summary": "상품기획 1.0.1 계약 정렬, H1 부서 상태, H2 필수 부서, README 재작성"
-  },
-  {
-   "date": "2026-10-26",
-   "version": "0.1.62 (후보)",
-   "summary": "승인된 축소 A/B 1회 실행(과제 A에서 정지, 설계 불일치 진단), 최종 전체 회귀 463/463"
-  },
-  {
-   "date": "2026-10-26",
-   "version": "0.1.62 (후보)",
-   "summary": "A/B 축소안(c) 사전 등록·실행 가능성 검사(미시작), 지시문 압축 시도 후 되돌림, 175k 수치 정정(실측 234,981)"
-  },
-  {
-   "date": "2026-10-26",
-   "version": "0.1.62 (후보)",
-   "summary": "Codex 검토 반영(근거 계보·검증 엔진 기록·인계 정리), 전체 회귀 460/460, A/B 1차 시도(예산으로 정지)"
-  },
-  {
-   "date": "2026-10-26",
-   "version": "0.1.62 (후보)",
-   "summary": "상품기획 부서·버전 고정·경험 참고(Codex 구현 보존), 전체 테스트 Tcl 중단 해결, 웹 글 수정 재작업 E2E, 조직형 하네스 설계안"
-  },
-  {
-   "date": "2026-10-25",
-   "version": "0.1.61",
-   "summary": "결과물 라이브러리·이어서 개발(웹), 개발실 개편, 빌드 보존, 웹 E2E 2회(1회 결함 발견·수정)"
-  },
-  {
-   "date": "2026-10-25",
-   "version": "0.1.61",
-   "summary": "웹 화면, 오너 개발실, 부서 계약·기준 검증, 재사용 규칙, 결과 실행 네트워크 제한, 브라우저 진단, 결과물 라이브러리·이어서 개발"
-  },
-  {
-   "date": "2026-10-24",
-   "version": "0.1.60",
-   "summary": "부서 하네스, 임시 에이전트 정책, Tk 입자 구체"
-  }
- ]
 }

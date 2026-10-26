@@ -44,7 +44,7 @@ NATIVE = S(tool=ENUM('none', 'pyinstaller'), exe_name=STR, windowed=BOOL)
 PLAN = S(title=STR, interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
          runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE),
-         native_build=NATIVE)
+         native_build=NATIVE, recommended_departments=ARR(S(id=STR, reason=STR)))
 DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=STR,
               artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
@@ -912,6 +912,7 @@ class Engine:
         missing = [t for t in plan['required_tools'] if not shutil.which(t)]
         with self.store.tx():
             self.store.update(pid, plan=plan, plan_version=1)
+            departments.record_recommendations(self.store, pid, plan.get('recommended_departments', []))
             self.store.event(pid, 'decision', what='plan v1', why=plan['interpretation'][:500], by=used)
             self._trace_applied(pid, trace, 'pause: install tools' if missing else 'staff and build', {}, plan,
                                 expects=None if missing else 'build')
@@ -959,11 +960,17 @@ class Engine:
     def _department_context(self, pid):
         """{'attached_departments': [...]} for 淸月's planning calls; nothing when none is attached."""
         specs = self._attached_departments(pid)
-        if not specs:
-            return {}
+        library, _ = departments.catalog()
         modes = {d['id']: d['mode'] for d in departments.attached(self.store, pid)}
         out = {'attached_departments': [dict(departments.summary(s), mode=modes.get(s['id'], 'available'))
                                         for s in specs.values()]}
+        out['recommendable_departments'] = [dict(departments.summary(s), lifecycle=departments.lifecycle(dep)['status'])
+                                             for dep, s in library.items() if dep not in specs and not departments.blocked(dep)]
+        out['recommendation_rule'] = ('Return recommended_departments: at most three unattached eligible departments '
+                                      'with concrete Goal-specific reasons, or []. This does NOT attach them or grant '
+                                      'permission. Plan using only already attached capabilities; the Owner explicitly '
+                                      'accepts recommendations for a later planning boundary. Do not add a stage for an '
+                                      'unattached recommended department or call legacy packages behaviour-verified.')
         if 'required' in modes.values():
             out['required_rule'] = ('A department with mode "required" must have at least one pipeline stage delegated '
                                     'to it (stage.department = its id); a temporary agent or a renamed role does not '
@@ -2563,7 +2570,11 @@ class Engine:
         python = None if exe else self._python()
         if not exe and not python:
             raise Rejected('No Python interpreter found to run the result.')
-        manifest = isolation.Manifest(purpose='Owner result execution', artifact_sha256=artifact['sha256'])
+        # PyInstaller onefile uses a parent bootloader and one contained application child.
+        # Both stay in the same AppContainer/Job; the two-process Job limit prevents a third process.
+        manifest = isolation.Manifest(purpose='Owner result execution', artifact_sha256=artifact['sha256'],
+                                      child_processes=bool(exe), max_processes=2 if exe else 8,
+                                      allow_custom_acl=bool(exe))
         if exe:
             shutil.copyfile(exe, run / exe.name)
             entry = run / exe.name
@@ -2581,7 +2592,8 @@ class Engine:
                 code, output = sandbox.run(args, cwd, manifest.lifetime_seconds, isolate=manifest)
                 copied = self._owner_output_files(target, run)
                 self.last_owner_output = (f'종료 코드: {code if code is not None else "시간 제한 초과"}\n'
-                                          f'보호: AppContainer · 네트워크/하위 프로세스 차단\n\n{output}')
+                                          f'보호: AppContainer · 네트워크 차단 · '
+                                          f'{"EXE 부트로더 포함 최대 2개 프로세스" if exe else "하위 프로세스 차단"}\n\n{output}')
                 self.store.event(pid, 'owner_run', version=artifact['iteration'], path=str(entry),
                                  exit_code=code, timed_out=code is None, output=output[:200000],
                                  output_files=copied, isolation=manifest.record(),

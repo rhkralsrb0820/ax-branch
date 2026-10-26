@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from axbranch import web                      # noqa: E402
+from axbranch import web, departments         # noqa: E402
 from axbranch.state import Store              # noqa: E402
 
 CHROME = Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe')
@@ -35,7 +35,12 @@ def main(out=None):
     tmp = Path(tempfile.mkdtemp(prefix='axb-web-selftest-'))
     ws, profile = tmp / 'ws', tmp / 'chrome-profile'
     ws.mkdir()
-    Store(ws / 'axbranch.sqlite3').close()
+    fixture = Store(ws / 'axbranch.sqlite3')
+    pid = fixture.new_project('H3 browser fixture (scripted recommendation data, no model)')
+    departments.record_recommendations(fixture, pid, [
+        {'id': 'research', 'reason': 'Synthetic browser fixture: inspect supplied evidence'},
+        {'id': 'operations', 'reason': 'Synthetic browser fixture: check quantities'}])
+    fixture.close()
     launched = []
 
     def no_engine():

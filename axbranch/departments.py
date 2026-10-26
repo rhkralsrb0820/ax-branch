@@ -353,6 +353,91 @@ def spec_digest(spec):
     return hashlib.sha256(json.dumps(spec, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
 
 
+def _recommendation_scope(store, pid):
+    p = store.project(pid)
+    inputs = [e['detail'] for e in store.events(pid, {'owner_inputs'})]
+    return hashlib.sha256(json.dumps({'goal': p['goal'], 'inputs': inputs,
+                                     'plan_version': p['plan_version']}, sort_keys=True).encode()).hexdigest()
+
+
+def record_recommendations(store, pid, proposed):
+    """A planning byproduct, not a new model call or an authority grant. Invalid suggestions are ignored."""
+    specs, _ = catalog()
+    linked = {d['id'] for d in attached(store, pid)}
+    seen = set()
+    scope = _recommendation_scope(store, pid)
+    existing = {(e['detail']['scope'], e['detail']['department'])
+                for e in store.events(pid, {'department_recommended'})}
+    for item in proposed if isinstance(proposed, list) else []:
+        if not isinstance(item, dict):
+            continue
+        dep, reason = item.get('id'), item.get('reason')
+        if (not isinstance(dep, str) or dep not in specs or dep in linked or dep in seen
+                or blocked(dep) or not isinstance(reason, str) or not reason.strip()):
+            continue
+        seen.add(dep)
+        if (scope, dep) not in existing:
+            store.event(pid, 'department_recommended', department=dep, reason=reason.strip()[:1000],
+                        scope=scope, plan_version=store.project(pid)['plan_version'],
+                        spec_sha256=spec_digest(specs[dep]), version=specs[dep]['version'])
+        if len(seen) >= 3:
+            break
+
+
+def recommendations(store, pid):
+    specs, _ = catalog()
+    scope = _recommendation_scope(store, pid)
+    linked = {d['id'] for d in attached(store, pid)}
+    decisions = {e['detail']['recommendation']: e['detail']['decision']
+                 for e in store.events(pid, {'department_recommendation_decision'})}
+    out = []
+    for event in store.events(pid, {'department_recommended'}):
+        d = event['detail']
+        if d['scope'] != scope:
+            continue
+        dep = d['department']
+        spec = specs.get(dep)
+        state = lifecycle(dep)
+        valid = bool(spec and not blocked(dep) and spec_digest(spec) == d['spec_sha256'])
+        out.append(dict(id=event['id'], department=dep, reason=d['reason'], version=d['version'],
+                        lifecycle=state['status'], status=decisions.get(event['id'], 'pending'),
+                        available=valid and dep not in linked,
+                        note='연결은 기능만 추가합니다. 실행 중인 계획은 변경하거나 재시작하지 않습니다.'))
+    return out[-3:]
+
+
+def decide_recommendation(store, pid, recommendation, decision):
+    """Caller holds the project execution lock. Attach + decision are one transaction; never launches work."""
+    if decision not in ('accepted', 'dismissed') or type(recommendation) is not int:
+        raise Rejected('올바른 추천 번호와 수락/닫기를 선택하세요.')
+    with store.tx():
+        old = [e['detail'] for e in store.events(pid, {'department_recommendation_decision'})
+               if e['detail']['recommendation'] == recommendation]
+        if old:
+            if old[-1]['decision'] != decision:
+                raise Rejected('이미 처리된 추천입니다.')
+            return False
+        p = store.project(pid)
+        if p['state'] not in ('CREATED', 'PAUSED', 'OWNER_REVIEW'):
+            raise Rejected('실행 중에는 추천을 연결하지 않습니다. 작업이 멈춘 뒤 다시 선택하세요.')
+        item = next((d for d in recommendations(store, pid) if d['id'] == recommendation), None)
+        if item is None:
+            raise Rejected('목표·자료·계획이 바뀐 오래된 추천입니다. 현재 계획의 추천을 확인하세요.')
+        if decision == 'accepted':
+            if not item['available']:
+                raise Rejected('추천 부서가 변경·격리됐거나 이미 연결돼 있습니다. 다시 확인하세요.')
+            specs, _ = catalog()     # attachment also rechecks lifecycle
+            if spec_digest(specs[item['department']]) != next(
+                    e['detail']['spec_sha256'] for e in store.events(pid, {'department_recommended'})
+                    if e['id'] == recommendation):
+                raise Rejected('추천 후 부서 명세가 변경됐습니다.')
+            attach(store, pid, item['department'], specs, mode='available')
+        store.event(pid, 'department_recommendation_decision', recommendation=recommendation,
+                    department=item['department'], decision=decision, by='owner',
+                    note='no execution, no permission grant, no required-mode change')
+        return True
+
+
 def resolve(store, pid, library):
     """Use the exact attached snapshot. A legacy version mismatch stops instead of silently upgrading."""
     current = {}

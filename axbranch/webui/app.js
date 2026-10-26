@@ -234,6 +234,26 @@
     $('#projectChips').querySelectorAll('[data-detach]').forEach(b => b.onclick = async () => {
       try { await api(`project/${pid}/department`, {action: 'detach', id: b.dataset.detach}); notice('부서 해제: 다음 위임부터 적용 (실행 중인 단계는 끝까지 진행, 기록은 보존)'); refreshProject(); } catch (e) { fail(e); }
     });
+    const suggestions = p.recommendations || [];
+    const canConnect = ['CREATED', 'PAUSED', 'OWNER_REVIEW'].includes(p.state);
+    $('#recommendations').hidden = !suggestions.length;
+    $('#recommendations').innerHTML = '<h3>淸月의 부서 추천</h3><div class="muted">필요한 기능만 제안합니다. 수락은 부서를 연결하며 실행·권한 부여·필수 부서 변경은 하지 않습니다.</div>'
+      + (!canConnect ? '<div role="status">작업이 멈추거나 결과가 도착하면 연결할 수 있습니다.</div>' : '')
+      + suggestions.map(d => `<div class="kv"><b>${esc(depName(d.department))}</b> · v${esc(d.version)} · ${esc(d.lifecycle === 'legacy' ? '기존 부서 · 작업 품질 미판정' : d.lifecycle)}<p>${esc(d.reason)}</p>`
+        + (d.status === 'pending' ? `<button data-recommend="${esc(d.id)}" data-decision="accepted" ${!canConnect || !d.available ? 'disabled' : ''}>프로젝트에 연결</button> <button class="ghost" data-recommend="${esc(d.id)}" data-decision="dismissed" ${!canConnect ? 'disabled' : ''}>닫기</button>`
+          + (!d.available ? '<span class="muted">명세·상태가 바뀌었거나 이미 연결된 부서입니다.</span>' : '')
+          : `<span class="muted">${d.status === 'accepted' ? '연결됨' : '닫음'}</span>`)
+        + `<div class="muted">${esc(d.note)}</div></div>`).join('');
+    $('#recommendations').querySelectorAll('[data-recommend]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await api(`project/${pid}/recommendation`, {id: Number(b.dataset.recommend), decision: b.dataset.decision});
+        if (pid === S.pid && navigation === S.navigation) {
+          notice(b.dataset.decision === 'accepted' ? '부서 연결됨. 현재 계획은 유지되며 다음 계획부터 사용할 수 있습니다.' : '추천을 닫았습니다.');
+          await refreshProject();
+        }
+      } catch (e) { fail(e); b.disabled = false; }
+    });
     $('#pipeline').innerHTML = p.pipeline.map(r => `<div class="stage ${r.mark === '✓' ? 'done' : r.mark === '●' ? 'now' : ''} ${r.key === S.stageKey ? 'sel' : ''}" data-key="${esc(r.key || '')}">
         <div class="h">${esc(r.mark)} ${esc(r.title)}</div><div class="muted">${esc(r.engine)} · ${esc(r.detail)}</div></div>`).join('');
     $('#pipeline').querySelectorAll('.stage').forEach(el => el.onclick = () => { S.stageKey = el.dataset.key; loadRecords(); refreshProject(); });

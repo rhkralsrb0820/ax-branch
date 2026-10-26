@@ -43,6 +43,8 @@ class Manifest:
     writes: list = field(default_factory=list)
     network: str = 'none'                           # the only supported value
     child_processes: bool = False
+    max_processes: int = 8
+    allow_custom_acl: bool = False                 # native bootloader creates a private extraction DACL
     lifetime_seconds: int = 120
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
     backend: str = 'appcontainer'
@@ -166,10 +168,11 @@ def _capability_sid(name):
     return first, _sid_string(first)
 
 
-def grant(path, sid_string, write):
+def grant(path, sid_string, write, custom_acl=False):
     """Grant one SID access to a directory AX Branch created (inherited by everything inside)."""
     rights = '(OI)(CI)(M)' if write else '(OI)(CI)(RX)'
-    r = subprocess.run(['icacls', str(path), '/grant', f'*{sid_string}:{rights}', '/T', '/C', '/Q'],
+    extra = ['/grant', f'*{sid_string}:(OI)(CI)(WDAC)'] if write and custom_acl else []
+    r = subprocess.run(['icacls', str(path), '/grant', f'*{sid_string}:{rights}', *extra, '/T', '/C', '/Q'],
                        capture_output=True, text=True, errors='replace', creationflags=0x08000000)
     if r.returncode != 0:
         raise IsolationUnavailable(f'could not grant run access to {path}: {r.stdout.strip()} {r.stderr.strip()}'[:300])
@@ -286,7 +289,7 @@ def launch(args, cwd, env, stdin, stdout, stderr, manifest):
         for d in manifest.reads:
             grant(d, manifest.package_sid, write=False)
         for d in manifest.writes:
-            grant(d, manifest.package_sid, write=True)
+            grant(d, manifest.package_sid, write=True, custom_acl=manifest.allow_custom_acl)
         cap_sid, _ = _capability_sid(RUNTIME_CAPABILITY)
         caps = (SID_AND_ATTRIBUTES * 1)(SID_AND_ATTRIBUTES(cap_sid, SE_GROUP_ENABLED))
         sc = SECURITY_CAPABILITIES(psid, caps, 1, 0)
@@ -314,6 +317,10 @@ def launch(args, cwd, env, stdin, stdout, stderr, manifest):
         si.StartupInfo.hStdInput, si.StartupInfo.hStdOutput, si.StartupInfo.hStdError = handles
         si.lpAttributeList = ctypes.addressof(attrs)
         private = env.get('TEMP') or str(cwd)        # AppContainer creation needs LOCALAPPDATA; keep it run-private
+        # GetTempPathW redirects AppContainer temp into this package-relative tree even
+        # when TEMP is set. Native onefile bootloaders use that API before Python runs.
+        # Create the parents inside the already-granted run temp, never in the Owner profile.
+        (Path(private) / 'Packages' / profile.lower() / 'AC' / 'Temp').mkdir(parents=True, exist_ok=True)
         env = {**env, 'LOCALAPPDATA': private, 'APPDATA': private}
         block = ''.join(f'{k}={v}\0' for k, v in sorted(env.items())) + '\0'
         envbuf = ctypes.create_unicode_buffer(block, len(block))
@@ -362,6 +369,8 @@ def _under_temp(path):
 def check_grants(manifest):
     """Grants go only to folders AX Branch created for this run under the temp directory: never the Owner's
     workspace, profile, the Python installation or system locations."""
+    if type(manifest.max_processes) is not int or not 1 <= manifest.max_processes <= 8:
+        raise IsolationUnavailable('isolated process limit must be an integer between 1 and 8')
     bad = [d for d in manifest.reads + manifest.writes if not _under_temp(d) or Path(d).resolve() == Path(
         __import__('tempfile').gettempdir()).resolve()]
     if bad:

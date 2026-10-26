@@ -3,6 +3,28 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.63] - 2026-10-27
+
+### Added
+- H3: bounded department recommendations in the existing CEO planning call, explicit Owner accept/dismiss, pinned specifications and persistent project-scoped decisions. No extra recommendation model call.
+- Actual web acceptance and isolated Owner-result canary tests; the browser self-test now includes four H3 checks.
+
+### Changed
+- Default in-app bounded CLI/native result execution uses AppContainer and shows output in the existing result viewer. Unsupported protected web/GUI/training paths block before execution.
+- Compact experiment task text explicitly follows Product Planning 1.0.1 headings/JSON and requires a different-provider verifier; original attempts are preserved.
+
+### Fixed
+- Closed the direct result-button isolation bypass and removed inherited credentials from explicitly reduced-protection execution.
+- Distinguish explicit OS access denial from loopback unreachability and other probe errors.
+
+### Verification
+- Focused recommendation tests 7/7, real HTTP acceptance test 1/1, Node recommendation UI 3/3; real headless Chrome 31/31 (scripted fixture, no models).
+- Isolation/Owner-run tests 16/16 before the later return-path adjustment; final frozen-code regression and package checks pending.
+
+### Known issues
+- The selected backend's web/server communication is unsupported. A bounded synthetic host/container probe confirmed bind succeeds but connection times out; no OS exception was configured.
+- No general experience quality improvement has been established. Interactive CLI input and protected GUI result viewing are unsupported by the new bounded result runner. Older Owner server remains unchanged.
+
 ## Unreleased — Owner execution isolation (2026-10-27)
 
 - Route in-app CLI/native result execution through AppContainer with the existing project lock; show bounded output in-app and export bounded regular output files.

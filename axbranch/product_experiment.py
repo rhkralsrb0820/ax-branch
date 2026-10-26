@@ -195,6 +195,14 @@ COMPACT_TASKS = {
           '(downside/base/upside), one MVP and one measurable next experiment. Willingness to pay and revenue stay '
           'UNKNOWN. Use only the attached synthetic data; no software, web research, contact or training.')},
 }
+for _task in COMPACT_TASKS.values():
+    _task['goal'] += (' Follow the attached Product Planning document contract exactly: use the Korean headings '
+                      '고객과 문제, 경쟁과 대안, 가치 가설, 손익 시나리오, MVP와 제외, 수용 기준과 실험, '
+                      'and include its product_plan JSON block. Brief means concise prose, NOT a hard word-count '
+                      'criterion. Cite the supplied synthetic input; if there is no preceding-stage result or '
+                      'retrieved experience, explicitly state that absence. Do not fabricate citations or create '
+                      'an unnecessary research stage. Use product-planning for the proposal; research/operations '
+                      'are available only if genuinely needed.')
 MEASURED_CALL_TOKENS = {   # (min, max) per-call reported tokens OBSERVED in attempt 1 (P-20261026-a47117 / a16736)
     'ceo': (10276, 14522), 'worker': (7049, 12959), 'verify': (15504, 20080),
 }
@@ -290,6 +298,7 @@ def run_compact(root, llm=None):
             eng.attach_inputs(pid, [path])
             eng.configure_budget(pid, **BUDGET)
             eng.configure_experience(pid, enabled=label == 'B-experience', source_projects=[source] if source else [], before=cutoff)
+            store.event(pid, 'verification_policy', cross_provider='required', by='owner-preregistered-experiment')
             report['runs'][label] = {'project': pid, 'task_sha256': digest(task['goal']), 'input_sha256': digest(data)}
             art, verification = finish(pid)
             report['runs'][label].update(artifact_sha256=art['sha256'], artifact_ref=art['id'], verification_ref=verification['id'],

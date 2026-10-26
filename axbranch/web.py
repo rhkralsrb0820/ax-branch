@@ -26,7 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from . import WORKSPACE, __version__, actions, departments, home, knowledge, live, supervisor
-from .state import Rejected, Store
+from .state import Rejected, Store, run_lock
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
 STATIC = ROOT / 'axbranch' / 'webui' if (ROOT / 'axbranch' / 'webui').is_dir() else Path(__file__).with_name('webui')
@@ -103,7 +103,8 @@ class App:
                 'required_unmet': ([e['detail'] for e in store.events(pid, {'required_unmet', 'delegation_refused'})] or [{}])[-1],
                 'conflicts': [e['detail'] for e in store.events(pid, {'criteria_conflict'})][-5:],
                 'document_contract': [e['detail'] for e in store.events(pid, {'department_document_contract'})][-10:],
-                'experience': knowledge.experience_view(store, pid)}
+                'experience': knowledge.experience_view(store, pid),
+                'recommendations': departments.recommendations(store, pid)}
 
     def settings(self):
         try:
@@ -357,6 +358,11 @@ def create_project(app, store, body, channel):
 
 
 def project_action(app, store, pid, action, body, channel):
+    if action == 'recommendation':
+        with run_lock(app.workspace / 'projects' / pid / 'run.lock'):
+            changed = departments.decide_recommendation(store, pid, body.get('id'), body.get('decision'))
+        return {'changed': changed, 'recommendations': departments.recommendations(store, pid),
+                'attached': departments.attached(store, pid)}
     store.project(pid)                               # unknown project -> error
     if action == 'department':
         dep = str(body.get('id', ''))

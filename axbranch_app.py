@@ -12,7 +12,8 @@ from axbranch.gui import main
 
 if __name__ == '__main__':
     args = sys.argv[1:]
-    if args and args[0] in ('run', 'result', 'department', 'web'):     # background worker, or the verified result (결과 실행)
+    if args and args[0] in ('run', 'result', 'department', 'web', 'lifecycle', 'isolation', 'verification',
+                           'status', 'check', 'training-env'):     # named CLI operations, not GUI auto-execution
         # A windowed exe shows a modal dialog on an uncaught exception; a hidden worker would wait on it
         # forever. Log the error and exit instead (the supervisor sees the stopped worker).
         try:

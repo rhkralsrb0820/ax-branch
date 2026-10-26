@@ -376,7 +376,9 @@ class Launch:
     def start(self, args, stdin_text='', split=False):
         manifest = None
         if self.isolate is not None and self.isolate is not False:
-            manifest = isolation.Manifest(purpose='runtime acceptance', writes=list(self.isolate))
+            manifest = isolation.Manifest(purpose='runtime acceptance', writes=list(self.isolate),
+                                          child_processes=self.native, max_processes=2 if self.native else 8,
+                                          allow_custom_acl=self.native)
             self.manifests.append(manifest.record() | {'pending': True})
         proc = sandbox.start(self.argv + list(args), self.cwd, stdin_text, extra_env=self.env, split=split,
                              isolate=manifest)
@@ -468,7 +470,8 @@ def _check(spec, mode, base, cwd, ev, on_step):
                 (home / sub).mkdir(parents=True, exist_ok=True)
             base = Launch(base.argv, {**base.env, 'HOME': str(home), 'USERPROFILE': str(home),
                                       'APPDATA': str(home / 'AppData' / 'Roaming'),
-                                      'LOCALAPPDATA': str(home / 'AppData' / 'Local')}, base.cwd, base.native)
+                                      'LOCALAPPDATA': str(home / 'AppData' / 'Local')}, base.cwd, base.native,
+                          [*base.isolate, str(home)] if base.isolate else base.isolate)
         _launches(spec, mode, base, owner, ev, on_step)
     finally:
         shutil.rmtree(pristine, ignore_errors=True)
