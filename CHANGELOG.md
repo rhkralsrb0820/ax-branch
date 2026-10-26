@@ -3,6 +3,20 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## Unreleased — Product Planning alignment, H1, H2 (2026-10-26, dev/web-ui, on top of 0.1.62)
+
+- Product Planning 1.0.1: conditional source criterion; the exact headings / `product_plan` JSON contract
+  reaches planning, production and verification; preflight refuses a non-markdown plan before any agent call.
+- H1: department registry lifecycle (`departments/<id>/lifecycle.json`: candidate / verified / quarantined /
+  retired, reason, evidence, history). Absent = legacy (schema-valid, behaviour unjudged, usable). Unreadable =
+  quarantined. Owner-only recorded transitions (`axbranch lifecycle`); verified needs 2+ evidence references.
+  Quarantine/retirement blocks attach, staffing, every execution entry and each stage call; history is kept.
+- H2: attachment mode available / required. Required = a stage delegated to that department in the plan,
+  valid recorded work in the current plan version and all its criteria met; checked at planning, execution,
+  acceptance; removal needs an explicit, reasoned, recorded Owner change. Web chips and toggles.
+- Validation: deterministic tests (test_lifecycle 5, test_required 9, product planning additions) and the
+  browser self-test 27/27. No real model run for these changes.
+
 ## Unreleased — Codex continuation (2026-10-25)
 
 - Project-bound approval/review drafts and actions; old navigation responses cannot replace current records.

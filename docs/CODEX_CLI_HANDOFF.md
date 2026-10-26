@@ -1,6 +1,37 @@
 # Codex CLI handoff — AX Branch
 
-## CURRENT CHECKPOINT — the only active instructions (Claude, 2026-10-26, after Codex review of bf6da8d)
+## CURRENT CHECKPOINT — the only active instructions (Claude, 2026-10-26 23:10 KST)
+- Branch `dev/web-ui`. Not merged into main. The Owner's server is unchanged (`builds/0.1.61-67d9095`, PID 54292).
+- Pushed to origin/dev/web-ui: up to 6366383 (README). Later commits are local until the next authorized push.
+- Repository visibility: **PRIVATE**. Publication is stopped pending four Owner decisions (e-mail in all commits,
+  law-firm project mention, screenshots in history, license). Audit: Codex work folder
+  `outputs/ceo-demo-review/PUBLICATION_AUDIT_2026-10-26.md`. No history rewrite without approval.
+- **Done this round** (deterministic tests; no real model run for any of it):
+  - README rewritten (Korean product intro + English lead), `docs/README.md` index, two synthetic screenshots.
+  - caaa1a4 — Product Planning 1.0.1. The conditional source criterion and the same headings/JSON contract
+    reach planning (`summary.document_contract`), production and verification (`required_document`). A preflight
+    refuses a non-markdown plan before any agent call.
+  - ce7bebc — H1 registry lifecycle: `departments/<id>/lifecycle.json`, kept outside department.json so the
+    spec digest is stable.
+    - Absent = legacy, usable. Unreadable = quarantined.
+    - `axbranch lifecycle` (Owner CLI); verified needs 2+ evidence references.
+    - Enforced at attach, staffing, every execution entry, and before each stage call and the final build.
+  - f3ec8cb / bdc5b07 — H2: attachment `mode` available/required plus `department_mode` events.
+    - Required work is checked at staffing, at execution entry and at acceptance (`_deliver` →
+      `required_unmet`).
+    - Detaching needs a reasoned lowering first.
+    - Web chips/toggles; browser self-test 27/27.
+- **A/B experiment: paused.** It needs a new Owner-approved pre-registration (task text); no budget increase.
+- **Next, in order:**
+  1. Full single-process regression on the frozen commit.
+  2. Preserved candidate build.
+  3. One small real-model H2 flow in an isolated root.
+  4. Owner decisions: A/B pre-registration, publication.
+- H3/H4, training, paid services and the server switch stay out of scope.
+
+# ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
+
+## [HISTORICAL — superseded, do not act on] Checkpoint (Claude, 2026-10-26, after Codex review of bf6da8d)
 - Branch `dev/web-ui`. Code commit 786834f (review fixes) plus a docs commit on top. Not merged into main; not
   pushed. The Owner's server is unchanged (`builds/0.1.61-67d9095`).
 - Codex review P1/P2 fixed in 786834f:
@@ -89,7 +120,6 @@
     - no budget increase.
   - **Running:** only the Owner web server (PID 54292). No test or experiment processes.
 
-# ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
 
 
 ## [HISTORICAL — superseded, do not act on] START HERE — Claude takeover round, 2026-10-26 02:22 KST (review checkpoint; NOT a usage-limit stop)
