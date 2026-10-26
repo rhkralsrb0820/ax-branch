@@ -14,23 +14,23 @@
     ]
   },
   "current_work": {
-    "state": "검증 중",
-    "basis": "H3 Chrome 31/31, recommendations 7/7; final frozen regression pending",
-    "title": "결과 실행 격리 보완·H3 구현 후 전체 회귀 준비",
+    "state": "사용량 기준 중단",
+    "basis": "H3 Chrome 31/31; packaged basic 13/13; H1/H2 boundaries 8/8; real packaged text-rework E2E 11/11. F163 partial failures, stopped at 5% remaining.",
+    "title": "0.1.63 구현 완료, 전체 회귀는 미완료",
     "why": "사용자 목표 → 기존 청월 계획 → 명시적 부서 연결 → 권한 안의 실행·검증을 실제 사용 경로까지 일치시킵니다.",
-    "after": "현재 코드의 전체 회귀와 후보 패키지 확인, 조건이 맞으면 승인된 A/B 1회"
+    "after": "안전성 테스트 isolate 인자와 오류 분류 단언 수정 후 관련 검사·고정 코드 전체 회귀. A/B 추가 실행 없음."
   },
   "next": [
     {
       "id": "ab-compare",
       "source": "owner",
-      "title": "상품기획 A/B: 과제 문구를 부서 계약에 맞춰 다시 사전 등록",
-      "why": "이번 정지는 과제 크기가 아니라 실험 설계 불일치(필수 제목·JSON 블록 미명시, 과제 A에 적용 불가능한 출처 기준) 때문입니다.",
+      "title": "상품기획 A/B 1회 실행 후 중단: 효과 미입증",
+      "why": "과제 A의 필수 JSON 목록 누락으로 재작업 후 64,487토큰으로 한도 초과. B·평가 미실행.",
       "improves": "경험 재사용의 효과(또는 효과 없음)를 같은 과제·자료·평가표·예산으로 처음 측정합니다.",
       "scope": "엔진 쪽 정렬은 완료(상품기획 1.0.1, 계약을 계획·제작·검증에 전달, 사전 충돌 검사). 남은 것: 새 사전 등록(과제 문구), 예산 증액 없음",
       "done_when": "새 사전 등록으로 1회 실행해 A·B-대조·B-경험·블라인드 평가가 한도 안에서 끝나거나, 멈추면 원인 기록",
       "verify": "사전 등록 해시와 결과 해시 대조, 평가자 독립성 확인",
-      "approval": "필요: 새 사전 등록·실행 (Owner)",
+      "approval": "추가 실행은 새 결정 전 보류",
       "evidence": [
         "docs/evidence/2026-10-26-product-ab-compact-run.md"
       ]

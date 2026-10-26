@@ -1,6 +1,15 @@
+## CURRENT CHECKPOINT — Codex stopped at actual 5% remaining, 2026-10-27
+- Implementation source: 18fbd6d, dev/web-ui. Read docs/evidence/2026-10-27-codex-163.md first.
+- H3, supported Owner CLI/native isolation and packaging implemented; actual packaged text-rework E2E 11/11, 12 calls, 718 sec. Candidate EXE hash 27de6cb17ca30dff831468387a0d16f37eb2c1216da9cd4c34e9da8a499b5af2.
+- Compact A/B ran ONCE: stopped task A after 64,487 reported tokens; nonempty excluded/experiments missing in v1. No comparison, UNPROVEN. Do not rerun without a new decision.
+- Full F163 was STOPPED at usage threshold; NOT a full PASS. Partial batch evidence is in the shared chat outputs/0.1.40-evidence/F163_batches.jsonl. Remaining batches are NOT RUN.
+- Confirmed failures needing follow-up: test_engine executive failover assertion still expects raw notes removed by earlier sanitization; harness-safety mocked check callbacks reject isolate keyword. Correct adapters to explicitly assert isolate=True and assert sanitized usage_limit categories, do not restore raw CLI text or weaken security. Edge runtime timeouts also recurred; cause remains unknown.
+- Next: fix those test contracts, run affected checks, then one fixed-source full regression. Do not claim existing tests pass. The runtime implementation has not been changed since packaged E2E.
+- Owner server PID 54292 / 0.1.61-67d9095 preserved. No main merge, push, server switch, OS exemption or new credentials. No extra model work should start automatically.
+- H3 is initial planning recommendations with explicit acceptance, not autonomous attachment or proven recommendation quality. Protected generated web/server/GUI/foreign training interpreters remain unsupported.
 # Codex CLI handoff — AX Branch
 
-## CURRENT CHECKPOINT — the only active instructions (Claude, 2026-10-27 00:55 KST, usage checkpoint)
+## HISTORICAL CHECKPOINT — superseded (Claude, 2026-10-27 00:55 KST, usage checkpoint)
 - **Why stopped:** the Claude 5-hour window is at 12% remaining (88% used; reset 02:00 KST). The 7-day window is at
   74% remaining. This is a checkpoint before the 7% rule, so no new long task was started.
 - **Verified facts:**
@@ -453,3 +462,4 @@ Repository: `C:\Users\HP\Desktop\AX-Branch\ax-branch`. Branch `dev/departments` 
 ## Codex W3 checkpoint — 2026-10-25 12:10 KST
 - 출처별 마지막 성공 수집 시각·24시간 경과·갱신 실패를 캐시 유무와 무관하게 표시. 출처/게시일, 홈 최신 3개씩, 전체 목록 유지.
 - Node DOM 9/9, JS 구문 확인. Python 캐시 보존/출처별 실패 회귀 추가했으나 미실행. 빌드/서버 전환 없음. 다음 텍스트 수정 E2E.
+
