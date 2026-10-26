@@ -195,21 +195,74 @@ class ProductPlanningTests(unittest.TestCase):
         self.assertEqual(card['verification_level'], knowledge.verification_level(v))
         self.assertNotEqual(card['verification_level'], 'INDEPENDENT_PASS')
 
-    def test_compact_design_preregisters_and_refuses_to_start_when_it_cannot_fit(self):
+    def _compact_llm(self, providers_by_stage):
+        """Scripted model for the compact experiment: department pipeline, fixed usage per call, rubric scores."""
+        from axbranch import providers as P
+        pipeline = [dict(DepartmentScript().pipeline[0], provider=providers_by_stage[0]),
+                    dict(DepartmentScript().pipeline[1], provider=providers_by_stage[1])]
+        script = DepartmentScript(pipeline)
+        from tests.test_engine import GOOD
+        script.builds, script.verdicts = [GOOD] * 9, ['PASS'] * 9   # three projects share this scripted model
+        prompts = []
+
+        def llm(prompt, schema, *a, **kw):
+            P._usage.value = {'source': 'fixture', 'input_tokens': 100, 'output_tokens': 50}
+            if 'scores' in schema.get('properties', {}):
+                prompts.append(prompt)
+                score = {'score': 1, 'evidence': ['artifact line 1']}
+                return {'scores': {k: dict(score) for k in kindex.PRODUCT_RUBRIC}, 'limitations': ['fixture']}, kw.get('prefer', 'codex'), []
+            result, used, notes = script(prompt, schema, *a, **kw)
+            if schema is E.BUILD:                      # a substantive markdown proposal (fixture, not market evidence)
+                result = dict(result, content='# Scripted proposal\n\n' + '\n'.join(
+                    f'## Section {n}\nScripted fixture text for section {n}; synthetic input row {n}.' for n in range(1, 9)),
+                    files=[], edits=[])
+            if schema is E.PLAN:                       # the compact tasks ask for one markdown proposal
+                result = dict(result, artifact_kind='markdown', artifact_filename='proposal.md', required_tools=[],
+                              network_access=[], runtime={'mode': 'none', 'probes': []})
+            return result, used, notes
+        return llm, prompts
+
+    def test_compact_run_is_blind_independent_and_reports_every_budget(self):
         from axbranch import product_experiment as X
-        est = X.compact_estimate()
-        self.assertEqual(est['A (with one textual revision)'][0], 10276 + 7049 + 15504 + 10276 + 10276 + 17434 + 15504 + 10276)
-        root = self.tmp / 'compact'
-        report = X.run_compact(root)                                   # no provider is touched on this path
-        self.assertEqual((report['status'], report['model_calls']), ('NOT_STARTED_INFEASIBLE', 0))
-        prereg = json.loads((root / 'PRE_REGISTERED.json').read_text(encoding='utf-8'))
-        for key in ('tasks', 'task_origin', 'inputs', 'department_specs', 'rubric_sha256', 'acceptance', 'budget_per_project',
-                    'experience_policy', 'planned_interventions', 'stop_conditions', 'estimate_reported_tokens_per_project'):
-            self.assertIn(key, prereg)
-        self.assertIn('NOT autonomous CEO', prereg['task_origin'])
-        self.assertEqual(prereg['budget_per_project']['max_reported_tokens'], 60000)   # the cap is unchanged
+        llm, prompts = self._compact_llm(['claude', 'claude'])
+        report = X.run_compact(self.tmp / 'compact', llm=llm)
+        self.assertEqual(report['status'], 'COMPLETED', report.get('error'))
+        prereg = json.loads((self.tmp / 'compact' / 'PRE_REGISTERED.json').read_text(encoding='utf-8'))
+        self.assertIn('NOT confirmed minimums', prereg['estimate_note'])
+        self.assertIn('NOT re-verified', prereg['textual_revision'])
+        self.assertEqual((prereg['budget_production_per_project']['max_reported_tokens'],
+                          prereg['budget_evaluation_per_result']['max_reported_tokens'], prereg['experiment_max_reported_tokens']),
+                         (60000, 25000, 230000))
+        for label in ('B-control', 'B-experience'):
+            ev = report['evaluations'][label]
+            self.assertEqual((ev['evaluator'], ev['independent']), ('codex', True))
+            self.assertNotEqual(ev['evaluation_project'], report['runs'][label]['project'])   # its own budget
+        self.assertEqual(len(prompts), 2)
+        for prompt in prompts:                                                         # blind, no retrieval
+            for leak in ('B-experience', 'B-control', 'department_experience', 'experience_search', 'prior_knowledge'):
+                self.assertNotIn(leak, prompt)
+        self.assertEqual(report['usage_total_reported_tokens'],
+                         sum(m['reported_total_tokens'] for m in report['usage_by_project'].values()))
+        self.assertIn('comparison', report)
+
+    def test_compact_run_stops_when_no_independent_evaluator_exists(self):
+        from axbranch import product_experiment as X
+        llm, prompts = self._compact_llm(['codex', 'claude'])                          # both providers produced
+        report = X.run_compact(self.tmp / 'compact', llm=llm)
+        self.assertEqual(report['status'], 'STOPPED')
+        self.assertIn('independent evaluation impossible', report['error'])
+        self.assertEqual(prompts, [])
         with self.assertRaises(Rejected):
-            X.run_compact(root)                                        # never reuses or overwrites a root
+            X.run_compact(self.tmp / 'compact', llm=llm)                              # never reuses a root
+
+    def test_compact_run_refuses_to_start_when_the_estimate_cannot_fit(self):
+        from unittest import mock
+        from axbranch import product_experiment as X
+        heavy = dict(X.MEASURED_CALL_TOKENS, verify=(50000, 60000))
+        with mock.patch.object(X, 'MEASURED_CALL_TOKENS', heavy):
+            report = X.run_compact(self.tmp / 'too-big', llm=lambda *a, **k: self.fail('no model call may happen'))
+        self.assertEqual((report['status'], report['model_calls']), ('NOT_STARTED_INFEASIBLE', 0))
+        self.assertTrue((self.tmp / 'too-big' / 'PRE_REGISTERED.json').exists())
 
     def test_comparison_rejects_leakage_and_never_promotes_small_sample(self):
         control = {'execution_mode': 'subscription_cli', 'artifact_sha256': 'a' * 64, 'verification_ref': 'V-fixture',
