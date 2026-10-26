@@ -1,6 +1,49 @@
 # Codex CLI handoff — AX Branch
 
-## CURRENT CHECKPOINT — the only active instructions (Claude, 2026-10-26 23:10 KST)
+## CURRENT CHECKPOINT — the only active instructions (Claude, 2026-10-27 00:55 KST, usage checkpoint)
+- **Why stopped:** the Claude 5-hour window is at 12% remaining (88% used; reset 02:00 KST). The 7-day window is at
+  74% remaining. This is a checkpoint before the 7% rule, so no new long task was started.
+- **Verified facts:**
+  - Repository rhkralsrb0820/ax-branch is **PUBLIC**; default branch main (old README). No license.
+  - Screenshot history was rewritten by Codex: former 884bc68 = 3bb8c05 and former 85f8f00 = 38e40c7; 8f94d88
+    removed the README image embeds.
+  - Never push old clones or the private recovery bundles.
+  - Owner server unchanged: `builds/0.1.61-67d9095`, PID 54292. Candidate builds exist but are not deployed.
+- **Directive in force:** shared `CLAUDE_FINAL_DIRECTIVE_2026-10-27.md` (Phases A–D plus the improvement backlog).
+- **Done this round** (local commit 2058648 on dev/web-ui; pushed with this checkpoint):
+  - **Phase A — OS isolation** (`axbranch/isolation.py`): Windows AppContainer plus the existing Job Object. No
+    admin rights and no OS, account or firewall change.
+    - Isolated: verification self-tests (file/bundle) and Runtime Acceptance in cli/gui mode.
+    - Blocked with an actionable pause: server/web runtime modes (loopback into an AppContainer needs an
+      admin-only exemption) and foreign interpreters (training stack). Owner exception:
+      `axbranch isolation <id> --allow-unisolated --reason`.
+    - Real-backend canary tests (`tests/test_isolation.py`, 8/8): outside read/write, profile, loopback, internet,
+      child process, credential env and stale grant are denied; allowed work runs; descendants are killed.
+    - Private runtime copy: `%LOCALAPPDATA%/AXBranch/sandbox-runtime/py312-v2` (stdlib + site-packages without
+      pip).
+  - **Phase B1/B2:**
+    - Sanitized provider failure categories (no raw CLI output).
+    - `verification_policy cross_provider=required` stops acceptance on a same-provider fallback
+      (`tests/test_verification_policy.py`).
+  - **Focused tests:** test_engine 92/92 (before the B change), test_isolation 8/8, test_verification_policy 3/3,
+    test_sandbox, test_departments.
+  - test_runtime: 41/42. One failure is the known intermittent headless-Edge 90 s stall in
+    `test_rendered_page_is_checked_not_just_served`. That test does not use isolation, and it ran concurrently with
+    other suites.
+- **NOT done yet, in order:**
+  1. B3: confirm historical-evidence reuse regressions still pass (no code change expected).
+  2. B5: H1/H2 packaged denial checks.
+  3. B6: bounded browser-stall diagnostics (single test, phase/process record; no timeout increase).
+  4. Full regression on frozen code, preserved candidate build, then B4: one packaged web text-rework E2E on it.
+  5. Phase C: H3 recommendations (CEO plan field `recommended_departments`, max 3, web accept/dismiss).
+  6. Phase D: corrected A/B pre-registration plus ONE attempt (budgets 60k×3 + 25k×2, max 230k; count probes).
+  7. Improvement backlog; README / 1–20 matrix / devroom update.
+- **Uncommitted changes:** none. **Processes:** only the Owner server. No test or experiment running.
+- Do not start another Codex CLI. The Owner relays the next prompt.
+
+# ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
+
+## [HISTORICAL — superseded, do not act on] Checkpoint (Claude, 2026-10-26 23:10 KST)
 - Branch `dev/web-ui`. Not merged into main. The Owner's server is unchanged (`builds/0.1.61-67d9095`, PID 54292).
 - Pushed to origin/dev/web-ui: up to 6366383 (README). Later commits are local until the next authorized push.
 - Repository visibility: **PRIVATE**. Publication is stopped pending four Owner decisions (e-mail in all commits,
@@ -34,8 +77,8 @@
   - Owner decisions: A/B pre-registration, publication (4 findings), any server switch to the candidate.
   - Optional: a real-model run of the blocking path.
 - H3/H4, training, paid services and the server switch stay out of scope.
+- [Correction 2026-10-27] Statements above about PRIVATE visibility, local-only commits and screenshots are stale: the repository is PUBLIC, screenshot history was rewritten (884bc68→3bb8c05, 85f8f00→38e40c7, then 8f94d88 removed the README embeds). Old hashes in this block are historical evidence identities.
 
-# ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
 
 ## [HISTORICAL — superseded, do not act on] Checkpoint (Claude, 2026-10-26, after Codex review of bf6da8d)
 - Branch `dev/web-ui`. Code commit 786834f (review fixes) plus a docs commit on top. Not merged into main; not
