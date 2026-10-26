@@ -22,7 +22,7 @@ def launch(workspace, store, pid, launcher=None):
     return True
 
 
-def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_id=None):
+def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_id=None, required=()):
     """A new project from the goal box: inputs checked first (a bad file never leaves a half project), then the
     project, its departments (function connections only) and its inputs. Returns the project id.
     request_id: the same id again returns the project it already created (a reload or double submit)."""
@@ -46,7 +46,7 @@ def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_i
         pid = store.new_project(goal)
         store.event(pid, 'owner_action', action='new', channel=channel, **({'request_id': request_id} if request_id else {}))
     for dep_id in dict.fromkeys(dep_ids):
-        departments.attach(store, pid, dep_id, specs)
+        departments.attach(store, pid, dep_id, specs, mode='required' if dep_id in required else 'available')
     if files:
         engine = engine_factory()
         try:

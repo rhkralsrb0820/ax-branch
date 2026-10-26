@@ -958,7 +958,16 @@ class Engine:
     def _department_context(self, pid):
         """{'attached_departments': [...]} for 淸月's planning calls; nothing when none is attached."""
         specs = self._attached_departments(pid)
-        return {'attached_departments': [departments.summary(s) for s in specs.values()]} if specs else {}
+        if not specs:
+            return {}
+        modes = {d['id']: d['mode'] for d in departments.attached(self.store, pid)}
+        out = {'attached_departments': [dict(departments.summary(s), mode=modes.get(s['id'], 'available'))
+                                        for s in specs.values()]}
+        if 'required' in modes.values():
+            out['required_rule'] = ('A department with mode "required" must have at least one pipeline stage delegated '
+                                    'to it (stage.department = its id); a temporary agent or a renamed role does not '
+                                    'count. "available" departments are used only when the goal needs them.')
+        return out
 
     def _attached_departments(self, pid, with_library=False):
         """{id: spec} of the departments attached to this project that the library still provides (validated);
@@ -1164,7 +1173,7 @@ class Engine:
             why = departments.check_stage(stage, specs, library, final=stage is plan['pipeline'][-1])
             if why:
                 return self._delegation_refused(pid, why)
-        conflicts = departments.preflight(plan, specs)
+        conflicts = departments.preflight(plan, specs) + departments.required_problems(self.store, pid, plan)
         if conflicts:
             return self._delegation_refused(pid, '; '.join(conflicts))
         with self.store.tx():
@@ -1229,6 +1238,9 @@ class Engine:
             why = departments.check_stage(stage, specs, library, final=stage is plan['pipeline'][-1])   # detached since staffing: no new work goes there
             if why:
                 return self._delegation_refused(pid, why)
+        required = departments.required_problems(self.store, pid, plan)   # a mode change since staffing applies here
+        if required:
+            return self._delegation_refused(pid, '; '.join(required))
             dep = stage.get('department')
             if dep and not any(e['detail'].get('iteration') == it and e['detail'].get('plan_version') == pv
                                and e['detail'].get('stage') == stage['name']
@@ -2844,6 +2856,11 @@ class Engine:
 
     def _deliver(self, pid, artifact, text, verdict):
         p = self.store.project(pid)
+        unmet = departments.required_unfulfilled(self.store, pid, p['plan'], artifact['iteration'])
+        if unmet:
+            self.store.event(pid, 'required_unmet', iteration=artifact['iteration'], artifact=artifact['id'], problems=unmet)
+            self.store.pause(pid, ('Owner action needed: required department not fulfilled - ' + '; '.join(unmet))[:400])
+            return
         context = {'owner_goal': p['goal'], 'interpretation': p['plan']['interpretation'], **self._owner_inputs(pid),
                    'artifact': {'path': artifact['path'], 'excerpt': text[:6000]},
                    'verification': {'criteria': verdict['criteria'], 'minor_findings': verdict['findings']},

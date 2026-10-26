@@ -100,6 +100,7 @@ class App:
                                    'created': v['created']} for v in store.verifications(pid)],
                 'contract': [e['detail'] for e in store.events(pid, {'department_contract'})][-10:],
                 'acceptance': ([e['detail'] for e in store.events(pid, {'department_acceptance'})] or [{}])[-1],
+                'required_unmet': ([e['detail'] for e in store.events(pid, {'required_unmet', 'delegation_refused'})] or [{}])[-1],
                 'conflicts': [e['detail'] for e in store.events(pid, {'criteria_conflict'})][-5:],
                 'document_contract': [e['detail'] for e in store.events(pid, {'department_document_contract'})][-10:],
                 'experience': knowledge.experience_view(store, pid)}
@@ -347,7 +348,7 @@ def create_project(app, store, body, channel):
             except (Rejected, ValueError, OSError) as e:
                 raise actions.StartRejected(str(e), request_id) from e
             pid = actions.start(store, app.engine_factory, body.get('goal', ''), list(body.get('departments') or []),
-                                app.specs, files, channel, request_id=request_id)
+                                app.specs, files, channel, request_id=request_id, required=list(body.get('required') or []))
         actions.launch(app.workspace, store, pid, app.launcher)
         return {'id': pid, 'created': True}
     finally:
@@ -363,8 +364,11 @@ def project_action(app, store, pid, action, body, channel):
             departments.attach(store, pid, dep, app.specs)
         elif body.get('action') == 'detach':
             departments.detach(store, pid, dep)
+        elif body.get('action') in ('require', 'optional'):
+            departments.set_mode(store, pid, dep, 'required' if body['action'] == 'require' else 'available',
+                                 str(body.get('reason', '')), channel=channel)
         else:
-            raise Rejected('action must be attach or detach')
+            raise Rejected('action must be attach, detach, require or optional')
         return {'attached': departments.attached(store, pid)}
     if action == 'resume':
         if actions.resume(store, pid, channel):

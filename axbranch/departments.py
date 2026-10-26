@@ -257,17 +257,85 @@ def set_lifecycle(dep_id, status, reason, evidence=(), by='owner-cli', root=None
 
 
 def attached(store, pid):
-    """[{id, version}] attached to this project now, in attach order (replayed from its own events)."""
+    """[{id, version, mode}] attached to this project now, in attach order (replayed from its own events).
+    mode: 'available' (the CEO may use it; legacy attachments have no mode) or 'required' (H2)."""
     current = {}
-    for e in store.events(pid, {'department_attached', 'department_detached'}):
+    for e in store.events(pid, {'department_attached', 'department_detached', 'department_mode'}):
+        d = e['detail']
         if e['kind'] == 'department_attached':
-            current[e['detail']['department']] = e['detail']['version']
+            current[d['department']] = {'id': d['department'], 'version': d['version'], 'mode': d.get('mode', 'available')}
+        elif e['kind'] == 'department_mode':
+            if d['department'] in current:
+                current[d['department']]['mode'] = d['mode']
         else:
-            current.pop(e['detail']['department'], None)
-    return [{'id': k, 'version': v} for k, v in current.items()]
+            current.pop(d['department'], None)
+    return list(current.values())
 
 
-def attach(store, pid, dep_id, specs):
+MODES = ('available', 'required')
+
+
+def set_mode(store, pid, dep_id, mode, reason='', channel='owner'):
+    """Owner's explicit, recorded choice. Lowering a requirement needs a reason; it applies to the next planning
+    or execution step and to acceptance (both read the current mode)."""
+    if mode not in MODES:
+        raise Rejected(f'mode must be one of {MODES}')
+    now = next((d for d in attached(store, pid) if d['id'] == dep_id), None)
+    if now is None:
+        raise Rejected(f'연결되지 않은 부서입니다: {dep_id}')
+    if now['mode'] == mode:
+        return attached(store, pid)
+    if mode == 'available' and not str(reason).strip():
+        raise Rejected('필수 해제에는 이유가 필요합니다')
+    if mode == 'required' and blocked(dep_id):
+        raise Rejected(f'사용할 수 없는 부서는 필수로 지정할 수 없습니다: {blocked(dep_id)}')
+    store.event(pid, 'department_mode', department=dep_id, mode=mode, previous=now['mode'], reason=str(reason)[:300],
+                channel=channel, applies='from the next planning/execution step and at acceptance')
+    return attached(store, pid)
+
+
+def required_problems(store, pid, plan):
+    """Why this plan cannot run with the project's required departments ([] = it can). Only a stage delegated to
+    the department itself counts: a temporary agent or a renamed role never stands in for it."""
+    delegated = {s.get('department') for s in plan.get('pipeline', [])}
+    out = []
+    for d in attached(store, pid):
+        if d['mode'] != 'required':
+            continue
+        why = blocked(d['id'])
+        if why:
+            out.append(f"required department {d['id']!r} is unavailable: {why}")
+        elif d['id'] not in delegated:
+            out.append(f"required department {d['id']!r} has no stage delegated to it in the plan")
+    return out
+
+
+def required_unfulfilled(store, pid, plan, iteration):
+    """At acceptance: each required department needs recorded work in the CURRENT plan version (fresh, or a
+    validated carry-over recorded as this version's stage output; the final stage is the verified artifact itself)
+    and every one of its criteria judged 'met' for this iteration. A department name in a plan is not fulfilment."""
+    out = required_problems(store, pid, plan)
+    if out:
+        return out
+    pv = store.project(pid)['plan_version']
+    outputs = {(e['detail'].get('stage'), e['detail'].get('plan_version')) for e in store.events(pid, {'stage_output'})}
+    judged = [e['detail'] for e in store.events(pid, {'department_acceptance'}) if e['detail'].get('iteration') == iteration]
+    results = judged[-1]['results'] if judged else []
+    last = len(plan.get('pipeline', [])) - 1
+    for d in attached(store, pid):
+        if d['mode'] != 'required':
+            continue
+        stages = [(i, s) for i, s in enumerate(plan['pipeline']) if s.get('department') == d['id']]
+        worked = any(i == last or ((s['name'], pv) in outputs and store.output(pid, i, pv)) for i, s in stages)
+        mine = [r for r in results if r.get('department') == d['id']]
+        if not worked:
+            out.append(f"required department {d['id']!r} has no valid recorded work in plan version {pv}")
+        elif not mine or any(r.get('status') != 'met' for r in mine):
+            out.append(f"required department {d['id']!r}: its acceptance criteria are not all met in version {iteration}")
+    return out
+
+
+def attach(store, pid, dep_id, specs, mode='available'):
     if dep_id not in specs:
         raise Rejected(f'부서 {dep_id!r}는 라이브러리에 없거나 명세 검증에 실패했습니다.')
     if any(d['id'] == dep_id for d in attached(store, pid)):
@@ -277,7 +345,7 @@ def attach(store, pid, dep_id, specs):
         raise Rejected(f"{specs[dep_id]['name']} 부서는 {state['status']} 상태라 새로 연결할 수 없습니다: {state.get('reason', '')}")
     spec = specs[dep_id]
     store.event(pid, 'department_attached', department=dep_id, version=spec['version'],
-                spec=spec, spec_sha256=spec_digest(spec),
+                spec=spec, spec_sha256=spec_digest(spec), mode=mode if mode in MODES else 'available',
                 note='function connection only; Owner approvals (payment, credentials, publishing, contact) unchanged')
 
 
@@ -305,8 +373,11 @@ def resolve(store, pid, library):
 
 
 def detach(store, pid, dep_id):
-    if not any(d['id'] == dep_id for d in attached(store, pid)):
+    now = next((d for d in attached(store, pid) if d['id'] == dep_id), None)
+    if now is None:
         raise Rejected(f'연결되지 않은 부서입니다: {dep_id}')
+    if now['mode'] == 'required':
+        raise Rejected(f'필수 부서는 바로 분리할 수 없습니다: 먼저 이유와 함께 필수를 해제하세요 ({dep_id})')
     store.event(pid, 'department_detached', department=dep_id,
                 applies='from the next delegation; a stage already running finishes; results and records are kept')
 

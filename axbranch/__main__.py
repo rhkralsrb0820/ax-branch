@@ -51,7 +51,8 @@ def main(argv=None):
     wb.add_argument('--port', type=int, default=8765); wb.add_argument('--stop', action='store_true')
     wb.add_argument('--test-mode', action='store_true', help=argparse.SUPPRESS)   # browser self-test / E2E only
     dp = sub.add_parser('department', help='departments of a project: list / attach / detach (same as the window)')
-    dp.add_argument('id'); dp.add_argument('action', choices=('list', 'attach', 'detach')); dp.add_argument('dep', nargs='?')
+    dp.add_argument('id'); dp.add_argument('action', choices=('list', 'attach', 'detach', 'require', 'optional'))
+    dp.add_argument('dep', nargs='?'); dp.add_argument('--reason', default='')
     lc = sub.add_parser('lifecycle', help='Owner: department registry state; a transition is recorded with reason and evidence')
     lc.add_argument('dep', nargs='?'); lc.add_argument('--status', choices=('candidate', 'verified', 'quarantined', 'retired'))
     lc.add_argument('--reason', default=''); lc.add_argument('--evidence', action='append', default=[])
@@ -220,10 +221,14 @@ def _dispatch(a):
                 departments.attach(store, a.id, a.dep, specs)
             elif a.action == 'detach':
                 departments.detach(store, a.id, a.dep)
+            elif a.action in ('require', 'optional'):
+                departments.set_mode(store, a.id, a.dep, 'required' if a.action == 'require' else 'available',
+                                     a.reason, channel='cli')
         except departments.Rejected as e:
             print(f'거부: {e}')
             return 1
-        print(', '.join(d['id'] for d in departments.attached(store, a.id)) or '(연결된 부서 없음)')
+        print(', '.join(d['id'] + (' (필수)' if d['mode'] == 'required' else '')
+                        for d in departments.attached(store, a.id)) or '(연결된 부서 없음)')
     elif a.cmd == 'training-env':
         from . import training
         env = training.ensure_env(os.getcwd())

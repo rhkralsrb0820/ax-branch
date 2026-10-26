@@ -96,8 +96,12 @@
     S.pending.push(id); draft(); renderPending();
   }
   function renderPending() {
-    $('#pendingDeps').innerHTML = S.pending.map(id => `<span class="chip">▣ ${esc(depName(id))}<button class="x" data-rm="${esc(id)}" title="첨부 해제">×</button></span>`).join('');
+    S.required = (S.required || []).filter(x => S.pending.includes(x));
+    $('#pendingDeps').innerHTML = S.pending.map(id => { const req = S.required.includes(id);
+      return `<span class="chip${req ? ' req' : ''}">▣ ${esc(depName(id))}<button class="x mode" data-req="${esc(id)}" aria-pressed="${req}" title="필수로 지정하면 淸月 CEO가 반드시 이 부서에 단계를 맡기고, 그 결과가 수용 기준을 통과해야 Owner 검토로 넘어갑니다">${req ? '🔒 필수' : '사용 가능'}</button><button class="x" data-rm="${esc(id)}" title="첨부 해제">×</button></span>`; }).join('');
     $('#pendingDeps').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.pending = S.pending.filter(x => x !== b.dataset.rm); renderPending(); });
+    $('#pendingDeps').querySelectorAll('[data-req]').forEach(b => b.onclick = () => { const id = b.dataset.req;
+      S.required = S.required.includes(id) ? S.required.filter(x => x !== id) : [...S.required, id]; renderPending(); });
   }
   async function attachToProject(id) {
     if (!S.pid) return;
@@ -180,7 +184,7 @@
         sessionStorage.setItem(submissionKey, JSON.stringify(pending)); // failure stops submission before any POST
         submission = pending;
       }
-      const r = await api('projects', {goal: text, departments: S.pending, files: S.files, request_id: S.requestId});
+      const r = await api('projects', {goal: text, departments: S.pending, required: (S.required || []).filter(x => S.pending.includes(x)), files: S.files, request_id: S.requestId});
       await accepted(r);
     } catch (e) {
       if (submission && e.rejectedRequest === submission.id) {
@@ -217,7 +221,16 @@
     $('#banner').textContent = p.banner.text; $('#banner').style.background = p.banner.color;
     $('#pTitle').textContent = p.title;
     $('#pState').textContent = `${p.id} · ${p.state} · ${p.status} · v${p.iteration}` + (p.pause_reason ? ` · ${p.pause_reason.slice(0, 200)}` : '');
-    $('#projectChips').innerHTML = p.attached.map(d => `<span class="chip">▣ ${esc(depName(d.id))} v${esc(d.version)}<button class="x" data-detach="${esc(d.id)}" title="해제 (다음 위임부터 적용)">×</button></span>`).join('') || '<span class="muted">없음 — 부서를 이 칸으로 끌어 놓거나 부서를 클릭해 [프로젝트에 추가]</span>';
+    $('#projectChips').innerHTML = (p.attached.map(d => { const req = d.mode === 'required';
+      return `<span class="chip${req ? ' req' : ''}">▣ ${esc(depName(d.id))} v${esc(d.version)}<button class="x mode" data-mode="${esc(d.id)}" data-req="${req}" title="${req ? '필수 해제 (이유 필요, 기록됨)' : '필수로 지정 (다음 계획·실행·수용부터 적용)'}">${req ? '🔒 필수' : '사용 가능'}</button>${req ? '' : `<button class="x" data-detach="${esc(d.id)}" title="해제 (다음 위임부터 적용)">×</button>`}</span>`; }).join('') || '<span class="muted">없음 — 부서를 이 칸으로 끌어 놓거나 부서를 클릭해 [프로젝트에 추가]</span>')
+      + (p.state === 'PAUSED' && (p.required_unmet.problems || p.required_unmet.reason) && /required department|quarantined|retired|candidate/.test(p.pause_reason || '')
+         ? `<div class="kv" role="status">수용을 막는 검사: ${esc((p.required_unmet.problems || [p.required_unmet.reason]).join('; '))}</div>` : '');
+    $('#projectChips').querySelectorAll('[data-mode]').forEach(b => b.onclick = async () => {
+      const req = b.dataset.req === 'true';
+      const reason = req ? window.prompt('필수를 해제하는 이유 (기록됩니다)') : '';
+      if (req && !reason) return;
+      try { await api(`project/${pid}/department`, {action: req ? 'optional' : 'require', id: b.dataset.mode, reason}); notice(req ? '필수 해제: 기록됨' : '필수로 지정: 다음 계획·실행·수용부터 적용'); refreshProject(); } catch (e) { fail(e); }
+    });
     $('#projectChips').querySelectorAll('[data-detach]').forEach(b => b.onclick = async () => {
       try { await api(`project/${pid}/department`, {action: 'detach', id: b.dataset.detach}); notice('부서 해제: 다음 위임부터 적용 (실행 중인 단계는 끝까지 진행, 기록은 보존)'); refreshProject(); } catch (e) { fail(e); }
     });
