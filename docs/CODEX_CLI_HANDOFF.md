@@ -64,6 +64,31 @@
     measured MAXIMUM exceeds 60k by up to about 5k.
   - **Running:** only the Owner web server (PID 54292). No test or experiment processes.
 
+- **Round result — approved compact A/B, 2026-10-26 22:10 KST.** Claude usage: 5-hour window 65% remaining,
+  7-day window 81% remaining.
+  - b088cdf implements the approved design:
+    - no textual revision in A (the revision is evidenced by the web E2E P-20261026-3ca452, NOT re-verified here);
+    - separate blind evaluation budget of 25k per B result; production 60k per project; experiment maximum 230k;
+    - estimates labelled as estimates;
+    - usage per project plus the total.
+  - **Ran once** (`outputs/product-ab-compact-2`, after one real availability call per provider): STOPPED in
+    Task A.
+    - 5 calls, 77,546 reported tokens, all in A. Evaluation 0; B not started.
+    - v1 failed verification: length (669 words against about 600), the exact Korean-heading / product_plan JSON
+      contract (my task text did not name them), and an inapplicable Product Planning provenance criterion.
+    - The rework's v2 verification overshot the cap in flight (59,807 → 77,546; stop-after-usage limitation).
+    - No comparison; UNPROVEN. Evidence: `docs/evidence/2026-10-26-product-ab-compact-run.md`.
+  - **Final full single-process regression on b088cdf, stable environment:** 463/463 OK (24 min, hashes matched,
+    `outputs/0.1.40-evidence/FULL-b088cdf-single-process.log`).
+  - The 4 failures of the ad1d8cb run stay UNRESOLVED. They did not recur here; their cause is not confirmed.
+    - Facts: that run took 46,108 s, and Claude Code reaped its shell for low memory.
+    - Inference only: a machine suspension or swapping.
+  - **Next (Owner approval needed):** a new pre-registration with
+    - task text naming the exact contract headings, the JSON block and the length limit;
+    - Product Planning 1.0.1 with a conditional provenance criterion;
+    - no budget increase.
+  - **Running:** only the Owner web server (PID 54292). No test or experiment processes.
+
 # ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
 
 
