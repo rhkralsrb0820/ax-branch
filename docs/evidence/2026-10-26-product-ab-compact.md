@@ -30,9 +30,11 @@ extrapolated**.
   Owner-delegated heading revision on A), stop conditions and the estimate.
 - **Feasibility gate:** the run refuses to start when even the MINIMUM of a project's measured per-call costs
   exceeds the unchanged cap. No model call is made on that path.
-- **Prompt overhead removed:** context JSON without layout whitespace (same data). Scripted department run: 38,334 →
-  35,991 prompt characters (−6%). The fixed system rules dominate (CEO rules 10,979 characters; verification rules
-  4,519 characters plus the schema).
+- **Prompt overhead: tried, then reverted.** Compact context JSON (same data) cut a scripted department run from
+  38,334 to 35,991 prompt characters (−6%). But the full single-process run on cb4d834 then FAILED: 461 run, 9
+  failures and 7 errors, because tests and scripted fixtures match indented prompt substrings. The change was reverted
+  (engine.py byte-identical to 786834f; engine + harness_safety 116/116 after the revert). The fixed system rules
+  dominate anyway: CEO rules 10,979 characters, verification rules 4,519 characters plus the schema.
 
 ## What actually ran
 `outputs/product-ab-compact-1`: pre-registration, then the gate. **0 model calls.** Status NOT_STARTED_INFEASIBLE.

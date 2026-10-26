@@ -41,6 +41,29 @@
   - **Running:** only the Owner web server (PID 54292, `builds/0.1.61-67d9095`); safe to leave. No test or
     experiment processes.
 
+- **Round result — option (c), 2026-10-26 21:30 KST.** Claude usage: 5-hour window 82% remaining, 7-day window
+  83% remaining.
+  - The compact A/B design is implemented (cb4d834): `product_experiment --design compact`, with fixed
+    developer-designed tasks, pre-registration and a measured feasibility gate.
+  - **Ran with 0 model calls** (`outputs/product-ab-compact-1`): NOT_STARTED_INFEASIBLE under the unchanged 60k
+    cap. A with revision: 96,595–128,641 tokens; B-experience with evaluation: 61,609–85,163.
+    `docs/evidence/2026-10-26-product-ab-compact.md`.
+  - Corrected figure: the comparable web E2E MEASURED 234,981 tokens over 10 calls; the earlier "175k" was the cache
+    part only.
+  - **Compact prompt JSON tried, then reverted** (ad1d8cb). The cb4d834 full run failed (461 run: 9 failures,
+    7 errors) because format-coupled tests match indented prompt substrings. engine.py is byte-identical to 786834f
+    again; engine + harness_safety 116/116 after the revert.
+  - **Full single-process run on ad1d8cb:** 461 run, 457 passed, 4 failed. Failing tests: test_lock crash release,
+    2 test_owner_run launcher tests, test_supervisor stalled worker. All are timing/subprocess tests, and the run
+    took 46,108 s (machine stalled or suspended during memory pressure; the session's shell was also reaped).
+    Rerun of those three modules alone: 25/25 OK. NOT a clean full pass; a clean full run on ad1d8cb is still to
+    be done when memory allows.
+  - Attempt 1 (`outputs/product-ab-786834f`) is preserved unchanged.
+  - **Owner decision needed for the comparison:** both, either or neither of (1) drop the text revision from the
+    comparison, already shown in the web E2E, and (2) a separate pre-registered evaluation budget. Even then the
+    measured MAXIMUM exceeds 60k by up to about 5k.
+  - **Running:** only the Owner web server (PID 54292). No test or experiment processes.
+
 # ===== HISTORY BELOW (older checkpoints, kept for the record; superseded) =====
 
 
