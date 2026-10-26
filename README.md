@@ -6,7 +6,6 @@ AX Branch is a local workspace where an Owner hands over a goal and AX Branch's 
 
 > 상태: 개발 중인 개인 프로젝트입니다. 현재 소스는 **0.1.62 후보**이고, Owner가 실제로 쓰는 서버는 이전 빌드 **0.1.61-67d9095**입니다. 두 버전은 같지 않습니다(아래 [버전](#버전-현재-소스와-사용-중인-빌드)).
 
-![AX Branch 웹 홈 — 목표 입력, 부서 첨부, 진행 현황](docs/images/web-home.png)
 
 ## 무엇을 해결하나
 
@@ -103,7 +102,6 @@ flowchart LR
 | H2: 부서 "사용 가능 / 필수" 구분과 강제 (계획·실행·수용·분리) | 구현 | 자동 테스트 · 헤드리스 브라우저 · 실제 모델 1회 (충족 경로만, [근거](docs/evidence/2026-10-26-h2-required-real-run.md)) |
 | 상품기획 계약(필수 제목·JSON)을 계획·제작·검증에 동일하게 전달, 사전 충돌 검사 | 구현 | 자동 테스트 |
 
-![Owner 개발실 — 현재 상태, 진행 중 작업, 다음 할 일](docs/images/web-devroom.png)
 
 ## 확인 수준과 한계
 
