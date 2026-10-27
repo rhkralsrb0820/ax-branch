@@ -188,19 +188,28 @@ def usage_summary(events):
                                          for e in events)}
 
 
+def call_tokens(detail):
+    """One completed turn's reported tokens (input + output, plus Claude cache tokens); None if not reported."""
+    u = detail.get('tokens')
+    if not isinstance(u, dict) or any(not isinstance(u.get(k), (int, float)) or isinstance(u.get(k), bool)
+                                      or u[k] < 0 for k in ('input_tokens', 'output_tokens')):
+        return None
+    total = u['input_tokens'] + u['output_tokens']
+    if str(u.get('source', '')).lower().startswith('claude'):
+        total += sum(u.get(k) or 0 for k in ('cache_creation_input_tokens', 'cache_read_input_tokens'))
+    return total
+
+
 def reported_tokens(events):
     """None if any completed turn lacks input/output usage. Cached/reasoning subsets are not double-counted."""
     total = 0
     for e in events:
         if e['kind'] != 'call':
             continue
-        u = e['detail'].get('tokens')
-        if not isinstance(u, dict) or any(not isinstance(u.get(k), (int, float)) or isinstance(u.get(k), bool)
-                                          or u[k] < 0 for k in ('input_tokens', 'output_tokens')):
+        n = call_tokens(e['detail'])
+        if n is None:
             return None
-        total += u['input_tokens'] + u['output_tokens']
-        if str(u.get('source', '')).lower().startswith('claude'):
-            total += sum(u.get(k) or 0 for k in ('cache_creation_input_tokens', 'cache_read_input_tokens'))
+        total += n
     return total
 
 

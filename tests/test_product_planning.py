@@ -168,7 +168,7 @@ class ProductPlanningTests(unittest.TestCase):
     def test_budget_scope_and_missing_usage_stop_further_calls(self):
         pid = self.store.new_project('bounded fixture')
         eng = E.Engine(self.store, workspace=self.tmp / 'ws')
-        eng.configure_budget(pid, max_calls=1, max_seconds=60, max_prompt_chars=10, max_reported_tokens=20)
+        eng.configure_budget(pid, max_calls=1, max_seconds=60, max_prompt_chars=10, max_reported_tokens=100000)
         self.assertFalse(eng._budget_guard(pid, 'short').is_set())
         with self.assertRaises(Rejected):
             eng._budget_guard(pid, 'too many characters')

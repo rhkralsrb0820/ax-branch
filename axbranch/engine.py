@@ -543,6 +543,12 @@ def _prompt(system, task, context):
             + '\n\nReturn exactly one JSON object matching the required schema.')
 
 
+# Largest single-call reported tokens (cache included) measured per role in recorded runs: 2026-10-26 compact A/B
+# (CEO plan 14,906; product planner rework 15,636) and attempt 1 (verification 20,080). Raised automatically by
+# larger calls observed in the same project; never lowered to fit a budget.
+BUDGET_RESERVE = {'ceo': 14906, 'worker': 15636, 'verify': 20080}
+
+
 def _other(provider):
     return next(p for p in gov.PROVIDERS if p != provider)
 
@@ -790,7 +796,7 @@ class Engine:
         self.log(f'{who} -> {prefer}')
         p = self.store.project(pid)
         prompt = _prompt(system, task, context)
-        call_cancel = self._budget_guard(pid, prompt)
+        call_cancel = self._budget_guard(pid, prompt, who)
         self.beat(pid, f'call {who} ({prefer})')
         activity = self.workspace / 'projects' / pid / 'ACTIVITY.json'
         base = {'project': pid, 'agent': who, 'state': p['state'], 'iteration': p['iteration'],
@@ -861,7 +867,16 @@ class Engine:
                 'model_training' in plan.get('harness_capabilities', [])):
             raise Rejected('Experiment scope: local documents only; no web, install, training, execution or external connection.')
 
-    def _budget_guard(self, pid, prompt):
+    def _call_reserve(self, events, who):
+        """Tokens to keep free before starting a call of this role: the largest call of the role measured in recorded runs
+        (BUDGET_RESERVE) or in this project, whichever is larger. A heuristic from observed maxima, not a provider cap:
+        one call larger than anything observed can still overshoot."""
+        role = 'ceo' if who == 'CEO' else 'verify' if who == 'Verification' else 'worker'
+        seen = [knowledge.call_tokens(e['detail']) for e in events
+                if e['kind'] == 'call' and e['detail'].get('who') == who]
+        return role, max([BUDGET_RESERVE[role], *[n for n in seen if n is not None]])
+
+    def _budget_guard(self, pid, prompt, who=None):
         records = self.store.events(pid, {'execution_budget'})
         if not records:
             return self.cancel
@@ -872,6 +887,14 @@ class Engine:
                 time.time() >= at + budget['max_seconds'] or len(prompt) > budget['max_prompt_chars'] or
                 tokens is None or tokens >= budget['max_reported_tokens']):
             raise Rejected('Execution budget reached; no model call started.')
+        role, reserve = self._call_reserve(events, who)
+        if tokens + reserve > budget['max_reported_tokens']:
+            left = budget['max_reported_tokens'] - tokens
+            self.store.event(pid, 'budget_reserve_stop', who=who, role=role, used=tokens, reserve=reserve,
+                             remaining=left, cap=budget['max_reported_tokens'])
+            raise Rejected(f'Execution budget: {who or role} call NOT started - remaining {left:,} reported tokens is '
+                           f'less than the {reserve:,} kept for one {role} call (largest measured), cap '
+                           f"{budget['max_reported_tokens']:,}, used {tokens:,}. 예산 여유가 부족해 호출을 시작하지 않았습니다.")
         owner_cancel, deadline = self.cancel, at + budget['max_seconds']
 
         class BudgetCancellation:
