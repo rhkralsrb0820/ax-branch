@@ -43,6 +43,8 @@ Semantic versioning. Every release needs an entry with all five sections (enforc
 - Owner revisions verified against the reviewed version's diff (ac83d2e).
 - Real-model runs: web app OWNER_REVIEW; product planning and CSV stopped by the budget reserve with no overshoot.
   Total 20 calls / 379,314 reported tokens (`docs/evidence/2026-10-28-real-work-runs.md`).
+- Full single-process regression on 0f5e8cb: 518/518 OK, hashes matched. Candidate build 0.1.63-0f5e8cb
+  preserved (not deployed).
 
 ## Unreleased — test contracts and verification evidence (2026-10-27, Claude, after 0.1.63 / 18fbd6d)
 

@@ -28,12 +28,12 @@
   - runtime 42/42 (before 0bf9914);
   - engine + departments 110;
   - product_planning, required, harness_safety, owner_run, sandbox, verification_policy, web, release.
-- **Full regression:** see the next entry (run on the frozen commit after this docs commit).
+- **Full regression on frozen 0f5e8cb: 518/518 OK**, 2,058 s, hashes matched (`outputs/0.1.40-evidence/FULL-0f5e8cb-single-process.log`).
+- **Candidate build preserved:** `C:/Users/HP/Documents/Codex/axbranch-builds/0.1.63-0f5e8cb` (exe sha256 95b92b28…8715, BUILD.json). Packaged web smoke on an isolated root: page 200, departments listed, stop OK. NOT deployed.
 - **Interrupted:** one B6 diagnostic batch was reaped by Claude Code under system memory pressure after 17/20
   runs. Its orphaned python was killed; not restarted.
 - **NOT done / next:**
-  1. Packaged-exe check of the new paths (server channel, contract skip, reserve). A candidate build is preserved
-     only if the full regression passes.
+  1. Packaged-exe check of the new paths (server channel, contract skip, reserve) on the preserved candidate.
   2. IB-6: reuse unchanged stages on revisions (measured 44,362 tokens of re-run).
   3. IB-8: Owner budget decision.
   4. A/B: not run. The preflight shows the best case fits 60k and the worst case is refused at CEO acceptance.
