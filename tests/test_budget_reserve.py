@@ -58,5 +58,13 @@ class BudgetReserveTests(unittest.TestCase):
         self.assertEqual(self.store.events(pid, {'budget_reserve_stop'})[-1]['detail']['who'], 'Verification')
 
 
+    def test_ab_preflight_walks_the_first_pass_under_the_reserve_rule(self):
+        from axbranch import product_experiment as X
+        fit = X.reserve_feasibility(60000)
+        self.assertTrue(fit['best_case']['fits'])
+        self.assertFalse(fit['worst_case']['fits'])                    # the risk is recorded, not hidden
+        self.assertIn('call 4 (ceo)', fit['worst_case']['stopped_at'])
+        self.assertFalse(X.reserve_feasibility(30000)['best_case']['fits'])   # would not even start
+
 if __name__ == '__main__':
     unittest.main()

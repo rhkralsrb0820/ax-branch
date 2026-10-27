@@ -213,6 +213,26 @@ EVALUATION_BUDGET = dict(max_calls=1, max_seconds=600, max_prompt_chars=32000, m
 EXPERIMENT_MAX_TOKENS = 230000        # 3 x 60,000 production + 2 x 25,000 evaluation (Owner approval 2026-10-26)
 
 
+FIRST_PASS = ('ceo', 'worker', 'verify', 'ceo')   # plan, proposal, independent verification, CEO acceptance
+
+
+def reserve_feasibility(cap, extra=0):
+    """Deterministic preflight under the engine's pre-call reserve rule (engine.BUDGET_RESERVE): walk the first-pass
+    call sequence with the smallest and the largest per-call usage observed so far, refusing a call when
+    used + reserve > cap, exactly as the engine would. Estimates from observed calls, not guarantees."""
+    from .engine import BUDGET_RESERVE
+    out = {}
+    for case, pick in (('best_case', 0), ('worst_case', 1)):
+        used, stopped = extra, None
+        for i, role in enumerate(FIRST_PASS):
+            if used + BUDGET_RESERVE[role] > cap:
+                stopped = f'call {i + 1} ({role}) refused: used {used:,} + reserve {BUDGET_RESERVE[role]:,} > cap {cap:,}'
+                break
+            used += MEASURED_CALL_TOKENS[role][pick]
+        out[case] = {'fits': stopped is None, 'stopped_at': stopped, 'used_estimate': used}
+    return out
+
+
 def compact_estimate():
     """ESTIMATES (not confirmed minimums) from per-call usage observed in earlier runs. Owner-approved design: no
     textual revision in this comparison (shown separately by the packaged web E2E, not re-verified here); the
@@ -258,10 +278,13 @@ def run_compact(root, llm=None):
               'stop_conditions': ['first budget stop (per project or experiment total)', 'first substantive failure (no PASS, no independent evaluator)',
                                   'no automatic rerun'],
               'estimate_reported_tokens': estimate,
+              'reserve_feasibility': {'A': reserve_feasibility(cap), 'B-control': reserve_feasibility(cap),
+                                      'B-experience': reserve_feasibility(cap, EXPERIENCE_CONTEXT_TOKENS)},
               'estimate_note': 'ESTIMATES derived from per-call usage observed in earlier runs; NOT confirmed minimums; an in-flight call may exceed a cap',
               'source_revision': revision.stdout.strip() if revision.returncode == 0 else 'UNKNOWN'}
     (root / 'PRE_REGISTERED.json').write_text(json.dumps(prereg, ensure_ascii=False, indent=1), encoding='utf-8')
-    if any(v[0] > cap for k, v in estimate.items() if not k.startswith('evaluation')) or EVALUATION_TOKENS[0] > EVALUATION_BUDGET['max_reported_tokens']:
+    if any(v[0] > cap for k, v in estimate.items() if not k.startswith('evaluation')) or EVALUATION_TOKENS[0] > EVALUATION_BUDGET['max_reported_tokens'] \
+            or not all(f['best_case']['fits'] for f in prereg['reserve_feasibility'].values()):
         report = {'status': 'NOT_STARTED_INFEASIBLE', 'model_calls': 0, 'estimate': estimate, 'quality_improvement': 'UNPROVEN'}
         (root / 'REPORT.json').write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding='utf-8')
         return report
