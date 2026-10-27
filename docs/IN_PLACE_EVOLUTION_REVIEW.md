@@ -62,3 +62,12 @@ Nothing below is deployed: the Owner server is still 0.1.61-67d9095.
 
 Areas 12, 14, 15, 16 and 20 remain DEFERRED (no demonstrated need or evaluation data). The other areas are unchanged
 from the table above.
+
+## Status update — 2026-10-28 (Claude; supersedes rows above where listed)
+| Area | Current state (level) | Next acceptance criterion |
+|---|---|---|
+| 3 Sandbox/security | Generated server/web programs are now verified inside their AppContainer through a per-run named-pipe channel; no Windows setting changed (impl, det, backend; one real-model web app run). Owner in-app web/server result execution remains blocked | WebSockets/HTTPS/multi-port programs tested; Owner-run web results |
+| 10 Autonomous verification | Department document-contract failures skip the verifier call; revisions verified against the reviewed version's diff (det; real-model once) | Packaged-exe run of these paths |
+| 17 Neuro-symbolic checks | Deterministic product_plan rules stated to the producer and enforced before verification (det; one real run passed first draft) | Repeated real runs |
+| 18 Verified self-improvement | Backlog extended with real-run evidence (IB-6..8); still developer-created; no autonomous promotion | Candidate evaluation + Owner approval |
+| Budget control (cross-cutting) | Pre-call reserve from measured per-role maxima; two real stops without overshoot (det; real) | Owner decision on per-task budgets (IB-8) |

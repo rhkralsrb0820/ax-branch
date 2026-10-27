@@ -1,4 +1,48 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-27 22:40 KST (after Codex 0.1.63)
+## CURRENT CHECKPOINT — Claude, 2026-10-28 01:05 KST (stabilization + real work runs)
+- **Owner server:** 0.1.63-18fbd6d, PID 57684, http://127.0.0.1:8765/ (switched by Codex 2026-10-27 22:56; DB backup in
+  `outputs/server-switch/`). Not restarted or replaced by Claude.
+- **dev/web-ui commits this round** (on top of 0e13802):
+  - 1f48687: Product Planning contract caught before verification; `PRODUCT_PLAN_RULES` given to the producer.
+  - dbcf069: pre-call budget reserve.
+  - 2761687: generated web/server verified inside the AppContainer via a per-run named-pipe channel; no Windows
+    change.
+  - a3a6cf6: A/B reserve preflight.
+  - 0bf9914: B6 post-output Edge shutdown hang accepted narrowly.
+  - ac83d2e: revisions verified against the reviewed version's diff.
+  - Then docs.
+- **Evidence:**
+  - `docs/evidence/2026-10-27-isolated-server-channel.md`;
+  - `docs/evidence/2026-10-27-b6-browser-stall.md` (updated);
+  - `docs/evidence/2026-10-28-real-work-runs.md`.
+- **Real-model runs** (source 0bf9914 / ac83d2e, isolated roots, synthetic data): 20 calls, 379,314 tokens, no
+  overshoot, no fallback.
+  - web app → OWNER_REVIEW (isolated server checks passed);
+  - product planning → reserve stop before v2 verification;
+  - CSV → v1 PASS; the revision v2 PASSED after the ac83d2e fix (resume); reserve stop before CEO acceptance.
+- **Tests this round** (focused):
+  - document_contract 4;
+  - budget_reserve 5;
+  - isolation 13 (real backend, incl. the server channel);
+  - browser_stall 2;
+  - revision_context 1;
+  - runtime 42/42 (before 0bf9914);
+  - engine + departments 110;
+  - product_planning, required, harness_safety, owner_run, sandbox, verification_policy, web, release.
+- **Full regression:** see the next entry (run on the frozen commit after this docs commit).
+- **Interrupted:** one B6 diagnostic batch was reaped by Claude Code under system memory pressure after 17/20
+  runs. Its orphaned python was killed; not restarted.
+- **NOT done / next:**
+  1. Packaged-exe check of the new paths (server channel, contract skip, reserve). A candidate build is preserved
+     only if the full regression passes.
+  2. IB-6: reuse unchanged stages on revisions (measured 44,362 tokens of re-run).
+  3. IB-8: Owner budget decision.
+  4. A/B: not run. The preflight shows the best case fits 60k and the worst case is refused at CEO acceptance.
+  5. Untested in the server channel: WebSockets, HTTPS, multi-port.
+- **Owner approvals needed:** per-task budgets (IB-8); whether to run the A/B; any persistent Windows change (none
+  proposed now).
+- Do not start another Codex CLI. No proof that Codex received this handoff.
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-27 22:40 KST (after Codex 0.1.63)
 - dev/web-ui:
   - 1434811 / 9684256: test contracts only, no production code;
   - then docs.

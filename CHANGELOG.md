@@ -32,6 +32,18 @@ Semantic versioning. Every release needs an entry with all five sections (enforc
 - Separate access-denied errors from loopback timeout observations in real-backend tests; add actual Owner-run canary/token coverage.
 - Validation and current limitations: docs/evidence/2026-10-27-owner-isolation.md. Full final regression and package integration still pending.
 
+## Unreleased — stabilization and real work runs (2026-10-28, Claude, on top of 0.1.63)
+
+- Product Planning contract failures are found before independent verification; the producer gets the exact
+  `product_plan` rules; a valid format still needs the verifier (1f48687).
+- Pre-call budget reserve (dbcf069), and an A/B preflight under that rule (a3a6cf6).
+- Generated web/server programs verified inside their AppContainer via a per-run channel, with no Windows setting
+  change (2761687). Browser stall snapshot plus narrow acceptance of the observed post-output shutdown hang
+  (0bf9914).
+- Owner revisions verified against the reviewed version's diff (ac83d2e).
+- Real-model runs: web app OWNER_REVIEW; product planning and CSV stopped by the budget reserve with no overshoot.
+  Total 20 calls / 379,314 reported tokens (`docs/evidence/2026-10-28-real-work-runs.md`).
+
 ## Unreleased — test contracts and verification evidence (2026-10-27, Claude, after 0.1.63 / 18fbd6d)
 
 - Test contracts aligned with the security changes: sanitized failover categories, explicit `isolate=True` in the

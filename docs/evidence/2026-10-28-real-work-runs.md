@@ -85,16 +85,21 @@
   - Fixed after this run: `Engine._previous_verified` adds `previous_verified_version` (a bounded unified diff
     from the latest PASS version) to the verifier context whenever `owner_rework` is present.
   - Deterministic test: `tests/test_revision_context.py`.
-  - A real-model re-run of the revision was NOT done in this round.
+  - **Resumed after the fix (ac83d2e), same project and budget:** call 10 was the verification of the same v2
+    (codex, 35 s, 20,689 tokens). It returned **PASS** with no findings, judging the change and its preservation
+    against the diff.
+  - The CEO acceptance call was then refused by the pre-call reserve: remaining 11,389 < 18,491. The project is
+    PAUSED at 148,611/160,000, with no overshoot and no budget increase.
 - **Measured cost observation:** for a summary-only change the CEO re-planned and re-ran BOTH research and
   operations (calls 6–8 = 44,362 tokens).
   - Reusing the unchanged research result would avoid part of this; not implemented (IB-6).
 
 ## Totals (this round's real-model work)
-- 19 calls; 358,625 reported tokens (157,033 + 73,670 + 127,922); 895 s of run time.
-- No provider fallback, no UNKNOWN usage, no budget overshoot (one reserve stop).
+- 20 calls; 379,314 reported tokens (157,033 + 73,670 + 148,611); about 930 s of run time.
+- No provider fallback, no UNKNOWN usage, no budget overshoot (two pre-call reserve stops).
 - Verification levels:
   - web app: real-model + real AppContainer server channel, source;
   - product planning: real-model (stopped by budget reserve);
-  - CSV: real-model v1 PASS; the revision was blocked by an engine defect, now fixed deterministically.
+  - CSV: real-model v1 PASS; the revision v2 PASS after the engine fix; final CEO acceptance not reached
+    (budget reserve).
   - None of these was a packaged-exe run, and none was confirmed by the Owner.
