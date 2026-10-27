@@ -78,6 +78,12 @@ class TrainingTests(unittest.TestCase):
         eng, pid, p = self.run_project(FILES)
         self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
         started = []
+        # The training interpreter is outside the OS boundary: without a recorded Owner exception nothing starts.
+        with self.assertRaises(E.Rejected) as refused:
+            eng.launch_verified(pid, popen=lambda cmd, **kw: started.append((cmd, kw)))
+        self.assertIn('isolation exception', str(refused.exception))
+        self.assertEqual(started, [])
+        self.store.event(pid, 'isolation_exception', allow=True, reason='Owner runs the trained demo', by='owner-cli')
         path, _ = eng.launch_verified(pid, popen=lambda cmd, **kw: started.append((cmd, kw)))
         cmd, kw = started[0]
         self.assertIn(str(training.env_python()[1]), cmd)
@@ -86,6 +92,7 @@ class TrainingTests(unittest.TestCase):
     def test_missing_stack_refuses_the_owner_run_with_the_recovery_action(self):
         eng, pid, p = self.run_project(FILES)
         missing = self.tmp / 'no-stack'
+        self.store.event(pid, 'isolation_exception', allow=True, reason='Owner runs the trained demo', by='owner-cli')
         with mock.patch.object(training, 'env_python', lambda d=None: (missing, missing / 'python.exe')):
             with self.assertRaises(E.Rejected) as caught:
                 eng.launch_verified(pid, popen=lambda *a, **k: self.fail('must not start'))
