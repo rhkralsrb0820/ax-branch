@@ -49,6 +49,7 @@ class Manifest:
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
     backend: str = 'appcontainer'
     package_sid: str = ''
+    serve: bool = False                            # server/web mode: run the bridge beside it
 
     def record(self):
         return asdict(self)
@@ -388,3 +389,235 @@ def sha256_dir(path):
         if f.is_file():
             h.update(f.relative_to(path).as_posix().encode() + b'\0' + f.read_bytes())
     return h.hexdigest()
+
+
+# ---- Server channel: verifying a generated web/server program that runs inside its AppContainer -------------------
+# The program listens on 127.0.0.1 INSIDE the container. AppContainers cannot receive loopback connections from the host
+# (and cannot reach the host's loopback), so a fixed AX Branch bridge runs in the SAME container (same package SID) and
+# talks to the host over named pipes whose DACL grants only that run's package SID (plus the owner). The bridge can only
+# reach listeners inside the container: the OS blocks its loopback to the host, and the run has no network capability.
+# The host side exposes one relay port per container port, used only by the verification client.
+
+BRIDGE = """import socket, sys, threading
+ctl = open(sys.argv[1], 'r+b', buffering=0)
+base = sys.argv[1][:-4]
+def words():
+    b = b''
+    while not b.endswith(b'\\n'):
+        c = ctl.read(1)
+        if not c:
+            sys.exit(0)
+        b += c
+    return b.decode('ascii').split()
+def pump(read, write, done):
+    try:
+        while True:
+            d = read(65536)
+            if not d:
+                break
+            write(d)
+    except OSError:
+        pass
+    finally:
+        done()
+def half_close(s):
+    try:
+        s.shutdown(socket.SHUT_WR)
+    except OSError:
+        pass
+while True:
+    cmd = words()
+    if cmd[0] == 'probe':
+        try:
+            socket.create_connection(('127.0.0.1', int(cmd[1])), timeout=1).close()
+            ctl.write(b'1\\n')
+        except OSError:
+            ctl.write(b'0\\n')
+    elif cmd[0] == 'conn':
+        c2s = open(base + '-' + cmd[1] + '-c2s', 'rb', buffering=0)
+        s2c = open(base + '-' + cmd[1] + '-s2c', 'wb', buffering=0)
+        try:
+            s = socket.create_connection(('127.0.0.1', int(cmd[2])), timeout=5)
+            s.settimeout(None)
+        except OSError:
+            c2s.close(); s2c.close(); continue
+        threading.Thread(target=pump, args=(c2s.read, s.sendall, lambda s=s: half_close(s)), daemon=True).start()
+        threading.Thread(target=pump, args=(s.recv, s2c.write, s2c.close), daemon=True).start()
+"""
+
+if os.name == 'nt':
+    class _SA(ctypes.Structure):
+        _fields_ = [('nLength', wintypes.DWORD), ('lpSecurityDescriptor', ctypes.c_void_p),
+                    ('bInheritHandle', wintypes.BOOL)]
+
+    _adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = (
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p)
+    _k32.CreateNamedPipeW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p)
+    _k32.CreateNamedPipeW.restype = wintypes.HANDLE
+    _k32.ConnectNamedPipe.argtypes = (wintypes.HANDLE, ctypes.c_void_p)
+
+
+def _pipe(name, sid, access):
+    """A single-instance pipe only this run's package SID (and the owner) may open. access: 1 in, 2 out, 3 duplex."""
+    import msvcrt
+    sd = ctypes.c_void_p()
+    if not _adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(f'D:P(A;;GA;;;{sid})(A;;GA;;;OW)', 1,
+                                                                   ctypes.byref(sd), None):
+        raise IsolationUnavailable(f'pipe security descriptor failed ({ctypes.get_last_error()})')
+    try:
+        sa = _SA(ctypes.sizeof(_SA), sd, False)
+        h = _k32.CreateNamedPipeW(name, access | 0x00080000, 0, 1, 65536, 65536, 0, ctypes.byref(sa))  # FIRST_INSTANCE
+        if h == wintypes.HANDLE(-1).value or not h:
+            raise IsolationUnavailable(f'CreateNamedPipe failed ({ctypes.get_last_error()})')
+    finally:
+        _k32.LocalFree(sd)
+    return h, msvcrt
+
+
+def _connect(h):
+    if not _k32.ConnectNamedPipe(h, None) and ctypes.get_last_error() != 535:      # 535: client already connected
+        raise OSError(ctypes.get_last_error(), 'ConnectNamedPipe failed')
+
+
+class ServerChannel:
+    """Host side of one isolated run's verification channel. reach(port) -> a host relay port for that container
+    port; ready(port) -> whether something listens on it inside the container."""
+    TIMEOUT = 5
+
+    def __init__(self, manifest, folder):
+        import threading
+        self.name = rf'\\.\pipe\axb-{manifest.run_id}'
+        self.sid, self.relays, self.lock, self.n, self.broken = manifest.package_sid, {}, threading.Lock(), 0, False
+        self.listeners = []
+        h, msvcrt = _pipe(self.name + '-ctl', self.sid, 3)
+        self._ctl_handle, self._msvcrt, self.ctl = h, msvcrt, None
+        self.script = Path(folder) / 'axb_bridge.py'
+        self.script.write_text(BRIDGE, encoding='utf-8')
+
+    def bridge_args(self):
+        return [str(python_for()), '-I', '-u', str(self.script), self.name + '-ctl']
+
+    def _control(self, line, answer=False):
+        import threading
+        result = []
+
+        def talk():
+            if self.ctl is None:
+                _connect(self._ctl_handle)
+                self.ctl = open(self._msvcrt.open_osfhandle(self._ctl_handle, 0), 'r+b', buffering=0)
+            self.ctl.write(line.encode('ascii'))
+            if answer:
+                b = b''
+                while not b.endswith(b'\n'):
+                    c = self.ctl.read(1)
+                    if not c:
+                        raise OSError('bridge closed the control channel')
+                    b += c
+                result.append(b.strip())
+            else:
+                result.append(b'')
+        with self.lock:
+            if self.broken:
+                return None
+            t = threading.Thread(target=talk, daemon=True)
+            t.start()
+            t.join(self.TIMEOUT)
+            if not result:
+                self.broken = True          # the bridge is gone or stuck: never block the verification
+                return None
+            return result[0]
+
+    def ready(self, port):
+        return self._control(f'probe {int(port)}\n', answer=True) == b'1'
+
+    def reach(self, port):
+        import socket, threading
+        port = int(port)
+        if port in self.relays:
+            return self.relays[port]
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(16)
+        self.listeners.append(listener)
+        self.relays[port] = listener.getsockname()[1]
+        threading.Thread(target=self._accept, args=(listener, port), daemon=True).start()
+        return self.relays[port]
+
+    def _accept(self, listener, port):
+        import threading
+        while True:
+            try:
+                client, _ = listener.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._relay, args=(client, port), daemon=True).start()
+
+    def _relay(self, client, port):
+        import socket, threading
+        with self.lock:
+            self.n += 1
+            n = self.n
+        try:
+            up, _ = _pipe(f'{self.name}-{n}-c2s', self.sid, 2)
+            down, _ = _pipe(f'{self.name}-{n}-s2c', self.sid, 1)
+            if self._control(f'conn {n} {port}\n') is None:
+                raise OSError('bridge unavailable')
+            _connect(up)
+            _connect(down)
+        except OSError:
+            client.close()
+            return
+        w = open(self._msvcrt.open_osfhandle(up, 0), 'wb', buffering=0)
+        r = open(self._msvcrt.open_osfhandle(down, 0), 'rb', buffering=0)
+
+        def to_server():
+            try:
+                while True:
+                    d = client.recv(65536)
+                    if not d:
+                        break
+                    w.write(d)
+            except OSError:
+                pass
+            finally:
+                w.close()
+                try:
+                    client.close()           # the client finished (or failed): only now release the socket
+                except OSError:
+                    pass
+
+        def to_client():
+            try:
+                while True:
+                    d = r.read(65536)
+                    if not d:
+                        break
+                    client.sendall(d)
+            except OSError:
+                pass
+            finally:
+                r.close()
+                # Half-close: closing a socket while to_server may still be reading can turn into a reset (RST)
+                # that discards the response the client has not read yet.
+                try:
+                    client.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+        threading.Thread(target=to_server, daemon=True).start()
+        threading.Thread(target=to_client, daemon=True).start()
+
+    def close(self):
+        for listener in self.listeners:
+            try:
+                listener.close()
+            except OSError:
+                pass
+        if self.ctl is not None:
+            try:
+                self.ctl.close()
+            except OSError:
+                pass
+        elif self._ctl_handle:
+            _k32.CloseHandle(self._ctl_handle)
+        self._ctl_handle = None

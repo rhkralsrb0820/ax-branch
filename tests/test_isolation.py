@@ -171,18 +171,93 @@ class RealBackendTests(unittest.TestCase):
         self.assertEqual(exception['isolation'], {'backend': 'job_object_only', 'owner_exception': True})
         store.close()
 
-    def test_runtime_cli_mode_is_isolated_and_server_mode_is_blocked(self):
+    def test_runtime_cli_mode_is_isolated(self):
         app = self.work / 'app.py'
         app.write_text(f'import sys\ntry:\n    open(r"{self.canary}").read(); print("LEAK")\n'
                        'except PermissionError:\n    print("denied")\n', encoding='utf-8')
         ev = runtime.check({'mode': 'cli', 'probes': []}, 'app.py', sys.executable, str(self.work), isolate=True)
         self.assertNotIn('LEAK', str(ev))
         self.assertTrue(ev['isolation'] and all(m['backend'] == 'appcontainer' for m in ev['isolation']))
-        server = runtime.check({'mode': 'server', 'launch_args': ['--port', '{port}'], 'probes': []}, 'app.py',
-                               sys.executable, str(self.work), isolate=True)
-        self.assertFalse(server['ok'])
-        self.assertIn('loopback', server['isolation_blocked'])
-        self.assertEqual(server['steps'], [])                     # nothing was launched
+
+    SERVER = """
+import http.server, json, socket, subprocess, sys
+def attempt(f):
+    try:
+        f(); return "ALLOWED"
+    except Exception as e:
+        return "DENIED " + type(e).__name__
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/probe":
+            body = json.dumps({{"owner_file": attempt(lambda: open(r"{canary}").read()),
+                "host_service": attempt(lambda: socket.create_connection(("127.0.0.1", {hport}), timeout=3)),
+                "internet": attempt(lambda: socket.create_connection(("1.1.1.1", 443), timeout=3)),
+                "child": attempt(lambda: subprocess.run(["cmd", "/c", "echo x"], capture_output=True))}}).encode()
+        else:
+            body = b"<html><body><h1>Inventory</h1><p>3 items</p></body></html>"
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a): pass
+port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else {default}
+print(f"Serving at http://127.0.0.1:{{port}}/", flush=True)
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+"""
+
+    def test_generated_web_server_is_verified_inside_its_container_through_the_run_channel(self):
+        host = socket.socket()
+        host.bind(('127.0.0.1', 0))
+        host.listen(5)
+        host.settimeout(15)
+        hits = []
+
+        def accept():
+            try:
+                hits.append(host.accept())
+            except OSError:
+                pass
+        threading.Thread(target=accept, daemon=True).start()
+        default = 18900 + os.getpid() % 90
+        (self.work / 'app.py').write_text(self.SERVER.format(canary=self.canary, hport=host.getsockname()[1],
+                                                             default=default), encoding='utf-8')
+        spec = {'mode': 'web', 'owner_launch': f'python app.py, then open http://127.0.0.1:{default}/',
+                'launch_args': ['--port', '{port}'],
+                'probes': [{'name': 'page', 'http_method': 'GET', 'http_path': '/', 'expect_status': 200,
+                            'expect_contains': ['3 items']},
+                           {'name': 'containment', 'http_method': 'GET', 'http_path': '/probe', 'expect_status': 200,
+                            'expect_contains': ['"owner_file": "DENIED', '"host_service": "DENIED',
+                                                '"internet": "DENIED', '"child": "DENIED']},
+                           {'name': 'rendered', 'http_method': 'BROWSER', 'http_path': '/', 'expect_contains': ['3 items']}]}
+        try:
+            ev = runtime.check(spec, 'app.py', sys.executable, str(self.work), isolate=True)
+        finally:
+            host.close()
+        self.assertTrue(ev['ok'], [(s['name'], s.get('problems')) for s in ev['steps']])
+        self.assertEqual(hits, [])                                         # the host service was never reached
+        runs = ev['isolation']
+        self.assertTrue(runs and all(m['backend'] == 'appcontainer' and m['serve'] for m in runs))
+        # Cleanup: the bridge processes are gone, the run pipes no longer exist, the run profiles are deleted.
+        time.sleep(1)
+        ps = subprocess.run(['powershell', '-NoProfile', '-Command',
+                             "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*axb_bridge.py*' }).Count"],
+                            capture_output=True).stdout.decode(errors='replace').strip()
+        self.assertIn(ps, ('', '0'))
+        import winreg
+        for m in runs:
+            with self.assertRaises(OSError):
+                open(rf'\\.\pipe\axb-{m["run_id"]}-ctl', 'rb')
+            with self.assertRaises(OSError):
+                winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Software\\Classes\\Local Settings\\Software\\Microsoft'
+                               '\\Windows\\CurrentVersion\\AppContainer\\Mappings\\' + m['package_sid'])
+
+    def test_a_run_channel_pipe_refuses_any_other_run(self):
+        other_sid = I._sid_string(I._package_sid('AXBranch.Run.channel-owner-test'))
+        name = rf'\\.\pipe\axb-cross-{os.getpid()}'
+        handle, _ = I._pipe(name, other_sid, 3)                             # a pipe that belongs to ANOTHER run
+        try:
+            rc, out, _ = self.run_isolated(f't("foreign_pipe", lambda: open(r"{name}", "r+b", buffering=0))\n')
+        finally:
+            I._k32.CloseHandle(handle)
+        self.assertIn('foreign_pipe DENIED', out)
 
     def test_owner_result_launch_is_isolated_and_exports_safe_outputs(self):
         from axbranch import artifacts

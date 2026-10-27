@@ -101,7 +101,7 @@ class Contained:
         self.log = self.tmp / 'output.txt'
         self.err_log = self.tmp / 'stderr.txt' if split else None
         self.proc = self.job = self._out = self._in = self._err = None
-        self.manifest = isolate
+        self.manifest, self.channel, self.bridge = isolate, None, None
         try:
             stdin_path = self.tmp / 'stdin.txt'
             stdin_path.write_bytes((stdin_text or '').encode('utf-8'))
@@ -124,6 +124,8 @@ class Contained:
                 if not _k32.AssignProcessToJobObject(self.job, int(self.proc._handle)):
                     self.proc.kill()
                     raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject failed')
+                if isolate.serve:
+                    self._start_bridge(isolation, isolate, cwd, env)
                 self.proc.resume()
                 return
             if os.name != 'nt':
@@ -153,6 +155,22 @@ class Contained:
                         handle.close()
                 self.cleanup()
             raise
+
+    def _start_bridge(self, isolation, manifest, cwd, env):
+        """The verification channel's container end (isolation.ServerChannel): same AppContainer and Job."""
+        self.channel = isolation.ServerChannel(manifest, self.tmp)
+        self._bridge_log = (self.tmp / 'bridge.txt').open('wb')
+        self._bridge_in = (self.tmp / 'stdin.txt').open('rb')
+        self.bridge = isolation.launch(self.channel.bridge_args(), cwd, env, self._bridge_in, self._bridge_log,
+                                       self._bridge_log, manifest)
+        self.bridge.profile = None                 # the program's handle owns (and deletes) the run's profile
+        if not _k32.AssignProcessToJobObject(self.job, int(self.bridge._handle)):
+            raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject (bridge) failed')
+        self.bridge.resume()
+
+    def reach(self, port):
+        """The port a verification client uses for the program's port (a host relay when isolated)."""
+        return self.channel.reach(port) if self.channel else port
 
     def alive(self):
         return self.proc.poll() is None
@@ -197,6 +215,12 @@ class Contained:
             self.proc.wait()
         for f in (self._out, self._in, self._err):
             if f is not None and not f.closed:
+                f.close()
+        if self.channel is not None:
+            self.channel.close()
+        if self.bridge is not None:
+            self.bridge.close()
+            for f in (self._bridge_log, self._bridge_in):
                 f.close()
         if hasattr(self.proc, 'close'):          # isolated: release handles, delete the per-run AppContainer profile
             self.proc.close()

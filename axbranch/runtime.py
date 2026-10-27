@@ -22,6 +22,7 @@ import os
 import shutil
 import socket
 import tempfile
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -305,8 +306,9 @@ def _contains(text, needles):
     return missing
 
 
-ISOLATED_MODES = ('cli', 'gui')     # server/web need loopback into the program: AppContainers refuse it without an
-                                    # administrator-only exemption (not configured; Owner decision)
+# server/web: the program stays in its AppContainer; the verifier reaches it only through the per-run channel
+# (isolation.ServerChannel). No Windows loopback exemption is used or configured.
+ISOLATED_MODES = ('cli', 'gui', 'server', 'web')
 
 
 def check(spec, entry_path, python, cwd, on_step=None, executable=None, isolate=False):
@@ -343,6 +345,7 @@ def check(spec, entry_path, python, cwd, on_step=None, executable=None, isolate=
     else:
         base = Launch([python, '-E', '-s', '-X', 'utf8', '-c', AUDIT, entry_path], {'AXB_AUDIT_LOG': audit_log}, cwd,
                       isolate=isolate and [audit_dir])
+    base.serve = bool(isolate) and mode in ('server', 'web')   # the verifier needs the per-run channel
     try:
         try:
             _check(spec, mode, base, cwd, ev, on_step)
@@ -364,21 +367,22 @@ class Launch:
     def __init__(self, argv, env, cwd, native=False, isolate=None):
         """isolate: None, or the extra folders (e.g. the audit log's) each isolated launch may write."""
         self.argv, self.env, self.cwd, self.native, self.isolate = argv, env, cwd, native, isolate
-        self.manifests = []
+        self.manifests, self.serve = [], False
 
     def at(self, cwd):
         """The same launch from another folder (a native program runs ITS copy there)."""
         argv = [str(Path(cwd) / Path(self.argv[0]).name)] if self.native else self.argv
         other = Launch(argv, self.env, cwd, self.native, self.isolate)
-        other.manifests = self.manifests
+        other.manifests, other.serve = self.manifests, self.serve
         return other
 
     def start(self, args, stdin_text='', split=False):
         manifest = None
         if self.isolate is not None and self.isolate is not False:
             manifest = isolation.Manifest(purpose='runtime acceptance', writes=list(self.isolate),
-                                          child_processes=self.native, max_processes=2 if self.native else 8,
-                                          allow_custom_acl=self.native)
+                                          child_processes=self.native,
+                                          max_processes=(2 if self.native else 8) + (1 if self.serve and self.native else 0),
+                                          allow_custom_acl=self.native, serve=self.serve)
             self.manifests.append(manifest.record() | {'pending': True})
         proc = sandbox.start(self.argv + list(args), self.cwd, stdin_text, extra_env=self.env, split=split,
                              isolate=manifest)
@@ -472,6 +476,7 @@ def _check(spec, mode, base, cwd, ev, on_step):
                                       'APPDATA': str(home / 'AppData' / 'Roaming'),
                                       'LOCALAPPDATA': str(home / 'AppData' / 'Local')}, base.cwd, base.native,
                           [*base.isolate, str(home)] if base.isolate else base.isolate)
+            base.serve = owner.serve
         _launches(spec, mode, base, owner, ev, on_step)
     finally:
         shutil.rmtree(pristine, ignore_errors=True)
@@ -523,9 +528,9 @@ def _launches(spec, mode, base, owner, ev, on_step):
                         break
                     continue
                 if probe.get('http_method') == 'BROWSER':
-                    ev['steps'].append({**_rendered(port, probe), 'dispatch': 'browser'})
+                    ev['steps'].append({**_rendered(proc.reach(port), probe), 'dispatch': 'browser'})
                 elif _is_http(probe):
-                    ev['steps'].append({**_http(port, probe), 'dispatch': 'http'})
+                    ev['steps'].append({**_http(proc.reach(port), probe), 'dispatch': 'http'})
                 else:                       # a command-line check of the same program (e.g. its self-test)
                     ev['steps'].append({**_cli(base, probe), 'dispatch': 'subprocess'})
                 if on_step:
@@ -534,7 +539,7 @@ def _launches(spec, mode, base, owner, ev, on_step):
             first_http = next((pr for pr in probes if _is_http(pr) and (pr.get('http_method') or 'GET') == 'GET'), None)
             if first_http:   # still serving after the flow, and the first page still answers
                 # Only "it answers without a server error": the flow may have changed the data the first probe saw.
-                again = _http(port, {**first_http, 'name': f"{first_http['name']} (again after flow)",
+                again = _http(proc.reach(port), {**first_http, 'name': f"{first_http['name']} (again after flow)",
                                      'expect_status': 0, 'expect_contains': [], 'expect_absent': []})
                 ev['steps'].append(again)
             alive = proc.alive()
@@ -636,18 +641,18 @@ def _exact_owner_launch(base, spec):
         everything = spec.get('probes', [])
         lenient = {} if not http_probes or (everything and page is everything[0]) else {
             'expect_status': 0, 'expect_contains': [], 'expect_absent': []}
-        first = _http(port, {**page, 'name': 'first page', **lenient})
+        first = _http(proc.reach(port), {**page, 'name': 'first page', **lenient})
         problems = list(first['problems'])
         # Same process: the whole HTTP flow (e.g. its self-test endpoint), then still serving.
         # The probes were written for the verification launch (launch_args, e.g. --offline): their content
         # expectations are judged there. Here the same process must still answer every request: a lost
         # connection or a server error fails the Owner launch; content differences are recorded only.
         flow = [{k: s.get(k) for k in ('name', 'request', 'status', 'ok', 'problems')}
-                for s in (_http(port, pr) for pr in http_probes if pr is not page)]
+                for s in (_http(proc.reach(port), pr) for pr in http_probes if pr is not page)]
         problems += [f"flow {s['name']}: {p}" for s in flow for p in s['problems']
                      if p.startswith(('connection lost', 'request failed')) or (s.get('status') or 0) >= 500]
         time.sleep(max(0.0, OBSERVE_SECONDS - (time.time() - t0)))
-        again = _http(port, {**page, 'name': f'first page after {OBSERVE_SECONDS}s and the flow', 'expect_status': 0,
+        again = _http(proc.reach(port), {**page, 'name': f'first page after {OBSERVE_SECONDS}s and the flow', 'expect_status': 0,
                              'expect_contains': [], 'expect_absent': []})      # the flow may have changed the data
         if not again['ok']:
             problems += [f'after the flow: {p}' for p in again['problems']]
@@ -681,7 +686,7 @@ def _second_launch(base, busy_port, hinted):
         rec = {'announced_port': port, 'differs_from_busy_port': port is not None and port != busy_port,
                'alive': proc.alive()}
         if port is not None and port != busy_port and _wait_port(proc, port)[0]:
-            rec['first_page_status'] = _http(port, {'name': 'second launch page', 'http_method': 'GET',
+            rec['first_page_status'] = _http(proc.reach(port), {'name': 'second launch page', 'http_method': 'GET',
                                                     'http_path': '/'}).get('status')
         rec['output_tail'] = proc.output()[-600:]
         return rec
@@ -692,9 +697,15 @@ def _second_launch(base, busy_port, hinted):
 
 def _wait_port(proc, port):
     started = time.monotonic()
+    channel = getattr(proc, 'channel', None)          # isolated: ask inside the container, not the host's loopback
     while time.monotonic() - started < START_TIMEOUT:
         if not proc.alive():
             return False, round(time.monotonic() - started, 2)
+        if channel is not None:
+            if channel.ready(port):
+                return True, round(time.monotonic() - started, 2)
+            time.sleep(0.25)
+            continue
         try:
             with socket.create_connection(('127.0.0.1', port), timeout=1):
                 return True, round(time.monotonic() - started, 2)
@@ -950,6 +961,8 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
         record['browser_exit_code'] = proc.wait(record['timeout_s'])
         finished = record['browser_exit_code'] is not None
         record['phases'] = phases(started, list(proxy.times), time.monotonic(), finished, len(selectors))
+        if not finished:              # B6: what the stalled browser was doing, captured before the tree is killed
+            record['stall_snapshot'] = stall_snapshot(proc.proc.pid, (proxy.server_port, port))
         dom, err = proc.streams()
         record.update(browser_requests=list(proxy.requests), browser_stderr_tail=err[-600:])
         return dom if finished else None
@@ -961,6 +974,27 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
             proxy.shutdown()
             proxy.server_close()
             thread.join()
+
+
+def stall_snapshot(root_pid, ports):
+    """Diagnostics only (no verdict): the browser's process tree (role from --type=, CPU seconds) and the TCP
+    connections on the proxy/app ports with their state and owning process, read once at the time limit."""
+    ps = (
+        "$root=%d; $all=Get-CimInstance Win32_Process; $tree=@($root); $grew=$true;"
+        "while($grew){$grew=$false; foreach($p in $all){ if(($tree -contains $p.ParentProcessId) -and -not ($tree -contains $p.ProcessId)){$tree+=$p.ProcessId; $grew=$true} } }"
+        "$procs=$all | Where-Object { $tree -contains $_.ProcessId } | ForEach-Object { $t='browser'; if($_.CommandLine -match '--type=([^ ]+)'){$t=$matches[1]};"
+        " $c=(Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).TotalProcessorTime.TotalSeconds;"
+        " [pscustomobject]@{pid=$_.ProcessId; parent=$_.ParentProcessId; role=$t; cpu_s=[math]::Round([double]$c,2)} };"
+        "$ports=@(%s); $conns=Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { ($ports -contains $_.LocalPort) -or ($ports -contains $_.RemotePort) } |"
+        " ForEach-Object { [pscustomobject]@{local=$_.LocalPort; remote=$_.RemotePort; state=[string]$_.State; owner=$_.OwningProcess} };"
+        "[pscustomobject]@{processes=@($procs); connections=@($conns)} | ConvertTo-Json -Depth 4 -Compress"
+    ) % (int(root_pid), ','.join(str(int(x)) for x in ports if x))
+    try:
+        out = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', ps], capture_output=True,
+                             timeout=20, creationflags=0x08000000 if os.name == 'nt' else 0).stdout
+        return json.loads(out.decode('utf-8', errors='replace') or '{}')
+    except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+        return {'error': f'snapshot failed: {type(e).__name__}'}
 
 
 def phases(started, request_times, ended, finished, actions):
