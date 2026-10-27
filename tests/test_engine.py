@@ -976,7 +976,7 @@ class ExecutiveAcceptanceTests(unittest.TestCase):
         handoffs = [e['detail'] for e in self.store.events(pid, {'provider_handoff'})]
         self.assertEqual([(e['who'], e['preferred'], e['used']) for e in handoffs],
                          [('CEO', 'claude', 'codex'), ('CEO', 'claude', 'codex')])
-        self.assertTrue(all('usage limit' in e['notes'][0] for e in handoffs))
+        self.assertTrue(all(e['failures'][0]['category'] == 'usage_limit' and 'notes' not in e for e in handoffs))
 
 
 class ProviderTests(unittest.TestCase):

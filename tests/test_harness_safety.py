@@ -124,9 +124,16 @@ class HarnessSafetyTests(unittest.TestCase):
         p = self.store.project(pid)
         p['plan']['runtime'] = json.loads(json.dumps(SPEC))
         self.store.update(pid, plan=p['plan'])
-        eng.checks = mock.Mock(side_effect=lambda *args: {'ok': True, 'output': '', 'ran': ['self-test']})
+        eng.checks = mock.Mock(side_effect=self.isolated_check({'ok': True, 'output': '', 'ran': ['self-test']}))
         eng.runtime_evidence = mock.Mock(return_value=BAD)
         return eng, pid, script
+
+    def isolated_check(self, result):
+        """A mocked check that still requires the engine to ask for OS isolation of generated code."""
+        def check(*args, isolate):
+            self.assertIs(isolate, True)
+            return dict(result)       # a fresh dict per call, like a real check
+        return check
 
     def test_product_failure_cannot_hide_behind_harness_blocker(self):
         for selftest in (False, True):
@@ -135,7 +142,7 @@ class HarnessSafetyTests(unittest.TestCase):
                 script.harness_blocker = True
                 eng, pid, _ = self.prepared(script)
                 if selftest:
-                    eng.checks.side_effect = lambda *args: {'ok': False, 'output': 'assert failed'}
+                    eng.checks.side_effect = self.isolated_check({'ok': False, 'output': 'assert failed'})
                 else:
                     eng.runtime_evidence.return_value = {**BAD, 'steps': [
                         {'name': 'save', 'ok': False, 'status': 500, 'problems': ['server error']}]}
