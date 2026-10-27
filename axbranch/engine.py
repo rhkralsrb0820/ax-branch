@@ -1589,6 +1589,9 @@ class Engine:
             if problems:
                 checks['ok'] = False
                 checks['output'] = (checks.get('output', '') + '\n' + '; '.join(problems))[-3000:]
+        failed_docs = [d for d in checks.get('department_documents', []) if d['problems']]
+        if failed_docs:
+            return self._document_contract_fail(pid, p, artifact, checks, failed_docs)
         if checks['ok'] and 'model_training' in plan.get('harness_capabilities', ()):
             job = self._training_run(pid, artifact)
             if job is None:
@@ -1940,6 +1943,24 @@ class Engine:
             self.store.update(pid, iteration=artifact['iteration'])
             if self.store.project(pid)['state'] != 'VERIFYING':
                 self.store.set_state(pid, 'VERIFYING', reason=reason)
+
+    def _document_contract_fail(self, pid, p, artifact, checks, failed_docs):
+        """A deliverable that breaks a department's deterministic document contract (missing headings, empty
+        required lists, wrong arithmetic...) fails WITHOUT an independent verification call: the verifier would judge
+        a document that cannot pass. The exact problems go back to the producer as findings. The opposite never
+        holds: a document that passes this format check still needs independent verification."""
+        findings = [{'severity': 'major', 'kind': 'product', 'criterion': -1, 'deterministic': True,
+                     'issue': f"[{d['department']}] document contract: {problem}"[:400],
+                     'evidence': 'departments.check_document (deterministic format/arithmetic check)'}
+                    for d in failed_docs for problem in d['problems']]
+        with self.store.tx():
+            self.store.event(pid, 'verification_call_skipped', artifact=artifact['id'], iteration=p['iteration'],
+                             reason='department document contract failed deterministically; no model verdict needed',
+                             problems=sum(len(d['problems']) for d in failed_docs))
+            self.store.add_verification(pid, artifact['id'], p['iteration'], 'FAIL',
+                                        {'verdict': 'FAIL', 'lenses_applied': ['deterministic'], 'criteria': [],
+                                         'findings': findings}, checks, 'engine')
+        self._after_fail(pid, self.store.project(pid))
 
     def _no_deliverable(self, pid, final, used, build, reason='empty deliverable'):
         """No usable deliverable (empty, or edits that do not apply): a deterministic FAIL, no artifact and

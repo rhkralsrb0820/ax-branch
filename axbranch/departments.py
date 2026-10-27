@@ -474,6 +474,24 @@ DOCUMENT_RULE = ('The deliverable must be a markdown document containing each re
                  'differing section names in stage instructions, and any length limit must leave room for it.')
 
 
+# The exact rules check_document enforces for a product_plan, stated to planner, producer and verifier alike
+# (2026-10-27 A/B: the producer left excluded/experiments empty and only verification found out).
+PRODUCT_PLAN_RULES = (
+    'exactly one ```json fenced block whose object is {"product_plan": {...}}',
+    'claims, mvp, excluded, experiments: each a NON-EMPTY list',
+    'mvp and excluded items: non-empty strings',
+    'each claim: {statement, status, evidence}; status is VERIFIED, ESTIMATED or UNKNOWN; VERIFIED only with at '
+    'least one reference to supplied material in evidence; without supplied evidence use ESTIMATED or UNKNOWN - '
+    'never invent a reference',
+    'each experiment: non-empty metric, threshold and method',
+    'market_validation exactly {"willingness_to_pay": "UNKNOWN", "revenue": "UNKNOWN"} (no customer contact or '
+    'trade has occurred)',
+    'scenarios: exactly three, named downside, base, upside; price, unit_cost, quantity, fixed_cost, revenue, profit '
+    'are non-negative numbers, quantity an integer; revenue = price*quantity; profit = (price-unit_cost)*quantity - '
+    'fixed_cost; break_even_units = ceil(fixed_cost/(price-unit_cost)), or null when price <= unit_cost',
+)
+
+
 def document_contracts(specs, delegated=None):
     """The document structure each (delegated) department requires, in the form planner, producer and verifier
     all see: the same headings check_document enforces."""
@@ -483,7 +501,8 @@ def document_contracts(specs, delegated=None):
         if c.get('document_sections') and (delegated is None or dep in delegated):
             out.append({'department': dep, 'version': spec['version'],
                         'headings': [f'## {s}' for s in c['document_sections']],
-                        'product_plan_json': bool(c.get('product_plan'))})
+                        'product_plan_json': bool(c.get('product_plan')),
+                        **({'product_plan_rules': list(PRODUCT_PLAN_RULES)} if c.get('product_plan') else {})})
     return out
 
 
