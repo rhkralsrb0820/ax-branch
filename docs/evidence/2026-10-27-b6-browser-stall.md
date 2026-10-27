@@ -26,3 +26,24 @@
 - Not measured: the browser's internal virtual-time state. Sleep or swapping are not claimed.
 - Next bounded step (IB-3): when a render reaches the time limit, record the Edge process tree and the open
   connections to the test server before killing it. Still no timeout increase.
+
+## Update — 2026-10-28: snapshot at the time limit narrows the cause
+Source 2761687 with `runtime.stall_snapshot`, the same single test run alone. Records: `outputs/b6-browser-diag-2761687.jsonl` (15 runs) and `...-b.jsonl` (20 runs).
+- **Stalls: 1/15 and 3/20.** All 4 stalls show the same state at the 90 s limit:
+  - Processes: only the Edge **browser main process and crashpad-handler**. No renderer, GPU or network/utility
+    process was alive.
+  - Connections: none open on the app or proxy ports. Earlier connections were `TimeWait` (closed); only the
+    harness's own `Listen` sockets remained.
+  - Output: `stdout_bytes_at_limit` 8,237–8,242. The `--dump-dom` output had already been printed.
+- **Conclusion (evidence-based, narrow):** the page load, scripts and requests had finished and the DOM was dumped.
+  The browser main process then failed to exit. This is a browser shutdown hang after output, not an app or
+  network wait.
+  - Its internal cause inside Edge is still UNKNOWN.
+  - Not established: whether Chrome behaves the same, and whether `--disable-features`/crashpad flags avoid it.
+- **Change:** `runtime.shutdown_hang()` accepts a stalled load only when all three hold:
+  1. the printed DOM is complete (ends with `</html>`);
+  2. nothing but the browser main process and crashpad is left;
+  3. no connection is open.
+
+  The result is then judged on that DOM and the hang is recorded (`browser_shutdown_hang`). Every other stall still
+  fails. No timeout was increased; a hang still costs the full limit.

@@ -963,7 +963,14 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
         record['phases'] = phases(started, list(proxy.times), time.monotonic(), finished, len(selectors))
         if not finished:              # B6: what the stalled browser was doing, captured before the tree is killed
             record['stall_snapshot'] = stall_snapshot(proc.proc.pid, (proxy.server_port, port))
+            record['stall_snapshot']['stdout_bytes_at_limit'] = len(proc.streams()[0])   # was the DOM already dumped?
         dom, err = proc.streams()
+        if not finished and shutdown_hang(dom, record.get('stall_snapshot')):
+            # B6 (4/4 observed stalls): Edge printed the complete DOM, every renderer/GPU/network process had exited
+            # and no app or proxy connection was open - only the browser main process failed to exit. The page's
+            # final DOM is judged; the hang is recorded. Any other stall still fails.
+            finished = True
+            record['browser_shutdown_hang'] = True
         record.update(browser_requests=list(proxy.requests), browser_stderr_tail=err[-600:])
         return dom if finished else None
     finally:
@@ -974,6 +981,16 @@ def _dump_dom(exe, port, path, selectors, needles=(), record=None, order=()):
             proxy.shutdown()
             proxy.server_close()
             thread.join()
+
+
+def shutdown_hang(dom, snapshot):
+    """True only for the observed post-output hang: a complete DOM was printed and nothing but the browser main
+    process (and its crash reporter) is left, with no open connection on the app/proxy ports."""
+    if not snapshot or 'error' in snapshot or not dom.rstrip().lower().endswith('</html>'):
+        return False
+    roles = {p.get('role') for p in snapshot.get('processes', [])}
+    busy = [c for c in snapshot.get('connections', []) if c.get('state') not in ('Listen', 'TimeWait')]
+    return bool(roles) and roles <= {'browser', 'crashpad-handler'} and not busy
 
 
 def stall_snapshot(root_pid, ports):
