@@ -1,4 +1,29 @@
-## CURRENT CHECKPOINT — Codex stopped at actual 5% remaining, 2026-10-27
+## CURRENT CHECKPOINT — Claude, 2026-10-27 22:40 KST (after Codex 0.1.63)
+- dev/web-ui:
+  - 1434811 / 9684256: test contracts only, no production code;
+  - then docs.
+  - Candidate build 0.1.63-18fbd6d contains all production code (later commits are tests/docs).
+- **Full single-process regression on 9684256: 504/504 OK**, 1,787 s, hashes matched
+  (`outputs/0.1.40-evidence/FULL-9684256-single-process.log`). The 1434811 run was 502/504 (2 test_training
+  contract failures, fixed). F163 (Codex) remains a stopped, failed run, not a pass.
+- Fixed contracts:
+  - executive failover asserts the sanitized `usage_limit` category;
+  - harness-safety mocks require and assert `isolate=True` and return fresh dicts;
+  - the trained-output Owner run is refused without a recorded isolation exception, while the stack and
+    recovery-message checks are kept.
+- B6: 1/13 isolated stalls; root cause unresolved (`docs/evidence/2026-10-27-b6-browser-stall.md`).
+- `docs/IMPROVEMENT_BACKLOG.md` (developer-created) and the 1–20 matrix update in
+  `docs/IN_PLACE_EVOLUTION_REVIEW.md` were added.
+- Known wording defect, deliberately left: the `axbranch/runtime.py` ISOLATED_MODES comment says
+  "administrator-only exemption" (unverified). Not changed, so the tested source stays identical; fix it with the
+  next code change.
+- A/B: two attempts, both stopped in task A. Do not rerun without a new Owner decision. The Owner server is still
+  0.1.61-67d9095.
+- Next:
+  - Owner decisions: loopback exemption (IB-5), any A/B retry, server switch to a candidate.
+  - Optional dev: IB-1 / IB-2 implementation with a regression.
+
+## HISTORICAL CHECKPOINT — superseded: Codex stopped at actual 5% remaining, 2026-10-27
 - Implementation source: 18fbd6d, dev/web-ui. Read docs/evidence/2026-10-27-codex-163.md first.
 - H3, supported Owner CLI/native isolation and packaging implemented; actual packaged text-rework E2E 11/11, 12 calls, 718 sec. Candidate EXE hash 27de6cb17ca30dff831468387a0d16f37eb2c1216da9cd4c34e9da8a499b5af2.
 - Compact A/B ran ONCE: stopped task A after 64,487 reported tokens; nonempty excluded/experiments missing in v1. No comparison, UNPROVEN. Do not rerun without a new decision.

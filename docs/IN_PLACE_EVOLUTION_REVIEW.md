@@ -39,3 +39,26 @@ Scope: existing `dev/web-ui`, base commit `5f70f97`, including the preserved pro
 - RAG retrieval is available without training. LoRA/fine-tuning is not required for this phase and is not started here.
 - Product scenario math is checked; willingness to pay, real revenue and market validity remain UNKNOWN without external evidence.
 - Existing runtime restrictions do not establish an OS security boundary.
+
+## Status update — 2026-10-27 (Claude, after Codex 0.1.63; supersedes rows above where listed)
+Evidence levels:
+- **impl** — implemented;
+- **det** — deterministic tests;
+- **backend** — real OS backend tests;
+- **model** — real-model run;
+- **pkg** — packaged web E2E.
+
+Nothing below is deployed: the Owner server is still 0.1.61-67d9095.
+
+| Area | Current state (level) | Next acceptance criterion |
+|---|---|---|
+| 3 Sandbox/security | AppContainer + Job Object for generated-program checks and bounded in-app Owner CLI/native runs (impl, det, backend: synthetic canaries denied for outside files, profile, network, child process and credential env). Server/web/GUI Owner runs and foreign training interpreters are blocked unless the Owner records an exception | Owner decision on a loopback exemption (IB-5); never a silent fallback |
+| 7 Policy | Per-run Manifest recorded with each isolated run; cross-provider verification requirement; H2 required modes (impl, det) | Use cross_provider=required in pre-registered experiments |
+| 8 Least privilege | Grants only on run folders under temp; no network capability; OS child-process policy (backend) | Keep DNS/HKCU denial in the regression set |
+| 9 Organization harness | H1 lifecycle, H2 required, H3 recommendations with explicit acceptance (impl, det, pkg: H1/H2 package checks 8/8; H3 persistence 13/13); H2 positive path (model, source only) | Real-model H3 recommendation quality is not evaluated |
+| 10 Autonomous verification | Provenance-labelled verification; sanitized failure categories; packaged text-rework E2E (pkg 11/11) | Full regression on the frozen final source |
+| 11 Experience | Scoped retrieval, provenance levels (det) | Effect UNPROVEN: both A/B attempts stopped in task A |
+| 18 Verified self-improvement | Developer-created evidence-linked backlog (`docs/IMPROVEMENT_BACKLOG.md`); no autonomous promotion | A candidate passes an isolated evaluation plus Owner approval |
+
+Areas 12, 14, 15, 16 and 20 remain DEFERRED (no demonstrated need or evaluation data). The other areas are unchanged
+from the table above.

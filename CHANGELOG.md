@@ -32,6 +32,17 @@ Semantic versioning. Every release needs an entry with all five sections (enforc
 - Separate access-denied errors from loopback timeout observations in real-backend tests; add actual Owner-run canary/token coverage.
 - Validation and current limitations: docs/evidence/2026-10-27-owner-isolation.md. Full final regression and package integration still pending.
 
+## Unreleased — test contracts and verification evidence (2026-10-27, Claude, after 0.1.63 / 18fbd6d)
+
+- Test contracts aligned with the security changes: sanitized failover categories, explicit `isolate=True` in the
+  harness-safety mocks, and an Owner run of trained outputs refused without a recorded isolation exception. No
+  production code change.
+- Full single-process regression on 9684256: 504/504 OK, 1,787 s, tested-code hashes matched. The earlier run on
+  1434811 was 502/504; its 2 failures were these test contracts, kept as evidence.
+- B6 browser-stall diagnostics: 1 stall in 13 isolated runs; root cause unresolved
+  (`docs/evidence/2026-10-27-b6-browser-stall.md`).
+- Developer-created improvement backlog (`docs/IMPROVEMENT_BACKLOG.md`); 1–20 matrix status update.
+
 ## Unreleased — Product Planning alignment, H1, H2 (2026-10-26, dev/web-ui, on top of 0.1.62)
 
 - Product Planning 1.0.1: conditional source criterion; the exact headings / `product_plan` JSON contract
