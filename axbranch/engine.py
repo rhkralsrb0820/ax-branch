@@ -1674,6 +1674,11 @@ class Engine:
                                       'ruling': e['detail']['ruling']}
                                      for e in self.store.events(pid, {'owner_ruling'})
                                      if e['detail'].get('criterion_text') in plan['acceptance_criteria']]}
+        previous = self._previous_verified(pid, artifact) if plan.get('owner_rework') else None
+        if previous is not None:
+            # A revision request ("add X, keep the rest") can only be judged against the version the Owner reviewed
+            # (2026-10-28 real run P-20261028-b203f2: without it the verifier could not check preservation).
+            context['previous_verified_version'] = previous
         if fetched is not None:
             # Every earlier verification of this project, not only this version's: a rework keeps verified content,
             # and its earlier exact quotes locate the passages (P-20261018-279325 v3 saw navigation only without them).
@@ -1966,6 +1971,23 @@ class Engine:
             self.store.update(pid, iteration=artifact['iteration'])
             if self.store.project(pid)['state'] != 'VERIFYING':
                 self.store.set_state(pid, 'VERIFYING', reason=reason)
+
+    def _previous_verified(self, pid, artifact, limit=8000):
+        """The latest PASS version of this project before `artifact`, as a unified diff against it (bounded), for
+        judging an Owner revision. None when there is no earlier verified version."""
+        import difflib
+        passed = {v['artifact_id'] for v in self.store.verifications(pid) if v['verdict'] == 'PASS'}
+        earlier = [a for a in self.store.artifacts(pid) if a['id'] in passed and a['iteration'] < artifact['iteration']]
+        if not earlier:
+            return None
+        old = earlier[-1]
+        diff = ''.join(difflib.unified_diff(artifacts.text_of(old).splitlines(True), artifacts.text_of(artifact).splitlines(True),
+                                            f"v{old['iteration']} (verified, reviewed by the Owner)",
+                                            f"v{artifact['iteration']} (this version)", n=2))
+        return {'iteration': old['iteration'], 'sha256': old['sha256'],
+                'diff': diff[:limit], 'diff_truncated': len(diff) > limit,
+                'rule': 'Judge the requested change AND that everything outside it is preserved from this verified '
+                        'version; lines not in the diff are unchanged.'}
 
     def _document_contract_fail(self, pid, p, artifact, checks, failed_docs):
         """A deliverable that breaks a department's deterministic document contract (missing headings, empty
