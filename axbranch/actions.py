@@ -1,10 +1,20 @@
 """Owner actions shared by the Tk window and the local web UI: one implementation of start / resume / stop /
 network decision / review / close / result, all through the existing store, engine and supervisor. A screen
 never runs its own approval, execution or verification logic."""
-from . import departments, supervisor
+from . import budgets, departments, supervisor
 from .state import Rejected
 
 OWNER_WAIT = ('OWNER_REVIEW', 'PENDING_CLOSE', 'ARCHIVE_PENDING_APPROVAL')
+
+# Owner-approved demo allowances. These limit the WHOLE project's subscription usage, including revisions;
+# choosing a profile never grants a capability, changes an experiment or purchases API credits.
+TASK_BUDGETS = {
+    'general': {'label': '기본 업무', 'max_reported_tokens': 250000},
+    'product_planning': {'label': '상품기획', 'max_reported_tokens': 150000},
+    'csv_analysis': {'label': 'CSV 분석·후속 수정', 'max_reported_tokens': 250000},
+    'web_app': {'label': '웹·서버형 결과물', 'max_reported_tokens': 250000},
+}
+TASK_LIMITS = {'max_calls': 20, 'max_seconds': 3600, 'max_prompt_chars': 200000}
 
 
 class StartRejected(Rejected):
@@ -22,7 +32,8 @@ def launch(workspace, store, pid, launcher=None):
     return True
 
 
-def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_id=None, required=()):
+def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_id=None, required=(),
+          task_type='general'):
     """A new project from the goal box: inputs checked first (a bad file never leaves a half project), then the
     project, its departments (function connections only) and its inputs. Returns the project id.
     request_id: the same id again returns the project it already created (a reload or double submit)."""
@@ -34,6 +45,8 @@ def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_i
         goal = (goal or '').strip()
         if not goal:
             raise Rejected('목표를 입력해 주세요.')
+        if not isinstance(task_type, str) or task_type not in TASK_BUDGETS:
+            raise Rejected('업무 종류를 목록에서 선택해 주세요.')
         if files:
             from .artifacts import validate_inputs
             validate_inputs(files)
@@ -44,6 +57,9 @@ def start(store, engine_factory, goal, dep_ids, specs, files, channel, request_i
         raise StartRejected(str(e), request_id) from e
     with store.tx():
         pid = store.new_project(goal)
+        budgets.configure(store, pid, **TASK_LIMITS,
+                          max_reported_tokens=TASK_BUDGETS[task_type]['max_reported_tokens'], profile=task_type,
+                          time_basis='call_seconds')
         store.event(pid, 'owner_action', action='new', channel=channel, **({'request_id': request_id} if request_id else {}))
     for dep_id in dict.fromkeys(dep_ids):
         departments.attach(store, pid, dep_id, specs, mode='required' if dep_id in required else 'available')

@@ -49,6 +49,7 @@
   // ---- overview / sidebar ----
   async function refreshOverview() {
     S.ov = await api('overview');
+    renderTaskBudgets();
     $('#version').textContent = 'v' + S.ov.version;
     $('#motionOff').checked = !!S.ov.settings.motion_off; $('#lowPower').checked = !!S.ov.settings.low_power;
     const list = $('#projects'); list.innerHTML = '';
@@ -131,6 +132,22 @@
   $('#depMenu').onchange = e => { if (e.target.value) addPending(e.target.value); e.target.value = ''; };
 
   // ---- goal box ----
+  const tokenNumber = n => Number(n).toLocaleString('ko-KR');
+  function renderTaskBudgets() {
+    const profiles = S.ov.task_budgets || [], menu = $('#taskType');
+    if (!profiles.length) return;
+    const selected = menu.value || 'general';
+    menu.innerHTML = profiles.map(p => `<option value="${esc(p.id)}">${esc(p.label)} · ${tokenNumber(p.max_reported_tokens)}토큰</option>`).join('');
+    menu.value = profiles.some(p => p.id === selected) ? selected : 'general';
+    renderTaskBudgetNote();
+  }
+  function renderTaskBudgetNote() {
+    const profile = (S.ov?.task_budgets || []).find(p => p.id === $('#taskType').value);
+    $('#taskBudgetNote').textContent = profile
+      ? `수정·재개까지 합계 ${tokenNumber(profile.max_reported_tokens)}토큰 · 구독 사용량 한도이며 추가 결제 승인이 아닙니다.`
+      : '수정·재개를 포함한 프로젝트 누적 한도입니다. 추가 결제를 승인하지 않습니다.';
+  }
+  $('#taskType').onchange = () => { draft(); renderTaskBudgetNote(); };
   const submissionKey = 'axb-pending-submission';
   let submission = null, submissionUnavailable = false;
   try { submission = JSON.parse(sessionStorage.getItem(submissionKey) || 'null'); }
@@ -151,6 +168,8 @@
     const r = await api('submission?request_id=' + encodeURIComponent(submission.id));
     if (r.id) { await accepted(r, true); return true; }
     S.requestId = submission.id; goal.value = submission.goal; S.pending = submission.departments.slice(); renderPending();
+    $('#taskType').value = submission.task_type || 'general'; renderTaskBudgetNote();
+    S.required = (submission.required || []).slice(); renderPending();
     $('#fileNames').textContent = submission.files.length ? '다시 첨부 필요: ' + submission.files.map(f => f.name).join(', ') : '';
     notice('이전 제출의 접수가 아직 확인되지 않았습니다. 같은 목표로 재시도하세요.' + (submission.files.length ? ' 파일 내용은 저장하지 않았으므로 같은 파일을 다시 첨부해 주세요.' : ''), 0);
     return false;
@@ -175,16 +194,20 @@
       if (submission) {
         const r = await api('submission?request_id=' + encodeURIComponent(submission.id));
         if (r.id) { await accepted(r, true); return; }
-        if (text !== submission.goal || JSON.stringify(S.pending) !== JSON.stringify(submission.departments) || JSON.stringify(fileList()) !== JSON.stringify(submission.files)) {
-          return notice('이전 제출을 확인 중입니다. 같은 목표·부서·첨부 파일로 재시도한 뒤 새 목표를 제출하세요.', 0);
+        if (text !== submission.goal || JSON.stringify(S.pending) !== JSON.stringify(submission.departments) || JSON.stringify(fileList()) !== JSON.stringify(submission.files)
+            || ($('#taskType').value || 'general') !== (submission.task_type || 'general')
+            || JSON.stringify((S.required || []).filter(x => S.pending.includes(x)).slice().sort()) !== JSON.stringify((submission.required || []).slice().sort())) {
+          return notice('이전 제출을 확인 중입니다. 같은 목표·부서·첨부 파일·업무 종류로 재시도한 뒤 새 목표를 제출하세요.', 0);
         }
         S.requestId = submission.id;
       } else {
-        const pending = {id: S.requestId, goal: text, departments: S.pending.slice(), files: fileList()};
+        const pending = {id: S.requestId, goal: text, departments: S.pending.slice(), files: fileList(),
+          task_type: $('#taskType').value || 'general', required: (S.required || []).filter(x => S.pending.includes(x))};
         sessionStorage.setItem(submissionKey, JSON.stringify(pending)); // failure stops submission before any POST
         submission = pending;
       }
-      const r = await api('projects', {goal: text, departments: S.pending, required: (S.required || []).filter(x => S.pending.includes(x)), files: S.files, request_id: S.requestId});
+      const r = await api('projects', {goal: text, departments: S.pending, required: (S.required || []).filter(x => S.pending.includes(x)),
+        files: S.files, task_type: submission.task_type || 'general', request_id: S.requestId});
       await accepted(r);
     } catch (e) {
       if (submission && e.rejectedRequest === submission.id) {
@@ -201,6 +224,28 @@
   };
 
   // ---- project view ----
+  function renderExecutionBudget(budget) {
+    const box = $('#executionBudget');
+    box.hidden = !budget;
+    if (!budget) return;
+    const known = budget.reported_tokens !== null && budget.reported_tokens !== undefined;
+    const used = known ? tokenNumber(budget.reported_tokens) : '집계 대기·미확인';
+    const title = budget.acceptance_pending ? '검증 통과 · 청월의 최종 수락 대기'
+      : budget.paused ? '사용 한도 때문에 일시 중단' : '이 프로젝트의 사용량';
+    const limit = budget.configured ? `${tokenNumber(budget.max_reported_tokens)}토큰` : '설정 기록 없음';
+    const phaseNames = {planning: '계획', production: '제작', verification: '검증', acceptance: '최종 수락', decision: '다음 행동 판단'};
+    const stop = budget.stop;
+    const reserve = stop ? `<p>다음 호출과 남은 필수 단계에 ${tokenNumber(stop.reserve || 0)}토큰을 남겨야 합니다.`
+      + `${stop.remaining !== null && stop.remaining !== undefined ? ` 현재 남은 양은 ${tokenNumber(stop.remaining)}토큰입니다.` : ''}</p>`
+      + ((stop.downstream || []).length ? `<div class="muted">남겨 둔 단계: ${stop.downstream.map(s => esc(phaseNames[s.phase] || s.phase)).join(' → ')}</div>` : '') : '';
+    box.innerHTML = `<div class="row"><h3>${esc(title)}</h3><span class="grow"></span><span class="badge">${esc(budget.label || '이전 프로젝트')}</span></div>`
+      + `<div class="budget-figures"><span>누적 사용 <b>${used}${known ? '토큰' : ''}</b></span><span>프로젝트 한도 <b>${limit}</b></span></div>`
+      + (!known ? `<p class="muted">확인된 사용량 ${tokenNumber(budget.known_tokens || 0)}토큰. 진행 중이거나 사용량이 남지 않은 호출이 있어 전체를 0으로 표시하지 않습니다.</p>` : '')
+      + (budget.acceptance_pending ? '<p>현재 버전의 검증은 통과했습니다. 최종 수락은 아직 끝나지 않았으며 결과와 검증 기록은 보존됩니다.</p>' : '')
+      + reserve
+      + '<div class="muted">수정·재시작에도 누적 사용량을 유지합니다. 토큰은 구독 사용량이며 추가 결제 승인이 아닙니다. 구독 한도가 먼저 끝날 수 있습니다.</div>'
+      + (budget.configured ? `<details><summary>사용 한도 상세</summary><div class="muted">호출 ${tokenNumber(budget.started_calls || 0)} / ${tokenNumber(budget.max_calls)}회 · 실행 시간 한도 ${tokenNumber(budget.max_seconds)}초 · 호출별 지시문 ${tokenNumber(budget.max_prompt_chars)}자 이하.<br>예약량은 이전 실측에 따른 추정치입니다. 제공자가 더 많이 사용하면 한 번의 호출이 토큰 한도를 넘을 수 있습니다.</div></details>` : '');
+  }
   function saveOwnerDraft() {
     const box = $('#owner'), text = $('#oText') || $('#oNote'), works = $('input[name=works]:checked');
     if (box.dataset.mode && text) S.ownerDrafts[box.dataset.mode] = {text: text.value, works: works ? works.value : 'unknown'};
@@ -208,7 +253,8 @@
   async function openProject(pid) {
     saveOwnerDraft(); S.navigation++; S.pid = pid; S.project = null; S.stageKey = null;
     $('#owner').hidden = true; $('#owner').dataset.mode = ''; $('#owner').innerHTML = '';
-    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience']) $('#' + id).textContent = '';
+    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience', 'executionBudget']) $('#' + id).textContent = '';
+    $('#executionBudget').hidden = true;
     show('project'); await refreshProject(); refreshOverview().catch(() => {});
   }
   async function refreshProject() {
@@ -221,6 +267,7 @@
     $('#banner').textContent = p.banner.text; $('#banner').style.background = p.banner.color;
     $('#pTitle').textContent = p.title;
     $('#pState').textContent = `${p.id} · ${p.state} · ${p.status} · v${p.iteration}` + (p.pause_reason ? ` · ${p.pause_reason.slice(0, 200)}` : '');
+    renderExecutionBudget(p.execution_budget);
     $('#projectChips').innerHTML = (p.attached.map(d => { const req = d.mode === 'required';
       return `<span class="chip${req ? ' req' : ''}">▣ ${esc(depName(d.id))} v${esc(d.version)}<button class="x mode" data-mode="${esc(d.id)}" data-req="${req}" title="${req ? '필수 해제 (이유 필요, 기록됨)' : '필수로 지정 (다음 계획·실행·수용부터 적용)'}">${req ? '🔒 필수' : '사용 가능'}</button>${req ? '' : `<button class="x" data-detach="${esc(d.id)}" title="해제 (다음 위임부터 적용)">×</button>`}</span>`; }).join('') || '<span class="muted">없음 — 부서를 이 칸으로 끌어 놓거나 부서를 클릭해 [프로젝트에 추가]</span>')
       + (p.state === 'PAUSED' && (p.required_unmet.problems || p.required_unmet.reason) && /required department|quarantined|retired|candidate/.test(p.pause_reason || '')
@@ -434,7 +481,7 @@
   }
   setInterval(tick, 2000);
   refreshOverview().then(async () => {
-    const start = decodeURIComponent(location.hash.slice(1));   // e.g. #devroom, #library (read-only views)
+    const start = decodeURIComponent((location.hash || '').slice(1));   // e.g. #devroom, #library (read-only views)
     show(['library', 'devroom'].includes(start) ? start : 'home');
     if (submission) await recoverSubmission();
     const q = new URLSearchParams(location.search);

@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import WORKSPACE, __version__, actions, departments, home, knowledge, live, supervisor
+from . import WORKSPACE, __version__, actions, budgets, departments, home, knowledge, live, supervisor
 from .state import Rejected, Store, run_lock
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
@@ -84,6 +84,7 @@ class App:
                 'departments': [dict(departments.summary(s), knowledge=s['knowledge'], lifecycle=departments.lifecycle(s['id']))
                                 for s in self.specs.values()],
                 'refused': sorted(self.refused), 'settings': self.settings(), 'test_mode': self.test_mode,
+                'task_budgets': [dict(v, id=k, **actions.TASK_LIMITS) for k, v in actions.TASK_BUDGETS.items()],
                 'orb_text': _orb_text()}
 
     def project(self, store, pid):
@@ -104,7 +105,8 @@ class App:
                 'conflicts': [e['detail'] for e in store.events(pid, {'criteria_conflict'})][-5:],
                 'document_contract': [e['detail'] for e in store.events(pid, {'department_document_contract'})][-10:],
                 'experience': knowledge.experience_view(store, pid),
-                'recommendations': departments.recommendations(store, pid)}
+                'recommendations': departments.recommendations(store, pid),
+                'execution_budget': _execution_budget(store, p)}
 
     def settings(self):
         try:
@@ -137,6 +139,33 @@ class App:
 def _title(p):
     from .library import project_title
     return project_title(p)
+
+
+def _execution_budget(store, project):
+    """Read-only Owner view of the cumulative ledger. A past PASS must not imply the current revision passed."""
+    events = store.events(project['id'])
+    configured = [e['detail'] for e in events if e['kind'] == 'execution_budget']
+    usage = budgets.ledger_usage(events)
+    if not configured:
+        return {'configured': False, **usage}
+    limit = configured[-1]
+    stop = next((e['detail'] for e in reversed(events) if e['kind'] == 'budget_reserve_stop'), None)
+    is_budget_pause = project['state'] == 'PAUSED' and 'budget' in (project['pause_reason'] or '').lower()
+    current_verification = next((v for v in reversed(store.verifications(project['id']))
+                                 if v['iteration'] == project['iteration']), None)
+    artifacts_now = {a['id'] for a in store.artifacts(project['id']) if a['iteration'] == project['iteration']}
+    current_pass = bool(current_verification and current_verification['artifact_id'] in artifacts_now
+                        and current_verification['verdict'] == 'PASS' and current_verification['checks'].get('ok'))
+    acceptance_wait = bool(is_budget_pause and stop and stop.get('phase') == 'acceptance' and current_pass
+                           and stop.get('iteration') == project['iteration'])
+    profile = limit.get('profile')
+    return {'configured': True, **usage, **{k: limit[k] for k in (
+                'max_reported_tokens', 'max_calls', 'max_seconds', 'max_prompt_chars')},
+            'profile': profile, 'label': actions.TASK_BUDGETS.get(profile, {}).get('label', '개별 설정'),
+            'remaining_tokens': (max(0, limit['max_reported_tokens'] - usage['reported_tokens'])
+                                 if usage['reported_tokens'] is not None else None),
+            'paused': is_budget_pause, 'stop': stop if is_budget_pause else None,
+            'verification_passed': current_pass, 'acceptance_pending': acceptance_wait}
 
 
 def _banner(state, status, reason):
@@ -349,7 +378,8 @@ def create_project(app, store, body, channel):
             except (Rejected, ValueError, OSError) as e:
                 raise actions.StartRejected(str(e), request_id) from e
             pid = actions.start(store, app.engine_factory, body.get('goal', ''), list(body.get('departments') or []),
-                                app.specs, files, channel, request_id=request_id, required=list(body.get('required') or []))
+                                app.specs, files, channel, request_id=request_id, required=list(body.get('required') or []),
+                                task_type=body.get('task_type', 'general'))
         actions.launch(app.workspace, store, pid, app.launcher)
         return {'id': pid, 'created': True}
     finally:

@@ -48,6 +48,11 @@
           <h2>청월에게 어떤 일을 맡길까요?</h2>
           <textarea id="goal" rows="3" placeholder="목표를 적어 주세요. 부서를 이 칸으로 끌어 놓으면 이번 업무에 첨부됩니다."></textarea>
           <div class="chips" id="pendingDeps"></div>
+          <div class="budget-choice">
+            <label for="taskType">업무 종류</label>
+            <select id="taskType" aria-describedby="taskBudgetNote"><option value="general">기본 업무</option></select>
+            <span id="taskBudgetNote" class="muted">이번 프로젝트의 누적 사용 한도를 적용합니다.</span>
+          </div>
           <div class="row">
             <select id="depMenu"><option value="">부서 첨부…</option></select>
             <label class="ghost file">파일 첨부<input type="file" id="files" multiple hidden></label>
@@ -79,6 +84,7 @@
         <div id="pState" class="muted"></div>
       </div>
       <div id="pipeline" class="pipeline"></div>
+      <div class="card budget-card" id="executionBudget" hidden aria-live="polite"></div>
       <div class="card" id="experience"></div>
       <div class="split">
         <div class="card"><h3>Agent 기록</h3><div id="records" class="records muted">Agent를 선택하면 그 Agent의 주장 · 근거 · 반론 · 결정 · 검증 기록이 표시됩니다.</div></div>

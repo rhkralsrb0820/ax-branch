@@ -25,7 +25,10 @@ DATA = [
     {'id': 'repair', 'condition': 'fictional small repair shop; local intake checklist; 12 possible orders',
      'assumptions': {'currency': 'KRW', 'period': 'month', 'price': 5000, 'unit_cost': 2500, 'fixed_cost': 15000}},
 ]
-BUDGET = dict(max_calls=12, max_seconds=1200, max_prompt_chars=32000, max_reported_tokens=60000, local_documents=True)
+# PROPOSAL 2026-10-28 (not yet Owner-approved for a real run): production 100,000 per project, evaluation 25,000 per
+# B result, experiment maximum 350,000. The 2026-10-26 approval (60,000 / 230,000) cannot even start under the
+# completion reserve (planning must keep plan + production + verification + acceptance = 65,528).
+BUDGET = dict(max_calls=12, max_seconds=1200, max_prompt_chars=32000, max_reported_tokens=100000, local_documents=True)
 MARKER = 'AXB-PRODUCT-REWORK'
 
 
@@ -210,7 +213,7 @@ EXPERIENCE_CONTEXT_TOKENS = 3000      # <= 6,000 characters of experience cards
 EVALUATION_TOKENS = (15504, 20080)    # one evaluation call of verification size (estimate)
 EVALUATION_BUDGET = dict(max_calls=1, max_seconds=600, max_prompt_chars=32000, max_reported_tokens=25000,
                          local_documents=True)
-EXPERIMENT_MAX_TOKENS = 230000        # 3 x 60,000 production + 2 x 25,000 evaluation (Owner approval 2026-10-26)
+EXPERIMENT_MAX_TOKENS = 350000        # 3 x 100,000 production + 2 x 25,000 evaluation (PROPOSAL 2026-10-28)
 
 
 FIRST_PASS = ('ceo', 'worker', 'verify', 'ceo')   # plan, proposal, independent verification, CEO acceptance
@@ -225,8 +228,10 @@ def reserve_feasibility(cap, extra=0):
     for case, pick in (('best_case', 0), ('worst_case', 1)):
         used, stopped = extra, None
         for i, role in enumerate(FIRST_PASS):
-            if used + BUDGET_RESERVE[role] > cap:
-                stopped = f'call {i + 1} ({role}) refused: used {used:,} + reserve {BUDGET_RESERVE[role]:,} > cap {cap:,}'
+            # Completion reserve: this call AND every remaining first-pass call must still fit (engine rule).
+            need = sum(BUDGET_RESERVE[r] for r in FIRST_PASS[i:])
+            if used + need > cap:
+                stopped = f'call {i + 1} ({role}) refused: used {used:,} + completion reserve {need:,} > cap {cap:,}'
                 break
             used += MEASURED_CALL_TOKENS[role][pick]
         out[case] = {'fits': stopped is None, 'stopped_at': stopped, 'used_estimate': used}
@@ -245,11 +250,14 @@ def compact_estimate():
             'evaluation (each of 2)': EVALUATION_TOKENS}
 
 
-def run_compact(root, llm=None):
+def run_compact(root, llm=None, owner_approved=False):
     """Owner-approved compact comparison, run ONCE: pre-register, then A (produce + verify), B-control and
     B-experience (same task/input/rubric/departments/budget; experience only in the treatment), then a BLIND
     independent evaluation of each B result in its own budget. Stops at the first budget stop or failure."""
     root = Path(root).resolve()
+    if llm is None and not owner_approved:
+        raise Rejected('Real A/B run refused: the v3 budgets are a PROPOSAL. Record the Owner approval and pass '
+                       '--owner-approved; no model call was made.')
     if root.exists():
         raise Rejected('Use a NEW root; existing databases and artifacts are never modified by this experiment.')
     root.mkdir(parents=True)
@@ -257,7 +265,8 @@ def run_compact(root, llm=None):
     estimate = compact_estimate()
     cap = BUDGET['max_reported_tokens']
     revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
-    prereg = {'design': 'compact v2 (Owner option c + approvals 2026-10-26: no A revision; separate evaluation budget)',
+    prereg = {'design': 'compact v3 (PROPOSAL 2026-10-28: production 100k each, evaluation 25k each, max 350k; '
+                        'no A revision; separate evaluation budget; Owner approval required before a real run)',
               'tasks': COMPACT_TASKS,
               'task_origin': 'developer-designed evaluation input; NOT autonomous CEO opportunity discovery',
               'inputs': {k: {'catalog_id': t['catalog_id'], 'sha256': digest(next(d for d in DATA if d['id'] == t['catalog_id']))}
@@ -385,9 +394,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True)
     parser.add_argument('--design', choices=('original', 'compact'), default='original')
+    parser.add_argument('--owner-approved', action='store_true', help='only after the Owner approved the v3 budgets')
     args = parser.parse_args()
     if args.design == 'compact':
-        result = run_compact(args.root)
+        result = run_compact(args.root, owner_approved=args.owner_approved)
         print(json.dumps(result, ensure_ascii=False, indent=1))
         return 0
     result = run(args.root)

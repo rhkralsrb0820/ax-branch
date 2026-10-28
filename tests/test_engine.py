@@ -271,8 +271,11 @@ class EngineTests(unittest.TestCase):
                 self.assertEqual(p['pause_reason'], f'{type(error).__name__}: {error}')
                 failed = self.store.events(pid, {'call_failed'})
                 self.assertEqual(len(failed), 1)
-                self.assertEqual(failed[0]['detail'], {
+                detail = dict(failed[0]['detail'])
+                self.assertIsInstance(detail.pop('call_start_id'), int)          # paired with its call_start
+                self.assertEqual(detail, {
                     'who': 'Developer', 'preferred': 'claude', 'seconds': 1800,
+                    'tokens': 'UNKNOWN', 'usage_complete': False,                   # a failed turn is never free
                     'error': str(error)[:500], 'failures': [providers.failure_category(n) for n in error.notes]})
                 self.assertIsNone(E.activity(self.tmp / 'ws', pid))
                 self.assertEqual(len(self.store.events(pid, {'call_start'})), 3)

@@ -48,23 +48,37 @@ class BudgetReserveTests(unittest.TestCase):
             eng._budget_guard(pid, 'prompt', 'CEO')
         self.assertIn('Execution budget reached', str(stop.exception))
 
-    def test_engine_pauses_before_the_verifier_with_a_readable_reason(self):
-        eng, pid = self.project()
-        with mock.patch.object(providers, 'last_usage', return_value=usage(15000)):
+    def test_engine_does_not_start_production_it_cannot_finish(self):
+        eng, pid = self.project(cap=95000)
+        with mock.patch.object(providers, 'last_usage', return_value=usage(20000)):
             p = eng.run(pid)
         self.assertEqual(p['state'], 'PAUSED')
         self.assertIn('예산 여유가 부족해 호출을 시작하지 않았습니다', p['pause_reason'])
-        self.assertEqual([e['detail']['who'] for e in self.store.events(pid, {'call'})], ['CEO', 'Architect', 'Developer'])
-        self.assertEqual(self.store.events(pid, {'budget_reserve_stop'})[-1]['detail']['who'], 'Verification')
+        self.assertEqual([e['detail']['who'] for e in self.store.events(pid, {'call'})], ['CEO', 'Architect'])
+        stop = self.store.events(pid, {'budget_reserve_stop'})[-1]['detail']
+        self.assertEqual((stop['who'], stop['phase']), ('Developer', 'production'))
+        self.assertEqual([s['phase'] for s in stop['downstream']], ['verification', 'acceptance'])
+        # this build + verification + acceptance; the 20,000-token calls seen in THIS project raised the worker and CEO
+        # reserves above their recorded defaults (15,636 / 14,906)
+        self.assertEqual(stop['reserve'], 20000 + 20080 + 20000)
 
 
     def test_ab_preflight_walks_the_first_pass_under_the_reserve_rule(self):
         from axbranch import product_experiment as X
-        fit = X.reserve_feasibility(60000)
-        self.assertTrue(fit['best_case']['fits'])
-        self.assertFalse(fit['worst_case']['fits'])                    # the risk is recorded, not hidden
-        self.assertIn('call 4 (ceo)', fit['worst_case']['stopped_at'])
-        self.assertFalse(X.reserve_feasibility(30000)['best_case']['fits'])   # would not even start
+        old = X.reserve_feasibility(60000)                             # the 2026-10-26 approval
+        self.assertFalse(old['best_case']['fits'])                     # cannot even start under the completion reserve
+        self.assertIn('call 1 (ceo)', old['best_case']['stopped_at'])
+        proposal = X.reserve_feasibility(X.BUDGET['max_reported_tokens'])
+        self.assertTrue(proposal['best_case']['fits'] and proposal['worst_case']['fits'])
+
+    def test_a_real_ab_run_needs_the_owner_approval_flag(self):
+        import tempfile
+        from pathlib import Path
+        from axbranch import product_experiment as X
+        root = Path(tempfile.mkdtemp()) / 'ab'
+        with self.assertRaises(Rejected):
+            X.run_compact(root)                                        # real providers, no approval: refused
+        self.assertFalse(root.exists())                                # nothing was registered or started
 
 if __name__ == '__main__':
     unittest.main()

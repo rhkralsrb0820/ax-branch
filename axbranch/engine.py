@@ -18,7 +18,7 @@ import traceback
 from pathlib import Path
 
 from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, isolation, kindex, knowledge, library, metrics, native,
-               departments, permissions, providers, runtime, sandbox, sources, supervisor, training)
+               budgets, departments, permissions, providers, runtime, sandbox, sources, supervisor, training)
 from . import __version__
 from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
 
@@ -50,6 +50,7 @@ DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
               network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE),
               native_build=NATIVE, removed_criteria=ARR(S(criterion=STR, owner_quote=STR)),
+              reuse_stages=ARR(S(name=STR, reason=STR)),
               evidence_class=ENUM('PRODUCT_CHANGE', 'HARNESS_DEFECT', 'NO_PRODUCT_EVIDENCE', 'AMBIGUOUS'))
 WORK = S(output=STR, key_points=ARR(STR), evidence=ARR(STR), counterpoints=ARR(STR))
 BUILD = S(content=STR, files=ARR(S(path=STR, content=STR)), edits=ARR(S(path=STR, find=STR, replace=STR)),
@@ -332,6 +333,11 @@ removed_criteria with owner_quote = the Owner's exact words from owner_feedback 
 without the Owner's words is reverted (your own diagnosis or retrieved knowledge is not the Owner).
 relevant_knowledge holds lessons from other projects that match the current problem; use what applies and say which
 one in your diagnosis.
+reuse_stages lists ONLY unchanged notes stages from reusable_stage_candidates whose work remains valid for the
+Owner's requested change. Give each stage's exact name and a concrete reason. Keep its full stage definition
+unchanged. Use [] if the feedback changes its facts, scope, inputs, instructions or needed evidence, or if unsure.
+The engine independently checks provenance and dependencies; this request cannot override those checks. Never
+reuse the final deliverable or skip final verification. A presentation-only change may reuse unaffected analysis.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
@@ -546,7 +552,7 @@ def _prompt(system, task, context):
 # Largest single-call reported tokens (cache included) measured per role in recorded runs: 2026-10-26 compact A/B
 # (CEO plan 14,906; product planner rework 15,636) and attempt 1 (verification 20,080). Raised automatically by
 # larger calls observed in the same project; never lowered to fit a budget.
-BUDGET_RESERVE = {'ceo': 14906, 'worker': 15636, 'verify': 20080}
+BUDGET_RESERVE = budgets.BUDGET_RESERVE
 
 
 def _other(provider):
@@ -796,7 +802,8 @@ class Engine:
         self.log(f'{who} -> {prefer}')
         p = self.store.project(pid)
         prompt = _prompt(system, task, context)
-        call_cancel = self._budget_guard(pid, prompt, who)
+        phase, pending_workers = self._completion_phase(pid, schema, context, who)
+        call_cancel = self._budget_guard(pid, prompt, who, phase=phase, pending_workers=pending_workers)
         self.beat(pid, f'call {who} ({prefer})')
         activity = self.workspace / 'projects' / pid / 'ACTIVITY.json'
         base = {'project': pid, 'agent': who, 'state': p['state'], 'iteration': p['iteration'],
@@ -808,13 +815,15 @@ class Engine:
             _status_write(activity, data)
         activity.parent.mkdir(parents=True, exist_ok=True)
         tick({'provider': prefer, 'elapsed': 0, 'output_bytes': 0, 'idle': 0})
-        self.store.event(pid, 'call_start', who=who, preferred=prefer, state=p['state'], iteration=p['iteration'])
+        start_id = self.store.event(pid, 'call_start', who=who, preferred=prefer, state=p['state'],
+                                    iteration=p['iteration'], phase=phase)
         providers.clear_usage()            # never attribute an earlier turn's usage to this one
         try:
             result, used, notes = self.llm(prompt, schema, prefer=prefer, web=web,
                                            cancel=call_cancel, on_tick=tick)
         except Exception as e:
             self.store.event(pid, 'call_failed', who=who, preferred=prefer,
+                             call_start_id=start_id, tokens=providers.last_usage() or 'UNKNOWN', usage_complete=False,
                              seconds=round(time.monotonic() - started), error=str(e)[:500],
                              failures=[providers.failure_category(n) for n in getattr(e, 'notes', [])])
             raise
@@ -825,15 +834,21 @@ class Engine:
             self.store.event(pid, 'provider_handoff', who=who, preferred=prefer, used=used, failures=self.last_failures)
         # Least privilege, auditable: the authority this turn had on the provider that ACTUALLY ran it (failover).
         call = self.store.event(pid, 'call', who=who, provider=used, seconds=round(time.monotonic() - started),
+                                call_start_id=start_id, phase=phase,
                                 capability_grant=context['capability_grant'],
                                 prompt_sha256=hashlib.sha256(prompt.encode('utf-8')).hexdigest(),
                                 prompt_chars=len(prompt), tokens=providers.last_usage() or 'UNKNOWN',
                                 authority=providers.authority(used, web) or 'UNKNOWN')
-        budgets = self.store.events(pid, {'execution_budget'})
-        if budgets:
-            measured = knowledge.reported_tokens(self.store.events(pid))
-            if measured is None or measured > budgets[-1]['detail']['max_reported_tokens']:
-                raise Rejected('Execution budget: usage missing or reported token ceiling exceeded; no further call.')
+        budget_records = self.store.events(pid, {'execution_budget'})
+        if budget_records:
+            measured = budgets.ledger_usage(self.store.events(pid))['reported_tokens']
+            if measured is None or measured > budget_records[-1]['detail']['max_reported_tokens']:
+                # Preserve a response already paid for (including a verifier verdict). The next
+                # guard stops new calls; dropping this result would force work to be repeated.
+                self.store.event(pid, 'budget_after_call', call=call, phase=phase, reported_tokens=measured,
+                                 cap=budget_records[-1]['detail']['max_reported_tokens'],
+                                 reason='unknown_usage' if measured is None else 'observed_call_exceeded_reserve',
+                                 action='record completed response; block further model calls')
         self.beat(pid, f'call done {who} ({used})')
         if audited:
             result['_trace_id'] = self._record_decision(pid, who, task, p, used, result, retrievals, call)
@@ -846,15 +861,9 @@ class Engine:
     def configure_budget(self, pid, *, max_calls=12, max_seconds=1200, max_prompt_chars=32000, max_reported_tokens=60000,
                          local_documents=False):
         """Additional opt-in experiment limits; governance/verification criteria remain unchanged."""
-        if self.store.events(pid, {'execution_budget', 'call_start'}):
-            raise Rejected('Execution budget must be fixed once before execution.')
-        values = dict(max_calls=max_calls, max_seconds=max_seconds, max_prompt_chars=max_prompt_chars,
-                      max_reported_tokens=max_reported_tokens)
-        if any(type(v) is not int or v <= 0 for v in values.values()):
-            raise Rejected('Execution budget values must be positive integers.')
-        self.store.event(pid, 'execution_budget', **values, local_documents=bool(local_documents),
-                         token_enforcement='reported usage stop after each turn; not a provider hard generation cap',
-                         provider_attempt_upper_bound_per_turn=len(gov.PROVIDERS))
+        return budgets.configure(self.store, pid, max_calls=max_calls, max_seconds=max_seconds,
+                                 max_prompt_chars=max_prompt_chars, max_reported_tokens=max_reported_tokens,
+                                 local_documents=local_documents)
 
     def _budget_scope(self, pid):
         budgets = self.store.events(pid, {'execution_budget'})
@@ -871,31 +880,61 @@ class Engine:
         """Tokens to keep free before starting a call of this role: the largest call of the role measured in recorded runs
         (BUDGET_RESERVE) or in this project, whichever is larger. A heuristic from observed maxima, not a provider cap:
         one call larger than anything observed can still overshoot."""
-        role = 'ceo' if who == 'CEO' else 'verify' if who == 'Verification' else 'worker'
-        seen = [knowledge.call_tokens(e['detail']) for e in events
-                if e['kind'] == 'call' and e['detail'].get('who') == who]
-        return role, max([BUDGET_RESERVE[role], *[n for n in seen if n is not None]])
+        role = budgets.role_for(who)
+        return role, budgets.call_reserve(events, role)
 
-    def _budget_guard(self, pid, prompt, who=None):
+    def _completion_phase(self, pid, schema, context, who):
+        """Schema identifies acceptance reliably: CEO also plans and diagnoses repairs."""
+        if schema is REPORT:
+            return 'acceptance', 0
+        if schema is VERDICT:
+            return 'verification', 0
+        if schema in (BUILD, BUILD_EDITS):
+            return 'production', 0
+        pipeline = (self.store.project(pid)['plan'] or {}).get('pipeline', [])
+        if schema is WORK:
+            index = next((i for i, st in enumerate(pipeline) if st['name'] == context.get('stage')), None)
+            return 'production', len(pipeline) - index - 1 if index is not None else max(1, len(pipeline))
+        if schema is PLAN:
+            return 'planning', 1  # plan not known yet; recomputed before every subsequent call
+        if who == 'Verification':
+            return 'verification_repair', 0
+        if who == 'Product evaluation':
+            return 'evaluation', 0
+        return 'decision', max(1, len(pipeline))
+
+    def _budget_guard(self, pid, prompt, who=None, *, phase=None, pending_workers=0):
         records = self.store.events(pid, {'execution_budget'})
         if not records:
             return self.cancel
         budget, at = records[-1]['detail'], records[-1]['at']
         events = self.store.events(pid)
-        tokens = knowledge.reported_tokens(events)
-        if (sum(e['kind'] == 'call_start' for e in events) >= budget['max_calls'] or
-                time.time() >= at + budget['max_seconds'] or len(prompt) > budget['max_prompt_chars'] or
+        ledger = budgets.ledger_usage(events)
+        tokens = ledger['reported_tokens']
+        if (ledger['started_calls'] >= budget['max_calls'] or
+                budgets.seconds_left(events, budget, at, time.time()) <= 0 or len(prompt) > budget['max_prompt_chars'] or
                 tokens is None or tokens >= budget['max_reported_tokens']):
+            self.store.event(pid, 'budget_stop', phase=phase, who=who, iteration=self.store.project(pid)['iteration'],
+                             used=tokens, cap=budget['max_reported_tokens'],
+                             reason='unknown_usage' if tokens is None else 'elapsed_prompt_or_usage_limit')
             raise Rejected('Execution budget reached; no model call started.')
         role, reserve = self._call_reserve(events, who)
-        if tokens + reserve > budget['max_reported_tokens']:
+        assessment = budgets.assess_budget(events, budget, phase, pending_workers) if phase else None
+        if assessment:
+            reserve = assessment['reserve_tokens']
+        if tokens + reserve > budget['max_reported_tokens'] or (assessment and not assessment['allowed']):
             left = budget['max_reported_tokens'] - tokens
             self.store.event(pid, 'budget_reserve_stop', who=who, role=role, used=tokens, reserve=reserve,
-                             remaining=left, cap=budget['max_reported_tokens'])
+                             remaining=left, cap=budget['max_reported_tokens'], phase=phase,
+                             iteration=self.store.project(pid)['iteration'],
+                             current_reserve=assessment['current_tokens'] if assessment else reserve,
+                             downstream=assessment['downstream'] if assessment else [],
+                             required_calls=assessment['reserve_calls'] if assessment else 1,
+                             remaining_calls=budget['max_calls'] - ledger['started_calls'])
             raise Rejected(f'Execution budget: {who or role} call NOT started - remaining {left:,} reported tokens is '
-                           f'less than the {reserve:,} kept for one {role} call (largest measured), cap '
+                           f'insufficient for {reserve:,} reserved tokens and the remaining required calls through acceptance, cap '
                            f"{budget['max_reported_tokens']:,}, used {tokens:,}. 예산 여유가 부족해 호출을 시작하지 않았습니다.")
-        owner_cancel, deadline = self.cancel, at + budget['max_seconds']
+        owner_cancel, deadline = self.cancel, time.time() + budgets.seconds_left(events, budget, at, time.time())
 
         class BudgetCancellation:
             def is_set(inner):
@@ -1112,7 +1151,32 @@ class Engine:
         self.store.event(pid, 'department_acceptance', iteration=p['iteration'], results=statuses)
         return findings
 
-    def _carry_over(self, pid, plan, idx, stage, pv, it, chain):
+    @staticmethod
+    def _data_digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+
+    def _stage_basis(self, pid, plan, stage, upstream):
+        """Persist what a notes result depended on, independently of a model's reuse request."""
+        self._owner_inputs(pid)  # verify the stored input bytes, not merely their recorded metadata
+        spec = self._attached_departments(pid).get(stage.get('department') or '')
+        return {'goal': self._data_digest(self.store.project(pid)['goal']),
+                'inputs': self._data_digest(self._input_records(pid)),
+                'department': departments.spec_digest(spec) if spec else None,
+                'connections': self._data_digest(self._connections(pid)),
+                'upstream': self._data_digest(upstream),
+                'criteria': list(plan.get('acceptance_criteria', [])),
+                'kind': plan.get('artifact_kind'), 'filename': plan.get('artifact_filename')}
+
+    def _reuse_candidates(self, pid, plan, pv):
+        """Candidate metadata helps the CEO express intent; it does not itself grant reuse."""
+        recorded = {e['detail'].get('index'): e['detail'] for e in self.store.events(pid, {'stage_output'})
+                    if e['detail'].get('plan_version') == pv}
+        return [{'name': st['name'], 'instructions': st['instructions'], 'department': st.get('department'),
+                 'rule': 'Only request reuse if this analysis is unaffected by the Owner feedback.'}
+                for idx, st in enumerate(plan.get('pipeline', [])[:-1])
+                if recorded.get(idx, {}).get('basis') and self.store.output(pid, idx, pv) and not st.get('web')]
+
+    def _carry_over(self, pid, plan, idx, stage, pv, it, chain, upstream=None):
         """After a re-plan, reuse the previous plan version's result of an UNCHANGED stage whose upstream was reused
         too; otherwise discard it (recorded either way). Returns (output or None, chain still intact)."""
         prev = next((e['detail'] for e in reversed(self.store.events(pid, {'stage_output'}))
@@ -1121,16 +1185,45 @@ class Engine:
         if old is None:
             return None, False
         same = prev['signature'] == _stage_signature(stage)
-        why = ('new Owner feedback in this plan' if plan.get('owner_rework') else
+        revision = plan.get('owner_rework')
+        requested = {r.get('name'): r.get('reason') for r in revision.get('reuse_stages', [])
+                     if isinstance(r, dict)} if isinstance(revision, dict) else {}
+        basis = self._stage_basis(pid, plan, stage, upstream or [])
+        before = prev.get('basis') or {}
+        unchanged = all(before.get(k) == v for k, v in basis.items() if k != 'criteria')
+        criteria_kept = bool(before) and set(before.get('criteria', [])) <= set(basis['criteria'])
+        discarded = any(e['detail'].get('stage') == stage['name'] and
+                        e['detail'].get('from_plan_version') == pv - 1
+                        for e in self.store.events(pid, {'stage_discarded'}))
+        why = ('new Owner feedback without an explicit unaffected-stage decision' if revision and not requested.get(stage['name']) else
                'an earlier stage re-ran, so its input may have changed' if not chain else
-               'the stage definition changed in the new plan' if not same else '')
+               'the stage definition changed in the new plan' if not same else
+               'live web evidence must be collected again' if stage.get('web') else
+               'recorded dependency provenance is missing or changed' if not before or not unchanged else
+               'approved criteria changed' if not criteria_kept else
+               'the result bytes changed or their hash is missing' if prev.get('output_sha256') != self._data_digest(old['output']) else
+               'the earlier result was explicitly discarded' if discarded else '')
+        if revision and not why:
+            baseline, _ = self._baselines(pid)
+            passed = self._passed_artifact(pid)
+            if (not baseline or not passed or baseline['id'] != passed['id'] or
+                    revision.get('base_artifact') != passed['id'] or artifacts.problems(passed)):
+                why = 'Owner revision has no intact verified baseline for the recorded analysis'
+        if not why:
+            spec = self._attached_departments(pid).get(stage.get('department') or '')
+            problems = departments.check_output(spec, old['output'], pid, self._input_project_ids(pid))
+            if problems:
+                why = 'recorded result no longer meets the department contract: ' + '; '.join(problems)
         if why:
             self.store.event(pid, 'stage_discarded', stage=stage['name'], from_plan_version=pv - 1, plan_version=pv, why=why)
             return None, False
         self.store.save_output(pid, it, pv, idx, old['agent_id'], old['provider'], old['output'])
-        self.store.event(pid, 'stage_output', stage=stage['name'], index=idx, plan_version=pv, signature=prev['signature'])
+        self.store.event(pid, 'stage_output', stage=stage['name'], index=idx, plan_version=pv,
+                         signature=prev['signature'], basis=basis, output_sha256=self._data_digest(old['output']))
         self.store.event(pid, 'stage_reused', stage=stage['name'], from_plan_version=pv - 1, plan_version=pv,
-                         why='unchanged stage definition and unchanged upstream; result passed the contract check')
+                         why='unchanged stage, inputs, department and upstream; criteria preserved; contract rechecked',
+                         owner_revision=bool(revision), decision_reason=requested.get(stage['name'], ''),
+                         source_output=old.get('id'), output_sha256=self._data_digest(old['output']))
         return {'output': old['output']}, True
 
     def _contract_paused(self, pid, stage, problems):
@@ -1286,7 +1379,7 @@ class Engine:
                 self.store.event(pid, 'stage_reused', stage=stage['name'], plan_version=pv,
                                  why='same plan version; its result passed the contract check when produced')
             if done is None and specs and pv > 1:
-                done, chain = self._carry_over(pid, plan, idx, stage, pv, it, chain)
+                done, chain = self._carry_over(pid, plan, idx, stage, pv, it, chain, upstream)
             if done is None:
                 stage_context = {'owner_goal': p['goal'], 'ceo_interpretation': plan['interpretation'],
                                  'stage': stage['name'], 'previous_stages': upstream, **self._connections(pid),
@@ -1328,7 +1421,8 @@ class Engine:
                 self.store.save_output(pid, it, pv, idx, self._agent(pid, stage), used, out)
                 if specs:
                     self.store.event(pid, 'stage_output', stage=stage['name'], index=idx, plan_version=pv,
-                                     signature=_stage_signature(stage))
+                                     signature=_stage_signature(stage), basis=self._stage_basis(pid, plan, stage, upstream),
+                                     output_sha256=self._data_digest(out))
                 if stage.get('department'):
                     self.store.event(pid, 'department_result', stage=stage['name'], department=stage['department'],
                                      provider=used, evidence=len(out.get('evidence') or []),
@@ -1712,6 +1806,14 @@ class Engine:
         if documents:
             context['required_document'] = {'contracts': documents, 'rule': departments.DOCUMENT_RULE,
                                             'deterministic_result': checks.get('department_documents', [])}
+        # A reserve/quota stop must not erase checks already performed. This is evidence,
+        # not a verifier PASS, and is not silently reused on a later verification attempt.
+        self.store.event(pid, 'verification_checks', artifact=artifact['id'], artifact_sha256=artifact['sha256'],
+                         iteration=p['iteration'], plan_version=p['plan_version'], checks=checks,
+                         basis_sha256=self._data_digest({'criteria': plan['acceptance_criteria'],
+                                                        'runtime': plan.get('runtime'),
+                                                        'inputs': self._input_records(pid)}),
+                         status='checks_recorded_pending_verifier')
         # Independence: a different engine than the producer judges whenever it can.
         result, used = self._ask(pid, 'Verification', VERIFY_SYSTEM, 'Verify this artifact.', context, VERDICT,
                                  prefer=_other(producer))
@@ -2900,6 +3002,7 @@ class Engine:
         before = self.runtime_evidence(last, plan.get('runtime'), old_entry) if last else nothing
         feedback = self.store.feedback(pid)
         context = {'owner_goal': p['goal'], 'current_plan': plan, **self._connections(pid), **self._owner_inputs(pid),
+                   'reusable_stage_candidates': self._reuse_candidates(pid, plan, p['plan_version']),
                    'owner_confirmed_working_versions': sorted({f['iteration'] for f in feedback if f['verdict'] == 'works'}),
                    'owner_feedback': [{'feedback_id': f['id'], 'round': f['iteration'], 'verdict': f['verdict'], 'text': f['text'],
                                        'new': f['handled_iteration'] is None} for f in feedback],
@@ -2940,7 +3043,9 @@ class Engine:
         unexecutable_repro = [s['name'] for s in repro['steps'] if not s['ok'] and runtime.classify_step(s) == 'harness']
         dropped = sorted({pr['name'] for pr in (plan.get('runtime') or {}).get('probes', [])}
                          - {pr['name'] for pr in new['runtime'].get('probes', [])})
-        new['owner_rework'] = {'feedback': [f['text'] for f in feedback if f['handled_iteration'] is None
+        new['owner_rework'] = {'base_artifact': last and last['id'],
+                               'reuse_stages': d.get('reuse_stages', []),
+                               'feedback': [f['text'] for f in feedback if f['handled_iteration'] is None
                                             and f['verdict'] in ('problem', 'request')],
                                'diagnosis': d['diagnosis'], 'root_cause': d['root_cause'],
                                'change_summary': d['change_summary'],

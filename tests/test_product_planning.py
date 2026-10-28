@@ -269,7 +269,7 @@ class ProductPlanningTests(unittest.TestCase):
         self.assertIn('NOT re-verified', prereg['textual_revision'])
         self.assertEqual((prereg['budget_production_per_project']['max_reported_tokens'],
                           prereg['budget_evaluation_per_result']['max_reported_tokens'], prereg['experiment_max_reported_tokens']),
-                         (60000, 25000, 230000))
+                         (100000, 25000, 350000))
         for label in ('B-control', 'B-experience'):
             ev = report['evaluations'][label]
             self.assertEqual((ev['evaluator'], ev['independent']), ('codex', True))
@@ -295,7 +295,7 @@ class ProductPlanningTests(unittest.TestCase):
     def test_compact_run_refuses_to_start_when_the_estimate_cannot_fit(self):
         from unittest import mock
         from axbranch import product_experiment as X
-        heavy = dict(X.MEASURED_CALL_TOKENS, verify=(50000, 60000))
+        heavy = dict(X.MEASURED_CALL_TOKENS, verify=(90000, 100000))           # cannot fit the 100k production cap
         with mock.patch.object(X, 'MEASURED_CALL_TOKENS', heavy):
             report = X.run_compact(self.tmp / 'too-big', llm=lambda *a, **k: self.fail('no model call may happen'))
         self.assertEqual((report['status'], report['model_calls']), ('NOT_STARTED_INFEASIBLE', 0))

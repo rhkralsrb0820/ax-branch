@@ -114,3 +114,12 @@ details.group > summary { font-size:16px; font-weight:bold; color:var(--ink); ma
 .tabs button { border:0; background:#f2f3f8; border-radius:12px; padding:8px 14px; cursor:pointer; font-size:14px; }
 .tabs button.on { background:#ddd5f3; }
 .tbl { width:100%; border-collapse:collapse; font-size:14px; } .tbl th, .tbl td { text-align:left; padding:8px; border-top:1px solid var(--line); vertical-align:top; }
+.budget-choice { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; margin:10px 0 14px; }
+.budget-choice label { font-weight:600; }
+.budget-choice select { max-width:100%; }
+.budget-choice .muted { flex-basis:100%; font-size:12px; }
+.budget-card { overflow-wrap:anywhere; }
+.budget-card h3 { margin:0; }
+.budget-card .row { flex-wrap:wrap; }
+.budget-figures { display:flex; flex-wrap:wrap; gap:10px 28px; margin:14px 0; color:var(--muted); }
+.budget-figures b { display:block; margin-top:4px; color:var(--ink); font-size:21px; }
