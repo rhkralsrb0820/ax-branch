@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 from tkinter import ttk
 
-from axbranch import engine as E, live
+from axbranch import engine as E, live, providers
 from axbranch.gui import App
 from axbranch.state import Store
 from tests.test_engine import BROKEN, GOOD, LAUNCHABLE, Script
@@ -213,6 +213,12 @@ class GuiTests(unittest.TestCase):
         self.vault.mkdir()
         self.script = Script([BROKEN, GOOD], ['FAIL', 'PASS'])
         ws, vault, gai, script = self.ws, self.vault, self.tmp / 'none.db', self.script
+        # Projects started from the window carry a task budget; real CLIs report usage, so the scripted turns do too
+        # (UNKNOWN usage would correctly stop a budgeted project).
+        usage = mock.patch.object(providers, 'last_usage', return_value={
+            'source': 'codex turn.completed', 'input_tokens': 1000, 'output_tokens': 100})
+        usage.start()
+        self.addCleanup(usage.stop)
 
         def factory():          # captures plain values only: a worker thread must never hold the window
             return E.Engine(Store(ws / 'axbranch.sqlite3'), workspace=ws, vault=vault, gai_db=gai, llm=script)
