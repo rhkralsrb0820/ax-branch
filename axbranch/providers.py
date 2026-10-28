@@ -277,7 +277,8 @@ def authority(name, web):
 
 
 _CATEGORIES = (('cli_not_installed', r'CLI not installed'),
-               ('usage_limit', r'usage limit|rate limit|quota|limit reached|429|too many requests|hit your limit'),
+               ('usage_limit', r'usage limit|rate limit|quota|limit reached|429|too many requests|hit your limit|'
+                               r'사용량 한도|한도에 도달|try again at'),
                ('auth', r'not logged in|log ?in required|unauthori[sz]ed|401|authentication'),
                ('timeout', r'timed? ?out|시간 초과'))
 

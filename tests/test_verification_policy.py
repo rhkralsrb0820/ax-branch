@@ -25,6 +25,8 @@ class VerificationPolicyTests(unittest.TestCase):
         self.assertEqual(providers.failure_category(RAW),
                          {'provider': 'codex', 'category': 'usage_limit', 'evidence': 'usage limit'})
         self.assertEqual(providers.failure_category('codex: CLI not installed')['category'], 'cli_not_installed')
+        real = 'codex: 구독 사용량 한도에 도달한 것으로 보입니다 (try again at Oct 29th, 2026 2:29 AM.).'   # observed 2026-10-28
+        self.assertEqual(providers.failure_category(real)['category'], 'usage_limit')
         self.assertEqual(providers.failure_category('claude: Not logged in · Please run /login')['category'], 'auth')
         self.assertEqual(providers.failure_category('codex: exit 3, something odd')['category'], 'unknown')
 
