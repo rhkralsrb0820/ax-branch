@@ -2742,7 +2742,7 @@ class Engine:
         # Both stay in the same AppContainer/Job; the two-process Job limit prevents a third process.
         manifest = isolation.Manifest(purpose='Owner result execution', artifact_sha256=artifact['sha256'],
                                       child_processes=bool(exe), max_processes=2 if exe else 8,
-                                      allow_custom_acl=bool(exe))
+                                      allow_custom_acl=True)
         if exe:
             shutil.copyfile(exe, run / exe.name)
             entry = run / exe.name

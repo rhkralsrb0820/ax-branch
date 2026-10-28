@@ -109,6 +109,22 @@ class RealBackendTests(unittest.TestCase):
         self.assertEqual(accepted, [])
         self.assertTrue(m.package_sid.startswith('S-1-15-2-'))
 
+    def test_python_tempfile_works_inside_the_boundary(self):
+        # 2026-10-28: tempfile.mkdtemp (os.mkdir 0o700 -> private DACL) looped forever without WRITE_DAC on run folders.
+        rc, out, m = self.run_isolated('import tempfile, os\n'
+                                       't("mkdtemp_cwd", lambda: tempfile.mkdtemp(dir=os.getcwd()))\n'
+                                       't("mkdtemp_temp", lambda: tempfile.mkdtemp())\n'
+                                       'd = tempfile.mkdtemp(dir=os.getcwd())\n'
+                                       't("write_inside_tempdir", lambda: open(os.path.join(d, "f.txt"), "w").write("x"))\n'
+                                       't("remove_inside_tempdir", lambda: os.remove(os.path.join(d, "f.txt")))\n'
+                                       f't("outside_still_denied", lambda: open(r"{self.canary}").read())\n')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('mkdtemp_cwd ALLOWED', out)
+        self.assertIn('mkdtemp_temp ALLOWED', out)
+        self.assertIn('write_inside_tempdir ALLOWED', out)
+        self.assertIn('remove_inside_tempdir ALLOWED', out)
+        self.assertIn('outside_still_denied DENIED', out)
+
     def test_a_previous_run_grant_is_useless_to_the_next_run(self):
         first = self.tmp / 'first-run'
         first.mkdir()

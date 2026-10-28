@@ -30,7 +30,21 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 RUNTIME_CAPABILITY = 'axbranchSandboxRuntime'
-RUNTIME_VERSION = 2
+RUNTIME_VERSION = 3
+# Installed into the PRIVATE runtime copy only (never the Owner's Python). Python 3.12 on Windows gives
+# os.mkdir(path, 0o700) - used by tempfile.mkdtemp - a private DACL (SYSTEM, Administrators, owner). It lacks the run's
+# package SID, so the AppContainer cannot use the directory it just created (observed 2026-10-28: a generated web
+# app's self-test hung, then failed with access denied). Inside an isolated run, the run folder is already private
+# to that run, so the inherited ACL is the right boundary.
+SITECUSTOMIZE = """import os
+if os.name == 'nt':
+    _axb_mkdir = os.mkdir
+
+    def mkdir(path, mode=0o777, *, dir_fd=None):
+        return _axb_mkdir(path, 0o777 if mode == 0o700 else mode, dir_fd=dir_fd)
+    mkdir.__doc__ = _axb_mkdir.__doc__
+    os.mkdir = mkdir
+"""
 SKIP = {'test', 'idlelib', 'ensurepip', '__pycache__', 'lib2to3', 'pip'}    # site-packages kept: same imports as before
 
 
@@ -44,7 +58,10 @@ class Manifest:
     network: str = 'none'                           # the only supported value
     child_processes: bool = False
     max_processes: int = 8
-    allow_custom_acl: bool = False                 # native bootloader creates a private extraction DACL
+    # WRITE_DAC on this run's OWN folders only (deleted with the run). Needed by native onefile bootloaders AND by
+    # Python 3.12 tempfile: os.mkdir(path, 0o700) sets a private DACL; without it mkdtemp() retries forever
+    # (observed 2026-10-28: a generated web app's self-test hung in isolation, passed instantly without it).
+    allow_custom_acl: bool = True
     lifetime_seconds: int = 120
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
     backend: str = 'appcontainer'
@@ -212,6 +229,7 @@ def runtime_dir(root=None):
                         ignore=lambda d, names: [n for n in names if n in SKIP or n.endswith('.pyc')])
         (staging / 'pyvenv.cfg').unlink(missing_ok=True)
         grant(staging, _capability_sid(RUNTIME_CAPABILITY)[1], write=False)
+        (staging / 'Lib' / 'sitecustomize.py').write_text(SITECUSTOMIZE, encoding='utf-8')
         (staging / 'READY.json').write_text(json.dumps({'source': str(base), 'version': sys.version,
                                                         'runtime_version': RUNTIME_VERSION}), encoding='utf-8')
         if target.exists():

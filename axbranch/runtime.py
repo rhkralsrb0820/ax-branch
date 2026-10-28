@@ -382,7 +382,7 @@ class Launch:
             manifest = isolation.Manifest(purpose='runtime acceptance', writes=list(self.isolate),
                                           child_processes=self.native,
                                           max_processes=(2 if self.native else 8) + (1 if self.serve and self.native else 0),
-                                          allow_custom_acl=self.native, serve=self.serve)
+                                          allow_custom_acl=True, serve=self.serve)
             self.manifests.append(manifest.record() | {'pending': True})
         proc = sandbox.start(self.argv + list(args), self.cwd, stdin_text, extra_env=self.env, split=split,
                              isolate=manifest)
