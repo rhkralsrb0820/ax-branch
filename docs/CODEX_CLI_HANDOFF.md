@@ -1,4 +1,34 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-28 01:05 KST (stabilization + real work runs)
+## CURRENT CHECKPOINT — Claude, 2026-10-29 00:58 KST (usage checkpoint: 5-hour window 12% left)
+- **Owner server:** 0.1.63-18fbd6d, PID 57684. Not touched.
+- **Codex WIP:** budgets, completion reserve, stage reuse. Interrupted by Codex's limit at 21:35, backed up to
+  `outputs/codex-wip-backup-20261028/`, reviewed and completed in 7a4e4cc.
+- **Commits after 652e7e6:**
+  - 7a4e4cc: task profiles, completion reserve, safe revision reuse, `time_basis=call_seconds`, A/B v3 proposal
+    with `--owner-approved`.
+  - f53ed1e: GUI tests report usage.
+  - 7597373: Korean limit message → `usage_limit`.
+  - 1fd997c: isolated Python tempfile fix (runtime v3 sitecustomize, run-folder WRITE_DAC).
+  - 50aabe2: evidence.
+  - Then docs.
+- **Regression:**
+  - 7a4e4cc: 540/542 (2 GUI contract failures, kept);
+  - f53ed1e: 542/542;
+  - **50aabe2: 543/543**, hashes matched.
+- **Packaged real runs on candidate 0.1.63-f53ed1e** (`docs/evidence/2026-10-28-packaged-work-runs.md`):
+  - product planning: completed, 68,532 tokens;
+  - CSV + revision: completed with research reuse, 123,956 tokens;
+  - web app: server channel worked, but self-test blocked by the tempfile harness defect (fixed after the run),
+    210,948 tokens.
+  - All verification was same-provider (Codex limited).
+- **Candidate 0.1.63-50aabe2 preserved** (`axbranch-builds/`, BUILD.json). No packaged real run on it yet.
+- **Next:**
+  1. After the usage reset (Claude 02:00, Codex 02:29): ONE packaged web-app re-run on 0.1.63-50aabe2
+     (`scratchpad pkg_task.py <exe> webapp <new root>`; profile web_app 250k).
+  2. Push docs.
+  3. Owner: A/B v3 approval.
+- No processes running except the Owner server. No uncommitted changes after this commit.
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-28 01:05 KST (stabilization + real work runs)
 - **Owner server:** 0.1.63-18fbd6d, PID 57684, http://127.0.0.1:8765/ (switched by Codex 2026-10-27 22:56; DB backup in
   `outputs/server-switch/`). Not restarted or replaced by Claude.
 - **dev/web-ui commits this round** (on top of 0e13802):
