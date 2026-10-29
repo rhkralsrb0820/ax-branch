@@ -49,6 +49,8 @@ class App:
         self.lock = threading.Lock()                 # serialises project creation (idempotency)
         self.reports = []                            # test mode: in-browser self-test / perf reports
         self.started = time.time()
+        from .owner_runs import OwnerRuns
+        self.owner_runs = OwnerRuns()                # Owner-opened web/server results (isolated, one per project)
 
     def _open_engine(self):
         from .engine import open_engine
@@ -106,7 +108,8 @@ class App:
                 'document_contract': [e['detail'] for e in store.events(pid, {'department_document_contract'})][-10:],
                 'experience': knowledge.experience_view(store, pid),
                 'recommendations': departments.recommendations(store, pid),
-                'execution_budget': _execution_budget(store, p)}
+                'execution_budget': _execution_budget(store, p),
+                'owner_web_run': self.owner_runs.status(pid)}
 
     def settings(self):
         try:
@@ -344,6 +347,7 @@ def route(app, store, method, path, query, body):
         (app.workspace / 'devroom-notes.json').write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding='utf-8')
         return {'notes': clean}
     if parts == ['shutdown']:
+        app.owner_runs.stop_all()
         threading.Thread(target=app.httpd.shutdown, daemon=True).start()
         return {'ok': True}
     if parts and parts[0] == 'test' and app.test_mode:   # in-browser self-test / perf reports (test server only)
@@ -437,10 +441,15 @@ def project_action(app, store, pid, action, body, channel):
         shown = {}
         engine = app.engine_factory()
         try:
+            mode = ((engine.store.project(pid)['plan'] or {}).get('runtime') or {}).get('mode', 'cli')
+            if mode in ('web', 'server') and engine.result_info(pid)[0] == 'run':
+                return {'how': 'web', **app.owner_runs.start(engine, pid)}
             how, path = engine.open_result(pid, show_text=lambda title, text, p: shown.update(title=title, text=text[:200000]))
         finally:
             engine.store.close()
         return {'how': how, 'path': str(path), **shown}
+    if action == 'result-stop':
+        return app.owner_runs.stop(store, pid, reason='owner')
     raise KeyError('unknown action')
 
 
@@ -483,5 +492,6 @@ def main(port=8765, test_mode=False):
     except KeyboardInterrupt:
         pass
     finally:
+        app.owner_runs.stop_all()
         httpd.server_close()
         (WORKSPACE / 'web-server.json').unlink(missing_ok=True)

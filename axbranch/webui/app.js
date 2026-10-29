@@ -253,7 +253,8 @@
   async function openProject(pid) {
     saveOwnerDraft(); S.navigation++; S.pid = pid; S.project = null; S.stageKey = null;
     $('#owner').hidden = true; $('#owner').dataset.mode = ''; $('#owner').innerHTML = '';
-    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience', 'executionBudget']) $('#' + id).textContent = '';
+    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience', 'executionBudget', 'webRun']) $('#' + id).textContent = '';
+    $('#webRun').hidden = true;
     $('#executionBudget').hidden = true;
     show('project'); await refreshProject(); refreshOverview().catch(() => {});
   }
@@ -268,6 +269,7 @@
     $('#pTitle').textContent = p.title;
     $('#pState').textContent = `${p.id} · ${p.state} · ${p.status} · v${p.iteration}` + (p.pause_reason ? ` · ${p.pause_reason.slice(0, 200)}` : '');
     renderExecutionBudget(p.execution_budget);
+    renderWebRun(p.owner_web_run);
     $('#projectChips').innerHTML = (p.attached.map(d => { const req = d.mode === 'required';
       return `<span class="chip${req ? ' req' : ''}">▣ ${esc(depName(d.id))} v${esc(d.version)}<button class="x mode" data-mode="${esc(d.id)}" data-req="${req}" title="${req ? '필수 해제 (이유 필요, 기록됨)' : '필수로 지정 (다음 계획·실행·수용부터 적용)'}">${req ? '🔒 필수' : '사용 가능'}</button>${req ? '' : `<button class="x" data-detach="${esc(d.id)}" title="해제 (다음 위임부터 적용)">×</button>`}</span>`; }).join('') || '<span class="muted">없음 — 부서를 이 칸으로 끌어 놓거나 부서를 클릭해 [프로젝트에 추가]</span>')
       + (p.state === 'PAUSED' && (p.required_unmet.problems || p.required_unmet.reason) && /required department|quarantined|retired|candidate/.test(p.pause_reason || '')
@@ -382,9 +384,36 @@
     try {
       const r = await api(`project/${pid}/result`, {});
       if ((view === 'project' && pid !== S.pid) || navigation !== S.navigation || S.view !== view || request !== S.resultRequest) return;
-      if (r.text !== undefined) { $('#modalBody').innerHTML = `<h3>${esc(r.title)}</h3><div class="result"><pre>${esc(r.text)}</pre></div>`; $('#modal').showModal(); }
+      if (r.how === 'web') { showWebRun(pid, r); await refreshProject(); }
+      else if (r.text !== undefined) { $('#modalBody').innerHTML = `<h3>${esc(r.title)}</h3><div class="result"><pre>${esc(r.text)}</pre></div>`; $('#modal').showModal(); }
       else notice(`${r.how === 'run' ? '실행함' : '열었음'}: ${r.path} (검증된 버전)`);
     } catch (e) { fail(e); }
+  }
+  // A web result runs isolated on its OWN port (another browser origin): the link opens it in a new tab without a
+  // reference back to this page (noopener noreferrer), so the result's code cannot reach AX Branch's window or token.
+  function webRunLink(r) {
+    return `<a class="primary-link" id="webRunOpen" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">결과 웹앱 열기 (v${esc(r.version)})</a>`;
+  }
+  function showWebRun(pid, r) {
+    $('#modalBody').innerHTML = `<h3>결과 웹앱 실행 중</h3>
+      <p>${webRunLink(r)}</p>
+      <div class="muted">${esc(r.protection || '')}. 다른 프로젝트·사용자 파일·외부 인터넷에 접근할 수 없습니다. 최대 ${Math.round((r.lifetime_seconds || 0) / 3600)}시간 뒤 자동 종료됩니다.
+      닫으면 프로그램이 저장한 자료는 프로젝트의 실행 폴더로 옮겨지고, 다음에 열 때는 검증된 버전에서 새로 시작합니다.</div>
+      <div class="row end"><button class="ghost" id="webRunStop">결과 종료</button></div>`;
+    $('#modal').showModal();
+    $('#webRunStop').onclick = () => stopWebRun(pid);
+  }
+  async function stopWebRun(pid = S.pid) {
+    try { await api(`project/${pid}/result-stop`, {}); notice('결과 웹앱을 종료했습니다. 프로세스와 임시 권한을 정리했습니다.'); $('#modal').close(); if (pid === S.pid) await refreshProject(); }
+    catch (e) { fail(e); }
+  }
+  function renderWebRun(run) {
+    const box = $('#webRun');
+    box.hidden = !(run && run.running);
+    if (!run || !run.running) return;
+    box.innerHTML = `<div class="row"><b>결과 웹앱 실행 중</b><span class="grow"></span>${webRunLink(run)}<button class="ghost" id="webRunStopInline">종료</button></div>`
+      + `<div class="muted">${esc(run.protection || '')}</div>`;
+    $('#webRunStopInline').onclick = () => stopWebRun(S.pid);
   }
   async function finishDialog(pid = S.pid) {
     const navigation = S.navigation;
