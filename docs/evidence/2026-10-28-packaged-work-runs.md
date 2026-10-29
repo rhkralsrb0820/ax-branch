@@ -101,3 +101,25 @@ fell back to Claude.
 - Total: 20 calls, 403,436 tokens.
 - All verification was same-provider (Codex at its limit), labelled, not cross-provider.
 - Not done: a packaged re-run of the web app after the fix (needs a new candidate build).
+
+## 4. Web app re-run on candidate 0.1.63-50aabe2 (after the tempfile fix) — P-20261029-99cea3 → OWNER_REVIEW
+- Build exe sha256 `082c2950dc0376776dc5a2dee018327e2db01abf6ba3e28a0df3ab6e728860aa` (source 50aabe2, 543/543).
+  Root: `outputs/pkg-webapp-50aabe2/`.
+- Codex availability was checked once before the run: 11,439 tokens (outside the project budget).
+- 6 calls, **152,819 / 250,000 tokens**, 378 s:
+
+  | # | Role | Provider | Tokens |
+  |---|---|---|---|
+  | 1 | CEO plan | claude | 17,550 |
+  | 2 | developer | claude | 26,882 |
+  | 3 | verification | **codex** | 29,991 (FAIL) |
+  | 4 | developer | claude | 32,296 |
+  | 5 | verification | **codex** | 30,175 (PASS) |
+  | 6 | CEO acceptance | claude | 15,925 |
+
+- **Cross-provider verification**: producer claude, verifier codex; no fallback.
+- **Isolation:** self-test and server/web Runtime Acceptance ran inside per-run AppContainers through the server
+  channel, and passed.
+- **Rework 1, content:** signed integer quantities were discarded instead of shown as low stock. Fixed in v2.
+  This was not a harness failure.
+- One run, no retry. Not driven through the web page; the Owner has not confirmed it.

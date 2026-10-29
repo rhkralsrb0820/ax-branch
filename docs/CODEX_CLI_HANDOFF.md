@@ -21,11 +21,12 @@
     210,948 tokens.
   - All verification was same-provider (Codex limited).
 - **Candidate 0.1.63-50aabe2 preserved** (`axbranch-builds/`, BUILD.json). No packaged real run on it yet.
+- **Web-app re-run done (2026-10-29 19:3x)** on 0.1.63-50aabe2: P-20261029-99cea3 → OWNER_REVIEW.
+  - 152,819 tokens; Codex verifier (cross-provider); isolated self-test and server channel passed.
 - **Next:**
-  1. After the usage reset (Claude 02:00, Codex 02:29): ONE packaged web-app re-run on 0.1.63-50aabe2
-     (`scratchpad pkg_task.py <exe> webapp <new root>`; profile web_app 250k).
-  2. Push docs.
-  3. Owner: A/B v3 approval.
+  1. Owner: A/B v3 approval.
+  2. Optional dev: drive the same three paths through the packaged web page (headless, separate profile).
+  3. Owner-run of web results (still blocked).
 - No processes running except the Owner server. No uncommitted changes after this commit.
 
 ## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-28 01:05 KST (stabilization + real work runs)
