@@ -1,4 +1,17 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-29 22:00 KST (Owner data persistence; full regression interrupted)
+## CURRENT CHECKPOINT — Claude, 2026-10-29 23:25 KST
+- Owner server unchanged: 0.1.63-50aabe2.
+- **2f4cdc5:** the Owner-data contract is carried from the CEO plan (`runtime.data`) to the producer, executed in
+  verification (write/read/save/restore/read) and enforced by the runner. Evidence:
+  `docs/evidence/2026-10-29-owner-data-contract.md`.
+- **Full regression 565/565 on 2f4cdc5** (the earlier d6f5b9c run was reaped by memory pressure; superseded).
+- **Candidate 0.1.63-2f4cdc5 preserved:** packaged web-page data flow 18/18 with the fixed developer test app; no model
+  call.
+- **Not done:**
+  - a real-model run proving the CEO/producer write and implement the contract (needs an Owner decision);
+  - applying this to the Owner server;
+  - A/B (on hold).
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-29 22:00 KST (Owner data persistence; full regression interrupted)
 - Owner server unchanged: 0.1.63-50aabe2 (PID 65848).
 - **Implemented (dev source):**
   - 6584135: `axbranch/userdata.py` data contract and snapshots; `owner_runs.py` restore / periodic save / save
