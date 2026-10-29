@@ -1,4 +1,27 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-29 21:10 KST
+## CURRENT CHECKPOINT — Claude, 2026-10-29 22:00 KST (Owner data persistence; full regression interrupted)
+- Owner server unchanged: 0.1.63-50aabe2 (PID 65848).
+- **Implemented (dev source):**
+  - 6584135: `axbranch/userdata.py` data contract and snapshots; `owner_runs.py` restore / periodic save / save
+    now / stop save, compatibility check with choices, port retry / announced port / reserved port; web UI.
+  - d6f5b9c: packaged-web harness `tests/browser_owner_data_e2e.py` and the selftest `owner-data` mode; a stale
+    result link fixed; devroom feature table; data rule for generated apps.
+  - Fixed test app: `tests/fixtures/owner_data_app` (developer fixture from generated P-20261029-99cea3; not
+    AI-produced).
+- **Tests:**
+  - focused: owner_data 10, owner_web_run 3, web, reserved_port, isolation, browser selftest 31/31 — all pass;
+  - source-server dry run of the packaged-web harness: 18/18 checks
+    (open → enter → save → stop → reopen/restore → revised v2 keeps data → incompatible v3 choices → previous
+    version → periodic save → killed AX Branch → restart restores).
+- **Interrupted:** the full single-process regression on d6f5b9c was reaped by Claude Code under system memory
+  pressure (≈194 tests in, no failure seen, no orphan process left; 3.6 GB free afterwards). Not restarted, per the
+  rule.
+- **Next commands (when memory allows / Owner asks):**
+  1. Full regression on d6f5b9c (single process).
+  2. `python -X utf8 build_exe.py --output-dir C:/Users/HP/Documents/Codex/axbranch-builds/0.1.63-<commit>`.
+  3. `python -X utf8 tests/browser_owner_data_e2e.py <exe> <out.json>`.
+  4. Update the devroom `candidate_build` and the features' location.
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-29 21:10 KST
 - **Owner server switched (Owner-approved)** to `0.1.63-50aabe2`, PID 65848, `demo-2026-11/workspace`, port 8765.
   Backup and rollback: `outputs/server-switch/switch-20261029-193311.json`.
 - **New:** open, use and stop web/server results in AX Branch (`axbranch/owner_runs.py`, b04ee15): isolated,
