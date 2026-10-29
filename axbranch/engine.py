@@ -110,11 +110,15 @@ not permission to invent a precedent. Accumulation, retrieval and adoption are n
 EXEC_CONTRACT = ("The engine runs `python <file> --self-test` with empty stdin in an empty temp dir; that "
                  "invocation must run the full self-test and exit 0 only if it passes. Running `python <file>` "
                  "with NO arguments is the Owner's normal launch (a double-click on Windows) and must start the "
-                 "primary user experience, never the self-test.")
+                 "primary user experience, never the self-test. A web/server program never defaults to port 8765 "
+                 "(AX Branch itself listens there on the Owner's PC); if its default port is busy it picks a free "
+                 "port and prints the actual URL.")
 RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the engine executes it at verification
   (Runtime Acceptance) and the artifact cannot PASS unless every probe holds.
   owner_launch = plain instructions for the Owner (e.g. 'double-click app.py; the browser opens
-  http://127.0.0.1:8050'). mode: web for anything with a page or dashboard, gui for a desktop window,
+  http://127.0.0.1:8050'). Port 8765 is RESERVED: AX Branch itself listens on 127.0.0.1:8765 on the Owner's PC, so a
+  program must never default to it; when its default port is busy it picks a free port and prints the real URL.
+  mode: web for anything with a page or dashboard, gui for a desktop window,
   cli for terminal tools, none only for documents or pure libraries. If the goal is vague about the
   interface ('make a program'), choose what a non-technical Owner can use by double-clicking.
   cli: probes run `python <file> *args` with stdin; expect_exit (-1 = any) and expect_contains.

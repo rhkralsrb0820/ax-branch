@@ -309,6 +309,9 @@ def _contains(text, needles):
 # server/web: the program stays in its AppContainer; the verifier reaches it only through the per-run channel
 # (isolation.ServerChannel). No Windows loopback exemption is used or configured.
 ISOLATED_MODES = ('cli', 'gui', 'server', 'web')
+# AX Branch's own web UI listens here on the Owner's PC (python -m axbranch web, AXBranch.exe web). A delivered program
+# that defaults to it can never start on that PC (2026-10-29 packaged E2E P-20261029-d466df: three rounds failed on it).
+RESERVED_PORTS = {8765: 'AX Branch itself (the Owner\'s workspace UI)'}
 
 
 def check(spec, entry_path, python, cwd, on_step=None, executable=None, isolate=False):
@@ -620,6 +623,11 @@ def _exact_owner_launch(base, spec):
     try:
         hinted = _URL.search(spec.get('owner_launch', ''))
         port = _announced(proc, hinted)
+        if port in RESERVED_PORTS:
+            step.update(ok=False, port=port, output_tail=proc.output()[-800:], problems=[
+                f'default port {port} is reserved on the Owner\'s PC for {RESERVED_PORTS[port]}: use another default '
+                'port, and when the default is busy pick a free port and print the actual URL'])
+            return step
         if port is None:
             step.update(ok=False, problems=['process exited before serving' if not proc.alive()
                                             else 'no local URL announced and none in the Owner instructions'],

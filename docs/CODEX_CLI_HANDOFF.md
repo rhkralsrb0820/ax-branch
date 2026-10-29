@@ -1,4 +1,22 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-29 00:58 KST (usage checkpoint: 5-hour window 12% left)
+## CURRENT CHECKPOINT — Claude, 2026-10-29 21:10 KST
+- **Owner server switched (Owner-approved)** to `0.1.63-50aabe2`, PID 65848, `demo-2026-11/workspace`, port 8765.
+  Backup and rollback: `outputs/server-switch/switch-20261029-193311.json`.
+- **New:** open, use and stop web/server results in AX Branch (`axbranch/owner_runs.py`, b04ee15): isolated,
+  separate origin, cleaned on stop/exit/lifetime. Real-backend tests in `tests/test_owner_web_run.py`.
+  NOT applied to the Owner server.
+- **Packaged web E2E (`--webapp --text-rework`) on candidate 0.1.63-3b3337c (546/546): FAILED** before Owner review.
+  - Cause: the generated app defaulted to port 8765, which is the Owner's AX Branch.
+  - Fixed in source: `runtime.RESERVED_PORTS`, plus CEO/producer rules; `tests/test_reserved_port.py`.
+  - Usage: 225,352 + precheck 11,505 = 236,857 tokens.
+  - Evidence: `docs/evidence/2026-10-29-owner-web-run-and-web-e2e.md`.
+- **Next (Owner decisions):**
+  1. One more real web-page E2E on a new candidate built from the fixed source (new 250k project budget).
+  2. Whether to apply the web-result runner to the Owner server.
+  3. A/B stays on hold.
+- Focused tests after the fix: runtime + engine + reserved_port + owner_web_run 139/139. The full regression on
+  the fixed commit has NOT been run yet.
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-29 00:58 KST (usage checkpoint: 5-hour window 12% left)
 - **Owner server:** 0.1.63-18fbd6d, PID 57684. Not touched.
 - **Codex WIP:** budgets, completion reserve, stage reuse. Interrupted by Codex's limit at 21:35, backed up to
   `outputs/codex-wip-backup-20261028/`, reviewed and completed in 7a4e4cc.
