@@ -68,8 +68,15 @@ def parse_headers(lines):
     if len(out) > MAX_HEADERS:
         raise ValueError(f'more than {MAX_HEADERS} headers')
     return out
+# Owner data of a web program (the CEO decides whether it is needed). AX Branch's runner keeps exactly ./data/ in the
+# supported formats between runs and versions (userdata.py); verification writes a unique marker through `write`,
+# reads it back through `read`, saves ./data/ the way the runner does, restores it into a fresh copy and reads it again.
+DATA = _obj(needed={'type': 'boolean'}, formats=_ARR(STR), schema_version=INT, compatible_from=INT,
+            write=_obj(http_method=STR, http_path=STR, http_body=STR, http_headers=_ARR(STR)),
+            read=_obj(http_path=STR, expect_contains=_ARR(STR)))
 SPEC = _obj(mode={'type': 'string', 'enum': ['none', 'cli', 'web', 'gui']}, owner_launch=STR,
-            launch_args=_ARR(STR), probes=_ARR(PROBE))
+            launch_args=_ARR(STR), probes=_ARR(PROBE), data=DATA)
+NO_DATA = {'needed': False}
 
 # Plans made before 0.1.8 carry no spec: judge them by the Owner's realistic launch (double-click).
 DEFAULT = {'mode': 'cli', 'owner_launch': 'double-click the file (python <file>, no arguments)',
@@ -285,7 +292,40 @@ def normalize(spec):
             notes.append(f'RESTART probes {dropped} dropped: only a web server is restarted within one check')
         spec['probes'] = [p for p in spec.get('probes', []) if p.get('http_method') != 'RESTART']
     spec['probes'] = [canonical_probe(p) for p in spec.get('probes', [])]
-    return spec, notes
+    spec['data'], data_notes = normalize_data(spec.get('data'), spec.get('mode'))
+    return spec, notes + data_notes
+
+
+def normalize_data(data, mode):
+    """The Owner-data contract as the runner can honour it. Absent (older plans) = not declared: nothing is restored
+    or saved by guesswork. A declared contract that cannot be checked stays declared but marked invalid, so
+    verification fails instead of passing on the declaration."""
+    from . import userdata
+    if not isinstance(data, dict) or not data.get('needed'):
+        return dict(NO_DATA), []
+    notes = []
+    if mode != 'web':
+        return dict(NO_DATA), [f'data contract dropped: Owner data is kept only for web programs (mode {mode!r})']
+    formats = sorted({str(f).lower() if str(f).startswith('.') else '.' + str(f).lower()
+                      for f in data.get('formats', [])} & set(userdata.FORMATS)) or ['.json']
+    version = data.get('schema_version') if isinstance(data.get('schema_version'), int) and data['schema_version'] >= 1 else 1
+    since = data.get('compatible_from') if isinstance(data.get('compatible_from'), int) else version
+    since = min(max(1, since), version)
+    write, read = dict(data.get('write') or {}), dict(data.get('read') or {})
+    problems = []
+    if (write.get('http_method') or '').upper() not in ('POST', 'PUT', 'PATCH') or not str(write.get('http_path', '')).startswith('/'):
+        problems.append('data.write needs POST/PUT/PATCH and a path')
+    if '{marker}' not in (write.get('http_body') or '') + (write.get('http_path') or ''):
+        problems.append('data.write must carry {marker}')
+    if not str(read.get('http_path', '')).startswith('/') or '{marker}' not in ' '.join(read.get('expect_contains') or []):
+        problems.append('data.read needs a path and must expect {marker}')
+    out = {'needed': True, 'dir': userdata.DATA_DIR, 'formats': formats, 'schema_version': version,
+           'compatible_from': since, 'write': {**write, 'http_method': (write.get('http_method') or '').upper()},
+           'read': {'http_path': read.get('http_path', ''), 'expect_contains': list(read.get('expect_contains') or [])}}
+    if problems:
+        out['invalid'] = problems
+        notes.append('data contract incomplete: ' + '; '.join(problems))
+    return out, notes
 
 
 def free_port():
@@ -468,6 +508,8 @@ def _check(spec, mode, base, cwd, ev, on_step):
     pristine, home = Path(tempfile.mkdtemp(prefix='axb-owner-')), None
     try:
         shutil.copytree(base.cwd, pristine / 'app')
+        if (spec.get('data') or {}).get('needed'):
+            shutil.copytree(base.cwd, pristine / 'data-fresh')      # the program as built, before any launch wrote data
         owner = base.at(str(pristine / 'app'))
         if any(p.get('http_method') == 'RESTART' for p in spec.get('probes', [])):
             # The clean environment gives each process its own temp HOME/USERPROFILE; data a program keeps in the
@@ -481,6 +523,11 @@ def _check(spec, mode, base, cwd, ev, on_step):
                           [*base.isolate, str(home)] if base.isolate else base.isolate)
             base.serve = owner.serve
         _launches(spec, mode, base, owner, ev, on_step)
+        if (spec.get('data') or {}).get('needed'):
+            ev['steps'].extend(_data_roundtrip(spec, base, pristine))
+            ev['ok'] = all(s.get('ok') for s in ev['steps'])
+            if on_step:
+                on_step('runtime: Owner data round trip')
     finally:
         shutil.rmtree(pristine, ignore_errors=True)
         if home is not None:
@@ -701,6 +748,62 @@ def _second_launch(base, busy_port, hinted):
     finally:
         proc.stop()
         proc.cleanup()
+
+
+def _data_roundtrip(spec, base, pristine):
+    """The Owner-data contract, executed: write a unique marker, read it back, save ./data/ exactly as the runner does
+    (userdata.snapshot with the declared formats), restore it into a fresh copy of the program, read it again. A
+    declaration alone never passes."""
+    import uuid
+    from . import userdata
+    data = spec['data']
+    if data.get('invalid'):
+        return [{'name': 'data: contract', 'ok': False, 'problems': list(data['invalid'])}]
+    marker = 'axb-' + uuid.uuid4().hex[:10]
+    sub = lambda s: str(s).replace('{marker}', marker)
+    write = canonical_probe({'name': 'data: write marker', 'http_method': data['write']['http_method'],
+                             'http_path': sub(data['write']['http_path']), 'http_body': sub(data['write'].get('http_body', '')),
+                             'http_headers': [sub(h) for h in data['write'].get('http_headers', [])], 'expect_status': 0})
+    read = canonical_probe({'name': 'data: read marker', 'http_method': 'GET', 'http_path': sub(data['read']['http_path']),
+                            'expect_status': 0, 'expect_contains': [sub(x) for x in data['read']['expect_contains']]})
+
+    def run_once(folder, probes):
+        port = free_port()
+        proc = base.at(str(folder)).start([a.replace('{port}', str(port)) for a in spec.get('launch_args', [])])
+        try:
+            up, _ = _wait_port(proc, port)
+            if not up:
+                return [{'name': 'start', 'ok': False, 'problems': [f'port {port} not listening'], 'output_tail': proc.output()[-600:]}]
+            return [_http(proc.reach(port), pr) for pr in probes]
+        finally:
+            proc.stop()
+            proc.cleanup()
+
+    first, second, store = pristine / 'data-run1', pristine / 'data-run2', pristine / 'data-store'
+    shutil.copytree(pristine / 'data-fresh', first)
+    steps = run_once(first, [write, read])
+    one = {'name': 'data: first run (no saved data) writes and reads back a marker', 'ok': all(s.get('ok') for s in steps),
+           'problems': [f"{s.get('name')}: {p}" for s in steps for p in s.get('problems', [])], 'marker': marker}
+    if not one['ok']:
+        return [one]
+    contract = {'formats': data['formats'], 'schema_version': data['schema_version']}
+    try:
+        snap = userdata.snapshot(store, first, {'iteration': 0, 'sha256': 'verification'}, 'verification', contract=contract)
+    except userdata.SaveFailed as e:
+        snap, why = None, str(e)
+    else:
+        why = 'nothing under ./data/ in a declared format ' + str(data['formats'])
+    if not snap or not snap['files']:
+        skipped = (userdata.collect(first, data['formats'])[1])[:5]
+        return [one, {'name': 'data: kept under ./data/ by the runner', 'ok': False, 'problems': [why, *skipped]}]
+    kept = {'name': 'data: kept under ./data/ by the runner', 'ok': True, 'files': [f['path'] for f in snap['files']]}
+    shutil.copytree(pristine / 'data-fresh', second)
+    shutil.rmtree(second / userdata.DATA_DIR, ignore_errors=True)
+    userdata.restore(snap, second)
+    steps = run_once(second, [read])
+    again = {'name': 'data: restored into a fresh copy and read back after restart', 'ok': all(s.get('ok') for s in steps),
+             'problems': [f"{s.get('name')}: {p}" for s in steps for p in s.get('problems', [])]}
+    return [one, kept, again]
 
 
 def _wait_port(proc, port):

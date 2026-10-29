@@ -24,7 +24,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 CHROME = Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe')
 FIXTURE = Path(__file__).parent / 'fixtures' / 'owner_data_app'
-SPEC = {'mode': 'web', 'owner_launch': 'double-click inventory_app.py', 'launch_args': ['--port', '{port}'], 'probes': []}
+DATA = {'needed': True, 'formats': ['.json'], 'schema_version': 1, 'compatible_from': 1,
+        'write': {'http_method': 'POST', 'http_path': '/update', 'http_body': 'item={marker}&qty=3',
+                  'http_headers': ['Content-Type: application/x-www-form-urlencoded']},
+        'read': {'http_path': '/', 'expect_contains': ['{marker}']}}
+SPEC = {'mode': 'web', 'owner_launch': 'double-click inventory_app.py', 'launch_args': ['--port', '{port}'], 'probes': [],
+        'data': DATA}
 
 
 def seed(root):
@@ -53,6 +58,10 @@ def add_version(store, ws, pid, fixture):
     path = folder / 'inventory_app.py'
     shutil.copyfile(FIXTURE / fixture, path)
     store.update(pid, iteration=it)
+    if fixture.startswith('v3'):                     # the incompatible revision declares the data format it requires
+        plan = store.project(pid)['plan']
+        plan['runtime'] = {**SPEC, 'data': {**DATA, 'schema_version': 3, 'compatible_from': 3}}
+        store.update(pid, plan=plan)
     aid = store.add_artifact(pid, it, path, hashlib.sha256(path.read_bytes()).hexdigest(), 'python', None)
     store.add_verification(pid, aid, it, 'PASS', {'verdict': 'PASS', 'findings': [], 'note': 'fixed test version'},
                            {'ok': True}, 'fixture')

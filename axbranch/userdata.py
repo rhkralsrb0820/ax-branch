@@ -46,8 +46,10 @@ def _sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def collect(run_dir):
-    """(files [(relative path, kind)], skipped [reasons]) of the data contract in a run folder."""
+def collect(run_dir, formats=None):
+    """(files [(relative path, kind)], skipped [reasons]) of the data contract in a run folder. formats: the
+    project's declared subset of FORMATS (the runner never widens it)."""
+    allowed = {f: k for f, k in FORMATS.items() if formats is None or f in formats}
     base = Path(run_dir) / DATA_DIR
     files, skipped = [], []
     if not base.is_dir() or base.is_symlink():
@@ -61,7 +63,7 @@ def collect(run_dir):
         for name in names:
             p = Path(folder) / name
             rel = p.relative_to(run_dir).as_posix()
-            kind = FORMATS.get(p.suffix.lower())
+            kind = allowed.get(p.suffix.lower())
             if p.is_symlink() or getattr(p.lstat(), 'st_file_attributes', 0) & 0x400:
                 skipped.append(f'{rel}: link')
             elif name.lower().endswith(('-wal', '-shm', '-journal')):
@@ -134,10 +136,10 @@ def _intact(folder):
     return manifest
 
 
-def snapshot(project_dir, run_dir, code_version, reason, only_if_changed=False):
+def snapshot(project_dir, run_dir, code_version, reason, only_if_changed=False, contract=None):
     """Save the run's contract data as a new snapshot. Returns its manifest, or None when there is nothing to save
     (no ./data folder, or unchanged with only_if_changed). Raises SaveFailed (previous snapshot untouched)."""
-    files, skipped = collect(run_dir)
+    files, skipped = collect(run_dir, (contract or {}).get('formats'))
     if not (Path(run_dir) / DATA_DIR).is_dir():
         return None
     if len(files) > MAX_FILES:
@@ -162,7 +164,8 @@ def snapshot(project_dir, run_dir, code_version, reason, only_if_changed=False):
         manifest = {'snapshot': f'{seq:06d}', 'data_version': seq, 'saved_at': time.strftime('%Y-%m-%d %H:%M:%S'),
                     'saved_epoch': time.time(), 'reason': reason, 'code_version': code_version, 'files': entries,
                     'skipped': skipped, 'previous': last and last['snapshot'],
-                    'contract': {'dir': DATA_DIR, 'formats': sorted(FORMATS)}}
+                    'contract': {'dir': DATA_DIR, 'formats': sorted((contract or {}).get('formats') or FORMATS)},
+                    'data_schema': (contract or {}).get('schema_version')}
         (staging / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding='utf-8')
         final = base / 'snapshots' / manifest['snapshot']
         os.replace(staging, final)

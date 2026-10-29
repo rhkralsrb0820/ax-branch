@@ -50,12 +50,21 @@ class OwnerRuns:
             if run:
                 return self._view(run, reused=True)
             project_dir = engine.workspace / 'projects' / pid
-            snap = None if choice == 'empty' else userdata.current(project_dir)
+            contract = data_contract(engine.store.project(pid))
+            snap = None if choice == 'empty' or contract is None else userdata.current(project_dir)
             artifact = _choose_artifact(engine, pid, snap if choice == 'previous' else None)
-            run = _launch(engine, pid, artifact, snap)
-            if snap and snap['code_version'].get('sha256') != artifact['sha256'] and not _serves(run):
-                _kill(run)
-                why = (f"이 결과 버전(v{artifact['iteration']})이 마지막 저장 데이터(v{snap['code_version'].get('iteration')}에서 "
+            other_code = snap and snap['code_version'].get('sha256') != artifact['sha256']
+            schema = snap.get('data_schema') if snap else None
+            declared_incompatible = bool(other_code and isinstance(schema, int) and
+                                         not contract['compatible_from'] <= schema <= contract['schema_version'])
+            run = None if declared_incompatible else _launch(engine, pid, artifact, snap, contract)
+            if other_code and (declared_incompatible or not _serves(run)):
+                if run:
+                    _kill(run)
+                why = (f"이 결과 버전(v{artifact['iteration']})은 데이터 형식 {contract['compatible_from']}~{contract['schema_version']}만 "
+                       f"읽을 수 있는데, 마지막 저장 데이터는 형식 {schema}입니다(v{snap['code_version'].get('iteration')}, {snap['saved_at']})."
+                       if declared_incompatible else
+                       f"이 결과 버전(v{artifact['iteration']})이 마지막 저장 데이터(v{snap['code_version'].get('iteration')}에서 "
                        f"{snap['saved_at']} 저장)로 시작하지 못했습니다.")
                 engine.store.event(pid, 'owner_web_data_incompatible', version=artifact['iteration'],
                                    snapshot=snap['snapshot'], snapshot_code=snap['code_version'], reason=why)
@@ -63,6 +72,9 @@ class OwnerRuns:
                         'options': [{'choice': 'previous', 'label': f"이전 버전 v{snap['code_version'].get('iteration')}로 데이터와 함께 열기"},
                                     {'choice': 'empty', 'label': f"새 버전 v{artifact['iteration']}을 빈 데이터로 열기 (저장된 데이터는 그대로 보존)"}]}
             run['choice'] = choice
+            if choice == 'previous' and run['contract'] and isinstance(schema, int):
+                # The previous version writes ITS data format, not the latest plan's: keep the restored schema.
+                run['contract'] = {**run['contract'], 'schema_version': schema}
             self.runs[pid] = run
             engine.store.event(pid, 'owner_web_run_start', version=run['version'], url=run['url'], run_id=run['run_id'],
                                artifact_sha256=run['code_version']['sha256'], isolation=run['manifest'], choice=choice,
@@ -120,10 +132,15 @@ class OwnerRuns:
             store.close()
 
     def _save(self, pid, run, reason, only_if_changed):
+        if run['contract'] is None:            # no declared data contract: nothing is kept by guesswork
+            if not only_if_changed:
+                raise Rejected('이 결과에는 데이터 저장 명세가 없어 저장하지 않습니다. 같은 프로젝트에 "입력한 데이터를 저장하게 해 달라"고 '
+                               '수정 요청을 보내면 저장·복원되는 버전이 만들어집니다.')
+            return None
         with run['save_lock']:
             try:
                 snap = userdata.snapshot(run['project_dir'], run['cwd'], run['code_version'], reason,
-                                         only_if_changed=only_if_changed)
+                                         only_if_changed=only_if_changed, contract=run['contract'])
             except userdata.SaveFailed as e:
                 run['save_error'] = {'at': time.strftime('%Y-%m-%d %H:%M:%S'), 'reason': str(e)[:300]}
                 self._event(pid, 'owner_data_save_failed', run_id=run['run_id'], reason=str(e)[:500], trigger=reason,
@@ -168,12 +185,21 @@ class OwnerRuns:
     @staticmethod
     def _view(run, reused):
         return {'running': True, 'url': run['url'], 'version': run['version'], 'started': run['started'],
+                'data_kept': run['contract'] is not None,
                 'lifetime_seconds': LIFETIME, 'reused': reused, 'choice': run.get('choice'),
                 'restored': run['restored'] and {k: run['restored'][k] for k in ('snapshot', 'saved_at', 'data_version')}
                 | {'code_iteration': run['restored']['code_version'].get('iteration'), 'files': len(run['restored']['files'])},
                 'last_saved': run.get('last_saved'), 'save_error': run.get('save_error'),
                 'save_interval_seconds': userdata.SAVE_INTERVAL,
                 'protection': 'AppContainer · 네트워크 차단 · 실행 전용 폴더만 접근 · 별도 출처(포트)'}
+
+
+def data_contract(project):
+    """The project's declared Owner-data contract (plan runtime.data, normalized), or None: an older plan without
+    one is never restored or saved by guesswork."""
+    spec, _ = runtime.normalize((project['plan'] or {}).get('runtime'))
+    data = spec.get('data') or {}
+    return data if data.get('needed') and not data.get('invalid') else None
 
 
 def _choose_artifact(engine, pid, snap):
@@ -187,7 +213,7 @@ def _choose_artifact(engine, pid, snap):
     raise Rejected('저장 데이터를 만든 이전 버전을 찾지 못했습니다(검증된 버전이 아니거나 삭제됨). 새 버전을 빈 데이터로 여세요.')
 
 
-def _launch(engine, pid, artifact, snap):
+def _launch(engine, pid, artifact, snap, contract=None):
     project = engine.store.project(pid)
     plan = project['plan'] or {}
     spec = plan.get('runtime') or {}
@@ -241,7 +267,8 @@ def _launch(engine, pid, artifact, snap):
                     'code_version': {'iteration': artifact['iteration'], 'sha256': artifact['sha256'], 'artifact': artifact['id']},
                     'manifest': manifest.record(), 'children': exe is not None, 'restored': snap and dict(snap),
                     'restored_files': restored, 'project_dir': engine.workspace / 'projects' / pid,
-                    'save_lock': threading.Lock(), 'stopped': threading.Event(), 'last_saved': None, 'save_error': None}
+                    'save_lock': threading.Lock(), 'stopped': threading.Event(), 'last_saved': None, 'save_error': None,
+                    'contract': contract}
         last_output = proc.output()[-600:]
         proc.stop()
         proc.cleanup()

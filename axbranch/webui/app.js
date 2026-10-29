@@ -403,13 +403,17 @@
     const restored = r.restored
       ? `이번 실행은 ${esc(r.restored.saved_at)}에 저장한 데이터(v${esc(r.restored.code_iteration)}, 파일 ${esc(r.restored.files)}개)를 복원해 시작했습니다.`
       : (r.choice === 'empty' ? '빈 데이터로 시작했습니다(저장된 데이터는 그대로 보존).' : '복원할 저장 데이터가 없어 처음 상태로 시작했습니다.');
+    if (r.data_kept === false) return `<div class="kv">사용 중인 결과: <b>v${esc(r.version)}</b></div>
+      <div class="kv" role="status">이 결과에는 데이터 저장 명세가 없어, 입력한 데이터는 종료하면 남지 않습니다. 같은 프로젝트에 "입력한 데이터가 다음에도 남게 해 달라"고 수정 요청을 보내면 저장·복원되는 버전이 만들어집니다.</div>
+      <div class="muted">${esc(r.protection || '')}.</div>`;
     return `<div class="kv">사용 중인 결과: <b>v${esc(r.version)}</b>${r.choice === 'previous' ? ' (이전 버전을 선택해 실행)' : ''}</div>
       <div class="kv">${restored}</div>
       <div class="kv">${savedText(r.last_saved)} · 실행 중에는 ${Math.round((r.save_interval_seconds || 60))}초마다 바뀐 데이터를 자동 저장합니다.</div>
       ${r.save_error ? `<div class="kv" role="alert">저장 실패(${esc(r.save_error.at)}): ${esc(r.save_error.reason)} — 마지막 정상 데이터는 그대로입니다. 프로그램에서 저장을 마친 뒤 [지금 저장]을 다시 누르세요.</div>` : ''}
       <div class="muted">${esc(r.protection || '')}. 다른 프로젝트·사용자 파일·인터넷에 접근할 수 없습니다. 최대 ${Math.round((r.lifetime_seconds || 0) / 3600)}시간 뒤 저장 후 자동 종료됩니다.</div>`;
   }
-  function webRunButtons(pid) {
+  function webRunButtons(pid, r) {
+    if (r && r.data_kept === false) return `<button class="ghost" data-webrun="stop" data-pid="${esc(pid)}">종료</button>`;
     return `<button class="ghost" data-webrun="save" data-pid="${esc(pid)}">지금 저장</button><button class="ghost" data-webrun="stop" data-pid="${esc(pid)}">저장하고 종료</button>`;
   }
   function bindWebRun(scope) {
@@ -428,7 +432,7 @@
   function showWebRun(pid, r) {
     if (r.incompatible) return showIncompatible(pid, r);
     $('#modalBody').innerHTML = `<h3>결과 웹앱 실행 중</h3><p>${webRunLink(r, 'webRunOpen')}</p>${webRunDetails(r)}
-      <div class="row end">${webRunButtons(pid)}</div>`;
+      <div class="row end">${webRunButtons(pid, r)}</div>`;
     $('#modal').showModal();
     bindWebRun($('#modalBody'));
   }
@@ -450,7 +454,7 @@
     box.hidden = !run || (!run.running && !run.last_saved);
     if (box.hidden) return;
     box.innerHTML = run.running
-      ? `<div class="row"><b>결과 웹앱 실행 중</b><span class="grow"></span>${webRunLink(run)}</div>${webRunDetails(run)}<div class="row end">${webRunButtons(pid)}</div>`
+      ? `<div class="row"><b>결과 웹앱 실행 중</b><span class="grow"></span>${webRunLink(run)}</div>${webRunDetails(run)}<div class="row end">${webRunButtons(pid, run)}</div>`
       : `<div class="row"><b>결과 웹앱 · 꺼져 있음</b></div><div class="kv">${savedText(run.last_saved)} [결과 보기]를 누르면 이 데이터를 복원해 다시 엽니다.</div>`;
     bindWebRun(box);
   }

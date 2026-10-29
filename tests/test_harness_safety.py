@@ -83,7 +83,17 @@ class PreservationTests(unittest.TestCase):
 
     def test_strategy_cannot_change_mode_or_launch_contract(self):
         kept, _ = E.preserve_runtime(SPEC, {**SPEC, 'mode': 'none', 'launch_args': ['--self-test']})
-        self.assertEqual(kept, SPEC)
+        self.assertEqual(kept, {**SPEC, 'data': {'needed': False}})        # normalized: no data contract declared
+
+    def test_strategy_cannot_drop_or_change_a_data_contract(self):
+        data = {'needed': True, 'formats': ['.json'], 'schema_version': 1, 'compatible_from': 1,
+                'write': {'http_method': 'POST', 'http_path': '/save', 'http_body': '{marker}', 'http_headers': []},
+                'read': {'http_path': '/', 'expect_contains': ['{marker}']}}
+        web = {'mode': 'web', 'owner_launch': 'x', 'launch_args': ['--port', '{port}', '--no-browser'], 'probes': [],
+               'data': data}
+        kept, notes = E.preserve_runtime(web, {**web, 'data': {'needed': False}})
+        self.assertTrue(kept['data']['needed'])
+        self.assertIn('kept runtime data', notes)
 
     def test_cli_crash_uses_exit_and_stderr_when_explicit_exit_assertion_fails(self):
         base = mock.Mock()

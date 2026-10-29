@@ -112,15 +112,27 @@ EXEC_CONTRACT = ("The engine runs `python <file> --self-test` with empty stdin i
                  "with NO arguments is the Owner's normal launch (a double-click on Windows) and must start the "
                  "primary user experience, never the self-test. A web/server program never defaults to port 8765 "
                  "(AX Branch itself listens there on the Owner's PC); if its default port is busy it picks a free "
-                 "port and prints the actual URL. Data the Owner enters is stored under ./data/ (JSON, CSV/TXT or "
-                 "SQLite); only that folder is kept between runs.")
+                 "port and prints the actual URL. If runtime.data.needed: store Owner data ONLY under ./data/ next to "
+                 "the program, in the declared formats, written atomically (temp file + replace); the first run with no "
+                 "./data/ must work; at start, load what ./data/ already holds; implement runtime.data.write and "
+                 "runtime.data.read exactly (the read page shows the stored value); never put code, executables or "
+                 "secrets in ./data/; a failed save must be shown to the Owner (and return an error), never ignored.")
 RUNTIME_RULES = """- runtime: how the Owner will REALLY use the deliverable; the engine executes it at verification
   (Runtime Acceptance) and the artifact cannot PASS unless every probe holds.
   owner_launch = plain instructions for the Owner (e.g. 'double-click app.py; the browser opens
   http://127.0.0.1:8050'). Port 8765 is RESERVED: AX Branch itself listens on 127.0.0.1:8765 on the Owner's PC, so a
   program must never default to it; when its default port is busy it picks a free port and prints the real URL.
-  Data the Owner enters in a web/server program is kept under ./data/ next to the program as JSON, CSV/TXT or SQLite:
-  AX Branch saves and restores exactly that folder between runs and versions (anything else starts fresh).
+  runtime.data (Owner data of a web program): decide whether the Owner will ENTER or CHANGE data that must still be
+  there next time (records, lists, settings). If not, data.needed=false and leave the rest empty/0. If yes:
+  needed=true; formats from .json .csv .txt .sqlite (AX Branch keeps ONLY ./data/ next to the program, in those
+  formats, between runs and versions; never code, executables or secrets); schema_version = the data format version
+  this program writes (start at 1; raise it when the format changes); compatible_from = the oldest data version this
+  program still reads (equal to schema_version if it cannot read older data); write = one HTTP request (POST/PUT/PATCH,
+  path, body, headers) that stores a value containing the literal {marker}; read = a GET path whose response shows the
+  stored value, with expect_contains containing {marker}. Verification really writes a unique marker, reads it back,
+  saves ./data/ as AX Branch does, restores it into a fresh copy, restarts and reads it again; a declaration alone
+  never passes. On a revision keep schema_version unless the stored format changes; if it changes, raise it and set
+  compatible_from honestly so AX Branch never feeds old data to a program that cannot read it.
   mode: web for anything with a page or dashboard, gui for a desktop window,
   cli for terminal tools, none only for documents or pure libraries. If the goal is vague about the
   interface ('make a program'), choose what a non-technical Owner can use by double-clicking.
@@ -440,7 +452,7 @@ def preserve_runtime(before, proposed, *, equivalent=False):
     probes, notes = preserve_probes(before.get('probes', []), proposed.get('probes', []), equivalent=equivalent)
     result = {**proposed, 'probes': probes}
     if not equivalent:
-        for key in ('mode', 'launch_args', 'owner_launch'):
+        for key in ('mode', 'launch_args', 'owner_launch', 'data'):     # a strategy review never weakens the data contract
             if result.get(key) != before.get(key):
                 result[key] = before.get(key)
                 notes.append(f'kept runtime {key}')

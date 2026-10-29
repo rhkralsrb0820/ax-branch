@@ -19,7 +19,12 @@ from axbranch.state import Rejected, Store
 
 REAL = os.name == 'nt' and I.available()[0]
 FIXTURE = Path(__file__).parent / 'fixtures' / 'owner_data_app'
-SPEC = {'mode': 'web', 'owner_launch': 'double-click inventory_app.py', 'launch_args': ['--port', '{port}'], 'probes': []}
+DATA = {'needed': True, 'formats': ['.json'], 'schema_version': 1, 'compatible_from': 1,
+        'write': {'http_method': 'POST', 'http_path': '/update', 'http_body': 'item={marker}&qty=3',
+                  'http_headers': ['Content-Type: application/x-www-form-urlencoded']},
+        'read': {'http_path': '/', 'expect_contains': ['{marker}']}}
+SPEC = {'mode': 'web', 'owner_launch': 'double-click inventory_app.py', 'launch_args': ['--port', '{port}'], 'probes': [],
+        'data': DATA}
 
 
 def page(url):
@@ -208,6 +213,9 @@ class OwnerDataFlowTests(unittest.TestCase):
         self.act(pid, 'result-stop')
         before = userdata.current(self.ws / 'projects' / pid)
         self.version(pid, 'v3_incompatible_inventory_app.py')
+        plan = self.store.project(pid)['plan']
+        plan['runtime'] = {**SPEC, 'data': {**DATA, 'schema_version': 3, 'compatible_from': 3}}
+        self.store.update(pid, plan=plan)
         answer = self.act(pid, 'result')
         self.assertTrue(answer['incompatible'])
         self.assertEqual([o['choice'] for o in answer['options']], ['previous', 'empty'])
@@ -216,11 +224,28 @@ class OwnerDataFlowTests(unittest.TestCase):
         prev = self.act(pid, 'result', choice='previous')                     # the older version with the data
         self.assertEqual(prev['version'], 1)
         self.assertIn('>40<', page(prev['url']).replace(' ', ''))
+        update(prev['url'], '냅킨', 12)
         self.act(pid, 'result-stop')
+        self.assertEqual(userdata.current(self.ws / 'projects' / pid)['data_schema'], 1)   # v1 wrote format 1, not 3
         empty = self.act(pid, 'result', choice='empty')                       # the new version, empty data
         self.assertEqual((empty['version'], empty['restored']), (2, None))
         self.act(pid, 'result-stop')
         self.assertTrue(Path(before['folder']).exists())                       # the v1 data is still kept
+
+    def test_a_plan_without_a_data_contract_is_never_restored_or_saved_by_guesswork(self):
+        pid = self.project()
+        plan = self.store.project(pid)['plan']
+        plan['runtime'] = {k: v for k, v in SPEC.items() if k != 'data'}         # an older plan
+        self.store.update(pid, plan=plan)
+        self.version(pid, 'v1_inventory_app.py')
+        r = self.act(pid, 'result')
+        self.assertFalse(r['data_kept'])
+        update(r['url'], '빨대', 40)
+        with self.assertRaises(Rejected) as why:
+            self.act(pid, 'result-save')
+        self.assertIn('저장 명세가 없어', str(why.exception))
+        self.act(pid, 'result-stop')
+        self.assertIsNone(userdata.current(self.ws / 'projects' / pid))
 
     def test_projects_never_share_data(self):
         a, b = self.project('A'), self.project('B')
