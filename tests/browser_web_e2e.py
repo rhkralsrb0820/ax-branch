@@ -28,7 +28,32 @@ GOAL = ('첨부한 검증 이력 CSV에서 실패 원인(attributed_cause)별 �
         '외부 서비스와 유료 API는 사용하지 마.')
 
 
-def main(exe, fixture, out, port=8767, text_rework=False):
+GOAL_WEBAPP = ('(합성 자료, 시험 입력) 작은 매장용 재고 확인 웹앱을 만들어 줘. 첨부한 inventory.csv를 읽어 품목·수량을 표로 '
+               '보여 주고, 수량이 5개 이하인 품목은 "재고 부족"으로 표시해야 한다. Python 표준 라이브러리만 사용, 127.0.0.1에서만 '
+               '실행, 외부 연결·설치 없음. 결과물은 실행 가능한 프로그램 하나.')
+
+
+def _check_web(url, expect):
+    """The harness, outside the browser, uses the running result (the page cannot read another origin)."""
+    import urllib.request
+    try:
+        body = urllib.request.urlopen(url, timeout=15).read().decode('utf-8', errors='replace')
+        return {'ok': all(e in body for e in expect), 'status': 200, 'contains': {e: e in body for e in expect},
+                'body_head': body[:300]}
+    except OSError as e:
+        return {'ok': False, 'error': f'{type(e).__name__}: {e}'[:200]}
+
+
+def _refused(url):
+    import urllib.request
+    try:
+        urllib.request.urlopen(url, timeout=5)
+        return False
+    except OSError:
+        return True
+
+
+def main(exe, fixture, out, port=8767, text_rework=False, webapp=False):
     root = Path(tempfile.mkdtemp(prefix='axb-web-e2e-'))
     (root / 'workspace').mkdir()
     (root / 'obsidian').mkdir()
@@ -39,9 +64,12 @@ def main(exe, fixture, out, port=8767, text_rework=False):
         if (root / 'workspace' / 'web-server.json').exists():
             break
         time.sleep(0.5)
-    url = f'http://127.0.0.1:{port}/?selftest=1&e2e=1&goal=' + urllib.parse.quote(GOAL)
+    url = f'http://127.0.0.1:{port}/?selftest=1&e2e=1&goal=' + urllib.parse.quote(GOAL_WEBAPP if webapp else GOAL)
     if text_rework:
         url += '&text-rework=1'
+    if webapp:
+        url += '&webapp=1'
+    used = {}
     chrome = subprocess.Popen([str(CHROME), '--headless=new', f'--user-data-dir={profile}', '--no-first-run',
                                '--no-default-browser-check', '--disable-extensions', '--window-size=1400,1000', url],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -50,9 +78,17 @@ def main(exe, fixture, out, port=8767, text_rework=False):
         while time.time() - started < (55 if text_rework else 30) * 60:
             if reports_file.exists():
                 reports = [json.loads(line) for line in reports_file.read_text(encoding='utf-8').splitlines() if line.strip()]
+                for r in reports:
+                    name = r.get('name', '')
+                    if name.endswith('web result opened') and r.get('ok') and name not in used:
+                        expect = ['재고 부족'] + (['AXB-TEXT-REWORK'] if name.startswith('e2e: revised') else [])
+                        used[name] = {'url': r.get('detail'), **_check_web(r.get('detail'), expect)}
+                    if name.endswith('stopped from the page') and name not in used:
+                        opened = used.get(name.replace('stopped from the page', 'opened'), {})
+                        used[name] = {'url_refused_after_stop': bool(opened.get('url')) and _refused(opened['url'])}
                 if any(r.get('name') == 'done' for r in reports):
                     break
-            time.sleep(5)
+            time.sleep(2)
     finally:
         subprocess.run(['taskkill', '/PID', str(chrome.pid), '/T', '/F'], capture_output=True)
         subprocess.run([exe, 'web', '--stop'], env=env, capture_output=True, timeout=30)
@@ -96,6 +132,16 @@ def main(exe, fixture, out, port=8767, text_rework=False):
             {'name': 'e2e: textual modification persisted as request feedback', 'ok': request_saved},
             {'name': 'e2e: text modification kept the same project', 'ok': same_project},
         ])
+    if webapp:
+        record['web_use'] = used
+        for name, u in used.items():
+            if 'opened' in name:
+                record['checks'].append({'name': name.replace('opened', 'used by the harness (page content)'), 'ok': u.get('ok'),
+                                         'detail': json.dumps({k: u.get(k) for k in ('url', 'contains', 'error')}, ensure_ascii=False)})
+            else:
+                record['checks'].append({'name': name.replace('stopped from the page', 'refused after stop'),
+                                         'ok': u.get('url_refused_after_stop')})
+        record['checks'].append({'name': 'e2e: both web results were used', 'ok': len([n for n in used if 'opened' in n]) == (2 if text_rework else 1)})
     record['passed'] = bool(record['finished'] and pid and record['checks'] and
                             all(c.get('ok') for c in record['checks']))
     Path(out).write_text(json.dumps(record, ensure_ascii=False, indent=1, default=str), encoding='utf-8')
@@ -113,5 +159,6 @@ if __name__ == '__main__':
     parser.add_argument('fixture')
     parser.add_argument('out')
     parser.add_argument('--text-rework', action='store_true')
+    parser.add_argument('--webapp', action='store_true')
     args = parser.parse_args()
-    sys.exit(main(args.exe, args.fixture, args.out, text_rework=args.text_rework))
+    sys.exit(main(args.exe, args.fixture, args.out, text_rework=args.text_rework, webapp=args.webapp))

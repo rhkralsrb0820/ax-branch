@@ -143,14 +143,34 @@
   }
   // Real E2E through the page (test server on an isolated workspace, REAL engine and models): goal + file +
   // dragged departments -> submit -> wait for the verified result -> open it -> save the Owner's feedback.
+  // A web result opens on its own origin; this page cannot read it (by design). It reports the link; the harness
+  // (outside the browser) loads and checks it while it runs, then the page stops it through the UI.
+  async function useWebResult(name) {
+    const linked = await until(() => document.getElementById('webRunOpen'), 90000);
+    const link = document.getElementById('webRunOpen');
+    await report(name, linked && link.rel.includes('noopener') && link.target === '_blank', link ? link.href : 'no link');
+    await sleep(30000);
+    document.getElementById('webRunStop').click();
+    const stopped = await until(async () => !(await api('project/' + window.AXB.pid)).owner_web_run.running, 20000);
+    await report(name.replace('opened', 'stopped from the page'), stopped);
+    if (document.getElementById('modal').open) document.getElementById('modal').close();
+  }
   async function e2e() {
     const fx = await api('test/fixture');
     const dt = new DataTransfer(); dt.items.add(new File([fx.text], fx.name, {type: 'text/csv'}));
     const input = $('#files'); input.files = dt.files; input.dispatchEvent(new Event('change'));
     await until(() => /첨부 1개/.test($('#fileNames').textContent));
     $('#goal').value = sessionStorage.getItem('axb-e2e-goal') || new URLSearchParams(location.search).get('goal'); $('#goal').dispatchEvent(new Event('input'));
-    drag(chip('research'), $('#composer')); drag(chip('operations'), $('#composer'));
-    await report('e2e: goal, file and two departments in the composer', /리서치/.test($('#pendingDeps').textContent) && /운영/.test($('#pendingDeps').textContent));
+    const webapp = new URLSearchParams(location.search).has('webapp');
+    if (webapp) {
+      $('#taskType').value = 'web_app'; $('#taskType').dispatchEvent(new Event('change'));
+      drag(chip('operations'), $('#composer'));
+      await report('e2e: goal, file, web-app task type and a department in the composer',
+        /운영/.test($('#pendingDeps').textContent) && $('#taskType').value === 'web_app', $('#taskType').value);
+    } else {
+      drag(chip('research'), $('#composer')); drag(chip('operations'), $('#composer'));
+      await report('e2e: goal, file and two departments in the composer', /리서치/.test($('#pendingDeps').textContent) && /운영/.test($('#pendingDeps').textContent));
+    }
     $('#submit').click();
     await until(() => window.AXB.view === 'project' && window.AXB.project, 20000);
     const pid = window.AXB.pid; await report('e2e: project created from the page', !!pid, pid);
@@ -165,13 +185,18 @@
       await window.AXB.api('project/' + pid).then(() => {}); await sleep(2500);
       await until(() => document.getElementById('oRun'), 10000);
       document.getElementById('oRun').click();
-      await until(() => document.getElementById('modal').open && /\S/.test(document.getElementById('modalBody').textContent), 20000);
-      const shown = document.getElementById('modalBody').textContent;
-      await report('e2e: verified result opened in the page', shown.length > 200, shown.slice(0, 160));
-      document.getElementById('modal').close();
+      if (webapp) await useWebResult('e2e: web result opened');
+      else {
+        await until(() => document.getElementById('modal').open && /\S/.test(document.getElementById('modalBody').textContent), 20000);
+        const shown = document.getElementById('modalBody').textContent;
+        await report('e2e: verified result opened in the page', shown.length > 200, shown.slice(0, 160));
+        document.getElementById('modal').close();
+      }
       if (new URLSearchParams(location.search).has('text-rework')) {
         const originalIteration = p.iteration, marker = 'AXB-TEXT-REWORK';
-        const request = '기존 메모의 내용과 근거 수치는 유지하고, 문서 맨 앞에 "# 재작업 확인: ' + marker + '" 제목 한 줄을 추가해 주세요. 다른 기능·외부 연결·학습은 추가하지 마세요.';
+        const request = webapp
+          ? '웹앱 화면 맨 위 제목을 "재고 확인 ' + marker + '"로 바꿔 주세요. 표·재고 부족 표시 등 다른 기능과 데이터 처리는 그대로 유지하고, 외부 연결은 추가하지 마세요.'
+          : '기존 메모의 내용과 근거 수치는 유지하고, 문서 맨 앞에 "# 재작업 확인: ' + marker + '" 제목 한 줄을 추가해 주세요. 다른 기능·외부 연결·학습은 추가하지 마세요.';
         document.getElementById('oText').value = request;
         document.getElementById('oText').dispatchEvent(new Event('input', {bubbles: true}));
         document.getElementById('oSend').click();
@@ -189,8 +214,11 @@
         if (passed) {
           await window.AXB.openProject(pid);
           document.getElementById('oRun').click();
-          const opened = await until(() => document.getElementById('modal').open && document.getElementById('modalBody').textContent.includes(marker), 20000);
-          await report('e2e: revised verified result opened with requested text', opened, document.getElementById('modalBody').textContent.slice(0, 250));
+          if (webapp) await useWebResult('e2e: revised web result opened');
+          else {
+            const opened = await until(() => document.getElementById('modal').open && document.getElementById('modalBody').textContent.includes(marker), 20000);
+            await report('e2e: revised verified result opened with requested text', opened, document.getElementById('modalBody').textContent.slice(0, 250));
+          }
         }
       } else {
         document.querySelector('input[name=works][value=yes]').checked = true;
