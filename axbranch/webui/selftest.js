@@ -150,7 +150,7 @@
     const link = document.getElementById('webRunOpen');
     await report(name, linked && link.rel.includes('noopener') && link.target === '_blank', link ? link.href : 'no link');
     await sleep(30000);
-    document.getElementById('webRunStop').click();
+    document.querySelector('[data-webrun="stop"]').click();
     const stopped = await until(async () => !(await api('project/' + window.AXB.pid)).owner_web_run.running, 20000);
     await report(name.replace('opened', 'stopped from the page'), stopped);
     if (document.getElementById('modal').open) document.getElementById('modal').close();

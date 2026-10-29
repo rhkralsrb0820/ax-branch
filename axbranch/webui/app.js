@@ -391,29 +391,68 @@
   }
   // A web result runs isolated on its OWN port (another browser origin): the link opens it in a new tab without a
   // reference back to this page (noopener noreferrer), so the result's code cannot reach AX Branch's window or token.
+  // Every action carries the project id it was rendered for; a click after switching projects never acts on another.
   function webRunLink(r) {
     return `<a class="primary-link" id="webRunOpen" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">결과 웹앱 열기 (v${esc(r.version)})</a>`;
   }
-  function showWebRun(pid, r) {
-    $('#modalBody').innerHTML = `<h3>결과 웹앱 실행 중</h3>
-      <p>${webRunLink(r)}</p>
-      <div class="muted">${esc(r.protection || '')}. 다른 프로젝트·사용자 파일·외부 인터넷에 접근할 수 없습니다. 최대 ${Math.round((r.lifetime_seconds || 0) / 3600)}시간 뒤 자동 종료됩니다.
-      닫으면 프로그램이 저장한 자료는 프로젝트의 실행 폴더로 옮겨지고, 다음에 열 때는 검증된 버전에서 새로 시작합니다.</div>
-      <div class="row end"><button class="ghost" id="webRunStop">결과 종료</button></div>`;
-    $('#modal').showModal();
-    $('#webRunStop').onclick = () => stopWebRun(pid);
+  function savedText(s) {
+    if (!s) return '아직 저장된 데이터가 없습니다.';
+    return `마지막 정상 저장: ${esc(s.saved_at)} (데이터 ${esc(s.data_version)}번째 저장, 파일 ${esc(s.files)}개${s.code_iteration ? `, v${esc(s.code_iteration)}에서 저장` : ''})`;
   }
-  async function stopWebRun(pid = S.pid) {
-    try { await api(`project/${pid}/result-stop`, {}); notice('결과 웹앱을 종료했습니다. 프로세스와 임시 권한을 정리했습니다.'); $('#modal').close(); if (pid === S.pid) await refreshProject(); }
-    catch (e) { fail(e); }
+  function webRunDetails(r) {
+    const restored = r.restored
+      ? `이번 실행은 ${esc(r.restored.saved_at)}에 저장한 데이터(v${esc(r.restored.code_iteration)}, 파일 ${esc(r.restored.files)}개)를 복원해 시작했습니다.`
+      : (r.choice === 'empty' ? '빈 데이터로 시작했습니다(저장된 데이터는 그대로 보존).' : '복원할 저장 데이터가 없어 처음 상태로 시작했습니다.');
+    return `<div class="kv">사용 중인 결과: <b>v${esc(r.version)}</b>${r.choice === 'previous' ? ' (이전 버전을 선택해 실행)' : ''}</div>
+      <div class="kv">${restored}</div>
+      <div class="kv">${savedText(r.last_saved)} · 실행 중에는 ${Math.round((r.save_interval_seconds || 60))}초마다 바뀐 데이터를 자동 저장합니다.</div>
+      ${r.save_error ? `<div class="kv" role="alert">저장 실패(${esc(r.save_error.at)}): ${esc(r.save_error.reason)} — 마지막 정상 데이터는 그대로입니다. 프로그램에서 저장을 마친 뒤 [지금 저장]을 다시 누르세요.</div>` : ''}
+      <div class="muted">${esc(r.protection || '')}. 다른 프로젝트·사용자 파일·인터넷에 접근할 수 없습니다. 최대 ${Math.round((r.lifetime_seconds || 0) / 3600)}시간 뒤 저장 후 자동 종료됩니다.</div>`;
+  }
+  function webRunButtons(pid) {
+    return `<button class="ghost" data-webrun="save" data-pid="${esc(pid)}">지금 저장</button><button class="ghost" data-webrun="stop" data-pid="${esc(pid)}">저장하고 종료</button>`;
+  }
+  function bindWebRun(scope) {
+    scope.querySelectorAll('[data-webrun]').forEach(b => b.onclick = () => webRunAction(b.dataset.pid, b.dataset.webrun, b));
+  }
+  async function webRunAction(pid, what, button) {
+    if (S.webRunBusy) return;                       // one action at a time (double clicks)
+    S.webRunBusy = true; if (button) button.disabled = true;
+    try {
+      const r = await api(`project/${pid}/result-${what}`, {});
+      notice(what === 'save' ? savedText(r.last_saved) : `결과 웹앱을 종료했습니다. ${savedText(r.last_saved)} 프로세스와 임시 권한을 정리했습니다.`);
+      if (what === 'stop' && $('#modal').open) $('#modal').close();
+    } catch (e) { fail(e); }
+    finally { S.webRunBusy = false; if (button) button.disabled = false; if (pid === S.pid) await refreshProject(); }
+  }
+  function showWebRun(pid, r) {
+    if (r.incompatible) return showIncompatible(pid, r);
+    $('#modalBody').innerHTML = `<h3>결과 웹앱 실행 중</h3><p>${webRunLink(r)}</p>${webRunDetails(r)}
+      <div class="row end">${webRunButtons(pid)}</div>`;
+    $('#modal').showModal();
+    bindWebRun($('#modalBody'));
+  }
+  function showIncompatible(pid, r) {
+    $('#modalBody').innerHTML = `<h3>저장 데이터와 맞지 않는 버전입니다</h3><p>${esc(r.reason)}</p>
+      <p>저장된 데이터는 바꾸거나 지우지 않았습니다. 어떻게 열지 선택하세요.</p>
+      <div class="row">${(r.options || []).map(o => `<button class="ghost" data-choice="${esc(o.choice)}">${esc(o.label)}</button>`).join('')}</div>
+      <div class="muted">또는 같은 프로젝트에 "기존 데이터 형식을 읽을 수 있게 해 달라"고 수정 요청을 보낼 수 있습니다.</div>`;
+    $('#modal').showModal();
+    $('#modalBody').querySelectorAll('[data-choice]').forEach(b => b.onclick = async () => {
+      if (S.webRunBusy) return; S.webRunBusy = true; b.disabled = true;
+      try { const again = await api(`project/${pid}/result`, {choice: b.dataset.choice}); showWebRun(pid, again); }
+      catch (e) { fail(e); } finally { S.webRunBusy = false; if (pid === S.pid) await refreshProject(); }
+    });
   }
   function renderWebRun(run) {
     const box = $('#webRun');
-    box.hidden = !(run && run.running);
-    if (!run || !run.running) return;
-    box.innerHTML = `<div class="row"><b>결과 웹앱 실행 중</b><span class="grow"></span>${webRunLink(run)}<button class="ghost" id="webRunStopInline">종료</button></div>`
-      + `<div class="muted">${esc(run.protection || '')}</div>`;
-    $('#webRunStopInline').onclick = () => stopWebRun(S.pid);
+    const pid = S.pid;
+    box.hidden = !run || (!run.running && !run.last_saved);
+    if (box.hidden) return;
+    box.innerHTML = run.running
+      ? `<div class="row"><b>결과 웹앱 실행 중</b><span class="grow"></span>${webRunLink(run)}</div>${webRunDetails(run)}<div class="row end">${webRunButtons(pid)}</div>`
+      : `<div class="row"><b>결과 웹앱 · 꺼져 있음</b></div><div class="kv">${savedText(run.last_saved)} [결과 보기]를 누르면 이 데이터를 복원해 다시 엽니다.</div>`;
+    bindWebRun(box);
   }
   async function finishDialog(pid = S.pid) {
     const navigation = S.navigation;

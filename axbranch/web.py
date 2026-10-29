@@ -50,7 +50,7 @@ class App:
         self.reports = []                            # test mode: in-browser self-test / perf reports
         self.started = time.time()
         from .owner_runs import OwnerRuns
-        self.owner_runs = OwnerRuns()                # Owner-opened web/server results (isolated, one per project)
+        self.owner_runs = OwnerRuns(self.store)      # Owner-opened web/server results (isolated, one per project)
 
     def _open_engine(self):
         from .engine import open_engine
@@ -109,7 +109,7 @@ class App:
                 'experience': knowledge.experience_view(store, pid),
                 'recommendations': departments.recommendations(store, pid),
                 'execution_budget': _execution_budget(store, p),
-                'owner_web_run': self.owner_runs.status(pid)}
+                'owner_web_run': self.owner_runs.status(pid, self.workspace / 'projects' / pid)}
 
     def settings(self):
         try:
@@ -443,13 +443,18 @@ def project_action(app, store, pid, action, body, channel):
         try:
             mode = ((engine.store.project(pid)['plan'] or {}).get('runtime') or {}).get('mode', 'cli')
             if mode in ('web', 'server') and engine.result_info(pid)[0] == 'run':
-                return {'how': 'web', **app.owner_runs.start(engine, pid)}
+                choice = body.get('choice')
+                if choice not in (None, 'previous', 'empty'):
+                    raise Rejected('choice must be previous or empty')
+                return {'how': 'web', **app.owner_runs.start(engine, pid, choice)}
             how, path = engine.open_result(pid, show_text=lambda title, text, p: shown.update(title=title, text=text[:200000]))
         finally:
             engine.store.close()
         return {'how': how, 'path': str(path), **shown}
     if action == 'result-stop':
         return app.owner_runs.stop(store, pid, reason='owner')
+    if action == 'result-save':
+        return app.owner_runs.save(pid, reason='owner')
     raise KeyError('unknown action')
 
 
