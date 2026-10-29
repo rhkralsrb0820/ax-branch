@@ -15,11 +15,12 @@
     return `
     <div class="dev">
     <section class="dcard"><h2>1. 지금 어디까지 됐나</h2><p class="lead">${esc(s.now.can_do)}</p>
+      ${features(s.features || [])}
       <h4>핵심 제한</h4>${list(s.now.limits)}
-      <div class="meta">버전 v${esc(s.version)} · 마지막 갱신 ${esc(s.updated_at)} · 보고 기준 커밋 ${esc(s.commit)} · 지금 화면의 코드 ${esc(D.running.code)}</div></section>
+      <div class="meta">현황 갱신 ${esc(s.updated_at)} · 기준 소스 커밋 ${esc(s.commit)} · 현재 사용 서버 ${esc(s.serving_build || '기록 없음')} · 후보 빌드 ${esc(s.candidate_build || '없음')} · 지금 화면의 코드 ${esc(D.running.code)}</div></section>
     <section class="dcard"><h2>2. 지금 무엇을 하고 있나</h2>${cw && cw.state === '개발 중'
       ? `<p class="lead"><b>${esc(cw.title)}</b></p><p>왜: ${esc(cw.why)}</p><p>끝나면: ${esc(cw.after)}</p><div class="meta">${esc(cw.basis)}</div>`
-      : '<p class="lead">개발 대기 — 진행 중으로 보고된 작업이 없습니다.</p>'}</section>
+      : `<p class="lead">진행 중으로 보고된 작업이 없습니다.</p><div class="meta">마지막 개발 보고 ${esc(s.updated_at)} (기준 소스 커밋 ${esc(s.commit)}) — 실시간 상태가 아닙니다.</div>`}</section>
     <section class="dcard recommendation"><h2>3. 다음에 무엇을 고쳐야 하나</h2>${top ? `
       <div class="badge">${src(top)}</div><p class="lead"><b>${esc(top.title)}</b></p>
       <p><b>왜 먼저:</b> ${esc(top.why)}</p><p><b>나아지는 점:</b> ${esc(top.improves)}</p><p><b>완료 기준:</b> ${esc(top.done_when)}</p>
@@ -33,6 +34,19 @@
     <section class="dcard"><h2>5. 최근 달라진 점</h2>${s.recent.slice(0, 3).map(r => `<div class="sub"><b>${esc(r.title)}</b> — ${esc(r.change)}
       <div class="meta">확인 수준: ${esc(r.level)}</div></div>`).join('')}</section>
     </div>`;
+  }
+
+  // 🟢 = implemented ONLY. Verification level and where it is applied are separate columns, never implied by the icon.
+  const IMPL = {'구현됨': '🟢', '일부 구현': '🟡', '미구현': '⚪'};
+  const LEVELS = ['자동 테스트', '실제 실행', 'Owner 확인'], PLACES = ['개발 소스', '후보 빌드', '현재 사용 서버'];
+  const marks = (have, all) => all.map(x => `<span class="${(have || []).includes(x) ? 'yes' : 'no'}">${(have || []).includes(x) ? '✔' : '–'} ${esc(x)}</span>`).join(' ');
+  function features(fs) {
+    if (!fs.length) return '';
+    return `<table class="tbl features"><tr><th>기능</th><th>구현 상태</th><th>확인 수준</th><th>적용 위치</th><th>남은 개발 · 다음 행동</th></tr>${fs.map(f => `<tr>
+      <td><b>${esc(f.title)}</b>${f.note ? `<div class="muted">${esc(f.note)}</div>` : ''}</td>
+      <td>${IMPL[f.impl] || ''} ${esc(f.impl)}</td><td>${marks(f.verified, LEVELS)}</td><td>${marks(f.location, PLACES)}</td>
+      <td>${esc(f.remaining || '-')}${f.next ? `<div class="muted">다음: ${esc(f.next)}</div>` : ''}${evid(f.evidence)}</td></tr>`).join('')}</table>
+      <div class="muted">🟢 구현됨 · 🟡 일부 구현 · ⚪ 미구현. 🟢는 구현됐다는 뜻만 있으며, 검증 완료나 현재 서버 적용은 옆 칸에서 따로 표시합니다.</div>`;
   }
 
   function issueCard(i) {

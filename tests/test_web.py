@@ -312,6 +312,13 @@ class WebTests(unittest.TestCase):
             self.assertIn(item['impl'], impl, item['id'])
             self.assertIn(item['verify'], verify, item['id'])
         self.assertNotRegex(json.dumps(status, ensure_ascii=False), r'\d+\s*%\s*완성')       # no unfounded completion %
+        for f in status['features']:                     # the icon means implemented only; level and place are separate
+            self.assertIn(f['impl'], {'구현됨', '일부 구현', '미구현'}, f['id'])
+            self.assertTrue(set(f['verified']) <= {'자동 테스트', '실제 실행', 'Owner 확인'}, f['id'])
+            self.assertTrue(set(f['location']) <= {'개발 소스', '후보 빌드', '현재 사용 서버'}, f['id'])
+            if f['impl'] == '미구현':
+                self.assertFalse(f['verified'] or f['location'], f['id'])
+        self.assertTrue(status['serving_build'] and status['candidate_build'])
         self.assertTrue({p['source'] for p in status['next']} <= {'owner', 'dev'})
         self.assertLessEqual(len(status['recent']), 3)
         cats = {'현재 문제', 'Owner 확인', '해결·과거 기록'}

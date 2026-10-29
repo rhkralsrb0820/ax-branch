@@ -392,8 +392,8 @@
   // A web result runs isolated on its OWN port (another browser origin): the link opens it in a new tab without a
   // reference back to this page (noopener noreferrer), so the result's code cannot reach AX Branch's window or token.
   // Every action carries the project id it was rendered for; a click after switching projects never acts on another.
-  function webRunLink(r) {
-    return `<a class="primary-link" id="webRunOpen" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">결과 웹앱 열기 (v${esc(r.version)})</a>`;
+  function webRunLink(r, id = '') {
+    return `<a class="primary-link web-run-link"${id ? ` id="${id}"` : ''} href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">결과 웹앱 열기 (v${esc(r.version)})</a>`;
   }
   function savedText(s) {
     if (!s) return '아직 저장된 데이터가 없습니다.';
@@ -427,7 +427,7 @@
   }
   function showWebRun(pid, r) {
     if (r.incompatible) return showIncompatible(pid, r);
-    $('#modalBody').innerHTML = `<h3>결과 웹앱 실행 중</h3><p>${webRunLink(r)}</p>${webRunDetails(r)}
+    $('#modalBody').innerHTML = `<h3>결과 웹앱 실행 중</h3><p>${webRunLink(r, 'webRunOpen')}</p>${webRunDetails(r)}
       <div class="row end">${webRunButtons(pid)}</div>`;
     $('#modal').showModal();
     bindWebRun($('#modalBody'));

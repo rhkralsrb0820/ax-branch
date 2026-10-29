@@ -297,6 +297,11 @@ def route(app, store, method, path, query, body):
             return app.feeds()
         if parts == ['devroom']:
             return app.devroom_data()
+        if parts == ['test', 'signals'] and app.test_mode:      # out-of-process harness -> page (test server only)
+            try:
+                return json.loads((app.workspace / 'test-signals.json').read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                return {}
         if parts == ['test', 'fixture'] and app.test_mode and os.environ.get('AXB_TEST_FIXTURE'):
             f = Path(os.environ['AXB_TEST_FIXTURE'])
             return {'name': f.name, 'text': f.read_text(encoding='utf-8-sig')}

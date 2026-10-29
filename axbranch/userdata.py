@@ -30,6 +30,8 @@ SECRET_HINTS = ('secret', 'token', 'credential', 'password', 'passwd', 'apikey',
 MAX_FILES, MAX_BYTES = 200, 50 * 1024 * 1024
 KEEP = 5
 SAVE_INTERVAL = 60
+if os.environ.get('AXB_DEV') == '1' and os.environ.get('AXB_SAVE_INTERVAL', '').isdigit():
+    SAVE_INTERVAL = max(1, int(os.environ['AXB_SAVE_INTERVAL']))     # test harnesses only (AXB_DEV)
 
 
 class SaveFailed(Exception):

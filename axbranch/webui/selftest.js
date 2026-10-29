@@ -21,6 +21,7 @@
   try {
     await until(() => window.AXB.ov);
     if (new URLSearchParams(location.search).has('e2e')) return await e2e();
+    if (new URLSearchParams(location.search).has('owner-data')) return await ownerData();
     if (phase === '1') {
       const px = $('#orb').getContext('2d').getImageData(0, 0, 260, 260).data;
       let lit = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 0) lit++;
@@ -154,6 +155,60 @@
     const stopped = await until(async () => !(await api('project/' + window.AXB.pid)).owner_web_run.running, 20000);
     await report(name.replace('opened', 'stopped from the page'), stopped);
     if (document.getElementById('modal').open) document.getElementById('modal').close();
+  }
+  // Owner data flow on a FIXED test app (no model): the page clicks AX Branch's real buttons; the harness uses the
+  // result tab (another origin) and changes code versions between steps, signalling through /api/test/signals.
+  async function ownerData() {
+    const pid = new URLSearchParams(location.search).get('pid');
+    const signal = name => until(async () => (await api('test/signals'))[name], 240000);
+    const status = async () => (await api('project/' + pid)).owner_web_run;
+    const openResult = async (label) => {
+      await window.AXB.openProject(pid); await sleep(800);
+      await until(() => document.getElementById('oRun'), 15000);
+      document.getElementById('oRun').click();
+      await until(() => (document.getElementById('modal').open && document.getElementById('webRunOpen')) || /맞지 않는 버전/.test(document.getElementById('modalBody').textContent), 60000);
+      const link = document.getElementById('webRunOpen');
+      const s = await status();
+      const sameUrl = !link || !s.running || link.href === s.url;      // the page links the run that is live NOW
+      await report('od: ' + label, (!!link && sameUrl) || /맞지 않는 버전/.test(document.getElementById('modalBody').textContent),
+                   JSON.stringify({url: s.url, linked: link && link.href, version: s.version, restored: s.restored, modal: document.getElementById('modalBody').textContent.slice(0, 120)}));
+      return s;
+    };
+    const click = async (what) => {
+      const b = document.querySelector(`#modalBody [data-webrun="${what}"]`) || document.querySelector(`#webRun [data-webrun="${what}"]`);
+      b.click(); b.click();                          // a double click must not run twice
+      await sleep(1500);
+    };
+    let s = await openResult('opened v1');
+    await signal('entered');
+    await click('save');
+    s = await status();
+    await report('od: saved from the page', s.last_saved && s.last_saved.data_version === 1, JSON.stringify(s.last_saved));
+    await click('stop');
+    s = await status();
+    await report('od: stopped; last save shown', !s.running && /마지막 정상 저장/.test(document.getElementById('webRun').textContent), document.getElementById('webRun').textContent.slice(0, 160));
+    s = await openResult('reopened with restored data');
+    await report('od: restore recorded on reopen', s.restored && s.restored.data_version === 1, JSON.stringify(s.restored));
+    await signal('checked_restore');
+    await click('stop');
+    await api('test/selftest', {phase: 'owner-data', name: 'ready for v2', ok: true});
+    await signal('v2');
+    s = await openResult('revised version opened');
+    await report('od: revised version keeps data', s.version === 2 && s.restored && s.restored.code_iteration === 1, JSON.stringify({version: s.version, restored: s.restored}));
+    await signal('checked_v2');
+    await click('stop');
+    await api('test/selftest', {phase: 'owner-data', name: 'ready for v3', ok: true});
+    await signal('v3');
+    await openResult('incompatible version answered');
+    const modal = document.getElementById('modalBody');
+    await report('od: incompatible data offers choices, nothing overwritten', /맞지 않는 버전/.test(modal.textContent) && modal.querySelectorAll('[data-choice]').length === 2, modal.textContent.slice(0, 200));
+    modal.querySelector('[data-choice="previous"]').click();
+    await until(() => document.getElementById('webRunOpen'), 60000);
+    s = await status();
+    await report('od: previous version opened with the data', s.running && s.version === 2 && document.getElementById('webRunOpen').href === s.url, JSON.stringify({version: s.version, restored: s.restored, url: s.url}));
+    await signal('checked_previous');
+    await click('stop');
+    await api('test/selftest', {phase: 'owner-data', name: 'done', ok: true, detail: pid});
   }
   async function e2e() {
     const fx = await api('test/fixture');
