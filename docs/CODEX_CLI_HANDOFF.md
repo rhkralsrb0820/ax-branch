@@ -1,4 +1,33 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-29 23:25 KST
+## CURRENT CHECKPOINT — Claude, 2026-10-30 19:20 KST (0.1.64 dev source; full regression interrupted)
+- Branch `dev/web-ui`, HEAD b4d4dec (+ this handoff commit). Working tree clean. Owner server unchanged: 0.1.63-50aabe2.
+- **Newly usable in the dev source (not in any build yet):**
+  - a8dfa81: uncommitted experience WIP found in the tree (lesson candidates, decision-change view; author not recorded)
+    integrated with a unit test.
+  - 4f177db: improvement candidates (`axbranch/improvements.py`, view "개선 후보 · 학습"): repeated failure -> proposal
+    from the strategy change that later passed -> prepared evaluation -> Owner-approved baseline/variant projects
+    (experience off) -> automatic comparison -> Owner apply (not-worse only) -> rollback. Applied rules reach CEO
+    planning/strategy as reference context. Learning paths shown from real state.
+  - 1076c6f: recommendation `gap` (missing capability), Owner-connected vs accepted-recommendation departments,
+    capability attempts card (free options, results, minimal approval), home centred on running/waiting work.
+  - e198820: project page "지금 단계 · 담당 / 멈춘 이유 / 다음 행동".
+  - a3c2f3e: Owner data across the library lineage (continued project starts from the ancestor's last good data;
+    original never changed).
+  - b4d4dec: version 0.1.64, CHANGELOG, devroom features.
+- **Checks run on this code:** test_improvements 5/5, test_recommendations 8/8, test_now 2/2, test_owner_data 12/12
+  (real AppContainer, fixed developer test app), test_department_lessons 1/1, test_product_planning+test_decision_trace
+  34/34, test_web 17/17, test_release 1/1, headless browser self-test 36/36 (synthetic fixtures). No model call.
+- **Interrupted:** full single-process regression on b4d4dec was reaped by Claude Code for low system memory after
+  ~446 tests, no failure seen, no orphan process. NOT restarted, per the rule. Not a pass.
+- **Not done:** full regression, candidate build 0.1.64-b4d4dec, packaged checks, real-model run, server switch.
+- **Resume (when memory allows / Owner asks):**
+  1. `python -X utf8 -m unittest discover -s tests -t .` on b4d4dec (single process; close other heavy apps first).
+  2. `python -X utf8 build_exe.py --output-dir C:/Users/HP/Documents/Codex/axbranch-builds/0.1.64-b4d4dec`
+  3. `python -X utf8 tests/browser_owner_data_e2e.py <exe> <out.json>` and `python -X utf8 tests/browser_web_selftest.py`.
+  4. Update devroom `candidate_build` / feature locations; then Owner decides a limited real-model run and the server.
+- **Next development:** run one improvement evaluation when a real candidate exists (Owner approval); evaluation
+  projects are listed among the Owner's projects (consider a filter); capability resolution covers training only.
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-29 23:25 KST
 - Owner server unchanged: 0.1.63-50aabe2.
 - **2f4cdc5:** the Owner-data contract is carried from the CEO plan (`runtime.data`) to the producer, executed in
   verification (write/read/save/restore/read) and enforced by the runner. Evidence:
