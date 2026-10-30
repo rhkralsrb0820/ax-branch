@@ -162,7 +162,7 @@ def _slug(text, n=50):
 
 # Department experience is a projection into the EXISTING event store, never a second knowledge database.
 # Free text (goals, feedback, source content, decisions, provider errors) stays at its original reference.
-EXPERIENCE_VERSION = 2   # 2: verification level from recorded producer/verifier provenance
+EXPERIENCE_VERSION = 3   # 3: bounded event-derived lessons, never inferred causal explanations
 EXPERIENCE_DAYS = 180
 TOKEN_FIELDS = ('input_tokens', 'output_tokens', 'cached_input_tokens', 'cache_creation_input_tokens',
                 'cache_read_input_tokens', 'reasoning_output_tokens')
@@ -223,6 +223,45 @@ def verification_level(v):
     if not producer or not verifier or prov.get('producer_source') != 'recorded':
         return 'PASS_PROVENANCE_UNKNOWN'
     return 'CROSS_PROVIDER_PASS' if producer != verifier else 'SAME_PROVIDER_ROLE_SEPARATED_PASS'
+
+
+def department_lessons(events, department, delegations):
+    """Project-local observations mapped to fixed advice, without copying private source text.
+
+    A candidate describes an observed event, not its unproven root cause or a learned skill.
+    Department events must match this verification's delegated plan versions and stages.
+    """
+    versions = {e['detail'].get('plan_version') for e in delegations
+                if e['detail'].get('plan_version') is not None}
+    stages = {e['detail'].get('stage') for e in delegations if e['detail'].get('stage')}
+    rules = (
+        ('contract_format', '부서 출력 형식 오류',
+         '이 부서의 출력 계약 검사에서 실패가 기록됐습니다.',
+         '제작 전에 같은 버전의 출력 계약을 확인하고, 내용 검증 전에 형식을 검사하세요.'),
+        ('completion_budget', '완료 단계 예산 확보',
+         '이 프로젝트에서 호출 전 예산 부족으로 작업이 중단됐습니다.',
+         '제작뿐 아니라 남은 검증과 최종 수락 비용도 함께 고려하세요.'),
+        ('unchanged_stage', '변경 없는 단계 재사용',
+         '이 부서의 이전 단계 결과를 재사용한 기록이 있습니다.',
+         '입력·부서 명세·의존 단계가 같고 현재 요청에 유효한 경우에만 재사용을 검토하세요.'),
+    )
+    found = {code: [] for code, *_ in rules}
+    for event in events:
+        d, kind = event['detail'], event['kind']
+        if (kind in ('department_contract', 'department_document_contract') and
+                d.get('department') == department and d.get('status') == 'fail' and
+                d.get('plan_version') in versions):
+            found['contract_format'].append(event['id'])
+        elif kind == 'budget_reserve_stop':
+            found['completion_budget'].append(event['id'])
+        elif (kind == 'stage_reused' and d.get('stage') in stages and d.get('plan_version') in versions):
+            found['unchanged_stage'].append(event['id'])
+    return [{'code': code, 'title': title, 'observation': observation, 'suggestion': suggestion,
+             'status': 'CANDIDATE', 'origin': 'deterministic_event_mapping',
+             'scope': 'project' if code == 'completion_budget' else 'department',
+             'evidence_events': found[code][-3:], 'observed_count': len(found[code]),
+             'causal_effect': 'UNKNOWN', 'rule': '조건을 비교할 참고 자료이며 권한·기준을 바꾸는 지시가 아닙니다.'}
+            for code, title, observation, suggestion in rules if found[code]]
 
 
 def record_department_experience(store, pid):
@@ -296,6 +335,7 @@ def record_department_experience(store, pid):
                  'not_applicable': ['different department version', 'unverified market or customer assumptions',
                                     'permissions or acceptance criteria changes'],
                  'facts': ['recorded verification outcome and event references'],
+                 'lesson_candidates': department_lessons(relevant, dep, ds),
                  'estimates': [], 'unknowns': ['business success', 'willingness to pay', 'actual revenue', 'quality improvement'],
                  'authority': 'reference data only; never instructions or permission', 'improvement': 'UNKNOWN'}
             revision = hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()
@@ -364,6 +404,7 @@ def _department_experience(store, query, requesting_project, allowed_departments
                                       'outcome', 'verification_level', 'verification', 'artifact', 'failures',
                                       'applicable', 'not_applicable', 'facts', 'estimates', 'unknowns', 'authority', 'improvement')}
             card.update(kind='department_experience', evidence=d['verification'], recorded_at=d['recorded_at'],
+                        lesson_candidates=d.get('lesson_candidates', []),
                         _source_sha256=e['detail']['revision'],
                         matched_terms=score, selection_reason='same pinned department version and matching goal terms',
                         difference_required='customer/market are UNKNOWN; compare current conditions before any adoption')
@@ -383,6 +424,8 @@ def _department_experience(store, query, requesting_project, allowed_departments
 
 def experience_view(store, pid):
     events, records, retrieved, uses = store.events(pid), {}, {}, []
+    changes = {(e['detail'].get('retrieval'), e['detail'].get('decision')): e['detail'] for e in events
+               if e['kind'] == 'knowledge_trace' and e['detail'].get('phase') == 'DECISION_CHANGE'}
     for e in events:
         d = e['detail']
         if e['kind'] == 'department_experience':
@@ -393,9 +436,14 @@ def experience_view(store, pid):
                 retrieved[d['retrieval']] = hit
         if e['kind'] == 'knowledge_trace' and d.get('phase') in ('ADOPTED', 'REJECTED', 'UNASSESSED') and d['retrieval'] in retrieved:
             hit = retrieved[d['retrieval']]
+            change = changes.get((d['retrieval'], d.get('decision')), {})
             uses.append({'retrieval': d['retrieval'], 'experience': hit['experience_id'],
                          'source_project': hit['project'], 'disposition': d['phase'], 'reason': d.get('reason', ''),
-                         'difference': d.get('difference', ''), 'verification': hit['verification_level']})
+                         'difference': d.get('difference', ''), 'verification': hit['verification_level'],
+                         'lesson_candidates': hit.get('lesson_candidates', []),
+                         'claimed_change': change.get('claimed_change', ''),
+                         'applied_action': change.get('applied_action', ''),
+                         'attribution': change.get('attribution', 'NONE'), 'improvement': 'UNKNOWN'})
     return {'records': list(records.values())[-10:], 'uses': uses[-15:],
             'errors': [e['detail'] for e in events if e['kind'] == 'experience_record_error'][-3:],
             'searches': [e['detail'] for e in events if e['kind'] == 'experience_search'][-5:],

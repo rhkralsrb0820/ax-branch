@@ -313,9 +313,12 @@
     $('#timeline').innerHTML = p.timeline.slice().reverse().map(t => `<div class="tl"><b>${esc(t.at)} ${esc(t.actor)}</b> ${esc(t.text)}</div>`).join('');
     const experience = p.experience || {records: [], uses: [], searches: []};
     const count = experience.records.length, uses = experience.uses;
+    const lessons = experience.records.flatMap(r => (r.lesson_candidates || []).map(l => ({...l, department: r.department})));
     $('#experience').innerHTML = `<h3>업무 경험</h3><div class="muted">최근 기록 ${count}개 · 이번 과제의 활용 판단 ${uses.length}개 · 품질 개선은 비교 평가 전까지 미확인</div>`
       + ((experience.errors || []).length ? '<div role="status">경험 기록에 실패한 항목이 있습니다. 기술 근거를 확인하세요.</div>' : '')
-      + (uses.length ? uses.map(u => `<div class="kv"><b>${esc(u.experience)}</b> · ${esc(u.disposition)}<br>선택·미사용 이유: ${esc(u.reason || '기록 없음')}<br>이번 과제와의 차이: ${esc(u.difference || '기록 없음')}</div>`).join('')
+      + (lessons.length ? `<details><summary>근거가 있는 교훈 후보 ${lessons.length}개 · 개선 효과 미확인</summary>`
+        + lessons.slice(-12).map(l => `<div class="kv"><b>${esc(l.title)}</b> · ${esc(l.department)}<br>${esc(l.observation)}<br>다음 업무 참고: ${esc(l.suggestion)}<br><span class="muted">근거 이벤트: ${esc((l.evidence_events || []).join(', '))} · 자동 추출 규칙에 따른 후보</span></div>`).join('') + '</details>' : '')
+      + (uses.length ? uses.map(u => `<div class="kv"><b>${esc(u.experience)}</b> · ${esc(u.disposition)}<br>선택·미사용 이유: ${esc(u.reason || '기록 없음')}<br>이번 과제와의 차이: ${esc(u.difference || '기록 없음')}<br>청월이 보고한 판단 변경: ${esc(u.claimed_change || '기록 없음')}<br>연결된 실행: ${esc(u.applied_action || '기록 없음')}<br><span class="muted">판단 반영 기록이며 품질 개선의 증거는 아닙니다.</span></div>`).join('')
         : `<div class="muted">${experience.searches.some(s => s.status === 'none') ? '관련 경험을 찾지 못했습니다.' : '아직 경험 활용 판단이 없습니다.'}</div>`)
       + `<details><summary>경험·검증 근거 펼치기</summary><pre>${esc(JSON.stringify({records: experience.records, searches: experience.searches, uses, errors: experience.errors || [], document_contract: p.document_contract || []}, null, 2))}</pre></details>`;
     renderOwner(p);
