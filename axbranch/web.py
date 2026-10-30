@@ -26,7 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from . import WORKSPACE, __version__, actions, budgets, departments, home, improvements, knowledge, live, supervisor
-from .state import Rejected, Store, run_lock
+from .state import Rejected, Store, run_lock, stop_outcome
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
 STATIC = ROOT / 'axbranch' / 'webui' if (ROOT / 'axbranch' / 'webui').is_dir() else Path(__file__).with_name('webui')
@@ -111,7 +111,7 @@ class App:
                 'recommendations': departments.recommendations(store, pid),
                 'execution_budget': _execution_budget(store, p),
                 'owner_web_run': self.owner_runs.status(pid, self.workspace / 'projects' / pid),
-                'improvements': _improvements_view(store, pid)}
+                'improvements': _improvements_view(store, pid), 'now': _now(p, rec['status'], view['pipeline'])}
 
     def settings(self):
         try:
@@ -417,6 +417,33 @@ def improvement_action(app, store, cid, action, body):
         if action == 'reject':
             return improvements.reject(store, cid, str(body.get('why', '')))
     raise KeyError('unknown action')
+
+
+NEXT = {'VERIFIED': '[결과 실행]으로 확인한 뒤 의견을 보내거나 완료하세요.',
+        'OWNER_DECISION_REQUIRED': '아래 결정 카드에서 고르거나, 방향을 적고 [수정 요청 / 계속]을 누르세요.',
+        'EXHAUSTED': '방향을 바꾼 뒤에도 같은 실패가 반복됐습니다. 요구를 바꾸거나 다른 방법을 지시하세요. 같은 방식으로는 다시 돌리지 않습니다.',
+        'BUDGET_REACHED': '허용된 재작업 횟수를 다 썼습니다. 기준은 낮추지 않습니다. 횟수를 늘려 재개하거나 목표를 바꾸세요.',
+        'OWNER_STOPPED': '[계속 실행 / 재개]를 누르면 멈춘 지점부터 기록을 이어 실행합니다.',
+        'CLOSING': '종료 절차를 진행 중입니다.'}
+
+
+def _now(p, status, pipeline):
+    """One line for the Owner: current stage and who does it, why it stopped, what to do next (from recorded state)."""
+    current = next((r for r in pipeline if r.get('mark') == '●'), None)
+    out = {'stage': current and current['title'], 'engine': current and current['engine'], 'status': status}
+    stop = stop_outcome(p)
+    if stop and status != 'ACTIVE':
+        code, reason = stop
+        if code == 'BLOCKED':
+            nxt = ('사용량 한도에 걸렸습니다. 한도가 풀린 뒤 [계속 실행 / 재개]하면 기록에서 이어서 실행합니다 (같은 단계를 두 번 돌리지 않음).'
+                   if 'RateLimited' in reason or 'No provider' in reason else
+                   '실행 환경 문제로 멈췄습니다. 타임라인의 원인을 확인한 뒤 [계속 실행 / 재개]하세요.')
+        elif 'budget' in reason.lower():
+            nxt = '이번 업무의 사용 한도에 도달했습니다. 아래 예산 카드에서 한도를 늘리거나 결과를 그대로 검토하세요.'
+        else:
+            nxt = NEXT.get(code, '')
+        out.update(stop=code, reason=reason, next=nxt)
+    return out
 
 
 def _attached_view(store, pid):

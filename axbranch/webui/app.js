@@ -272,7 +272,7 @@
   async function openProject(pid) {
     saveOwnerDraft(); S.navigation++; S.pid = pid; S.project = null; S.stageKey = null;
     $('#owner').hidden = true; $('#owner').dataset.mode = ''; $('#owner').innerHTML = '';
-    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience', 'executionBudget', 'webRun', 'capabilities']) $('#' + id).textContent = '';
+    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience', 'executionBudget', 'webRun', 'capabilities', 'pNow']) $('#' + id).textContent = '';
     $('#capabilities').hidden = true;
     $('#webRun').hidden = true;
     $('#executionBudget').hidden = true;
@@ -288,6 +288,9 @@
     $('#banner').textContent = p.banner.text; $('#banner').style.background = p.banner.color;
     $('#pTitle').textContent = p.title;
     $('#pState').textContent = `${p.id} · ${p.state} · ${p.status} · v${p.iteration}` + (p.pause_reason ? ` · ${p.pause_reason.slice(0, 200)}` : '');
+    const n = p.now || {};
+    $('#pNow').innerHTML = (n.stage ? `지금 단계: <b>${esc(n.stage)}</b> · 담당 ${esc(n.engine)}` : '')
+      + (n.next ? `${n.stage ? '<br>' : ''}멈춘 이유: ${esc(n.reason || n.stop)}<br>다음 행동: <b>${esc(n.next)}</b>` : '');
     renderExecutionBudget(p.execution_budget);
     renderWebRun(p.owner_web_run);
     renderCapabilities(p.capabilities || []);
