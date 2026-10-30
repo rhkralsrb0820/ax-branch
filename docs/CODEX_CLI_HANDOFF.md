@@ -1,4 +1,16 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-30 19:20 KST (0.1.64 dev source; full regression interrupted)
+## CURRENT CHECKPOINT — Claude, 2026-10-30 20:30 KST (0.1.64 candidate built)
+- Branch dev/web-ui, code 42b1bd2 (+ records commit). Working tree clean. Owner server unchanged: 0.1.63-50aabe2.
+- New since 098759f: a744f5b generalized capability-gap flow; 5fab908 evaluation projects out of the work list
+  (devroom verification values fixed: b4d4dec would have failed test_web); 612ea51 training records; 42b1bd2 devroom.
+- **Full regression 576 OK (1 skipped) on 42b1bd2**, hashes matched (supersedes the reaped b4d4dec run).
+- **Candidate 0.1.64-42b1bd2:** C:/Users/HP/Documents/Codex/axbranch-builds/0.1.64-42b1bd2 (BUILD.json). Packaged
+  Owner-data flow 18/18 (fixed test app), smoke of new views/APIs. No model call.
+- Evidence: docs/evidence/2026-10-30-0.1.64-features.md.
+- **Not done / Owner decisions:** server switch to the candidate (needs approval + backup/rollback as on 2026-10-29);
+  one limited real-model run; improvement evaluation (no real candidate yet); A/B on hold.
+- Correction: earlier notes said test_improvements 5/5 at 4f177db/b4d4dec; it was 4/4 then (5/5 now).
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-30 19:20 KST (0.1.64 dev source; full regression interrupted)
 - Branch `dev/web-ui`, HEAD b4d4dec (+ this handoff commit). Working tree clean. Owner server unchanged: 0.1.63-50aabe2.
 - **Newly usable in the dev source (not in any build yet):**
   - a8dfa81: uncommitted experience WIP found in the tree (lesson candidates, decision-change view; author not recorded)
