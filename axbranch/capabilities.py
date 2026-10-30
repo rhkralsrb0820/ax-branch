@@ -5,6 +5,7 @@ governance, or grant OS isolation. Provider flags and contained processes enforc
 the authority; events alone are never claimed as enforcement.
 """
 import re
+import shutil
 import time
 from contextlib import contextmanager
 
@@ -97,8 +98,21 @@ def _launches_exe(spec, exe_name):
     return bool(exe_name) and names == {f'{exe_name}.exe'.lower()}
 
 
+def probe_browser(project_dir):
+    """Free option for runtime_browser: an installed Chrome/Edge (found on disk, never installed by AX Branch)."""
+    from . import runtime
+    path = runtime.browser()
+    if path:
+        return {'ok': True, 'evidence': {'browser': path}}
+    return {'ok': False, 'why': 'no installed Chrome or Edge was found on this PC',
+            'minimal_approval': 'Owner installs Google Chrome or Microsoft Edge (free); AX Branch never installs software itself',
+            'cost': '0'}
+
+
 def options(capability, training=None):
     """(name, attempt) pairs in the order they are tried for a resolvable capability; () if none is known."""
+    if capability == 'runtime_browser':
+        return (('installed_browser', probe_browser),)
     if capability not in TRAINING_NAMES:
         return ()
     if training is None:
@@ -106,9 +120,44 @@ def options(capability, training=None):
     return (('local_cpu_lora', training.probe_cpu), ('free_cloud_gpu', training.probe_cloud_gpu))
 
 
+# Installed programs a capability name may refer to. Finding one is recorded, but an installed program is not an
+# execution adapter here (LIMITS): it is never leased to an agent, so it never resolves the capability by itself.
+TOOL_HINTS = {'ocr': ('tesseract',), 'pdf': ('pdftotext', 'qpdf'), 'video': ('ffmpeg',), 'audio': ('ffmpeg',),
+              'image': ('magick',), 'office': ('soffice',), 'docker': ('docker',), 'node': ('node',),
+              'java': ('java',), 'dotnet': ('dotnet',), 'rust': ('cargo',), 'go': ('go',)}
+
+
+def static_checks(capability):
+    """Attempts that need no run: installed-tool lookup and the known free alternative or reason. Each is a record of
+    what was checked, never a claim that the capability was obtained."""
+    out = []
+    low = capability.lower()
+    found = sorted({f'{t} ({shutil.which(t)})' for k, tools in TOOL_HINTS.items() if k in low
+                    for t in tools if shutil.which(t)})
+    hinted = [t for k, tools in TOOL_HINTS.items() if k in low for t in tools]
+    if hinted:
+        out.append({'option': 'installed_tool', 'ok': False, 'seconds': 0,
+                    'why': (f"installed: {', '.join(found)}; but an installed program is not an execution adapter in "
+                            'AX Branch, so no agent or check can use it' if found else
+                            f"no installed program found ({', '.join(sorted(set(hinted)))})")})
+    if capability == 'native_executable_launch':
+        out.append({'option': 'pyinstaller_native_build', 'ok': False, 'seconds': 0, 'replan': True,
+                    'why': 'free supported alternative: the CEO re-plans with native_build pyinstaller (Python source -> '
+                           'one .exe that verification builds and launches); other packagers/installers are unsupported'})
+    elif capability.startswith('unsupported_runtime:'):
+        out.append({'option': 'supported_runtime_modes', 'ok': False, 'seconds': 0, 'replan': True,
+                    'why': 'supported program modes are cli, web, gui (startup only) and none; the CEO re-plans with one'})
+    return out
+
+
 def resolve(store, pid, capability, project_dir, tried_options=None):
-    """Try each option (a real small run, not a declaration); record every attempt and the decision."""
+    """Identify -> check installed tools -> try the allowed free options (real small runs, not declarations) -> record
+    every attempt and ONE decision: resolved / needs_owner (minimal approval) / needs_replan (a supported free
+    alternative) / unsupported. Only a successful real attempt resolves a capability."""
     tried = []
+    for rec in static_checks(capability):
+        store.event(pid, 'capability_attempt', capability=capability, **rec)
+        tried.append(rec)
     for name, attempt in tried_options if tried_options is not None else options(capability):
         started = time.monotonic()
         try:
@@ -124,6 +173,20 @@ def resolve(store, pid, capability, project_dir, tried_options=None):
             break
     else:
         approvals = [t['minimal_approval'] for t in tried if t.get('minimal_approval')]
+        replan = [t['why'] for t in tried if t.get('replan')]
+        if not approvals and replan:
+            decision = {'capability': capability, 'status': 'needs_replan', 'tried': tried, 'alternative': replan,
+                        'cost': ['0'], 'minimal_approval': [],
+                        'next_action': 'the CEO re-plans with the supported alternative ([수정 요청 / 계속]); nothing was obtained'}
+            store.event(pid, 'capability_decision', **decision)
+            return decision
+        if not approvals and not any(t['option'] != 'installed_tool' for t in tried):
+            decision = {'capability': capability, 'status': 'unsupported', 'tried': tried, 'cost': [],
+                        'minimal_approval': ['no free option exists here: change the requirement, or approve developing '
+                                             'a new AX Branch capability (development work, not a runtime grant)'],
+                        'next_action': 'Owner changes the requirement; the quality bar is not lowered silently'}
+            store.event(pid, 'capability_decision', **decision)
+            return decision
         decision = {'capability': capability, 'status': 'needs_owner', 'tried': tried,
                     'cost': [t.get('cost', 'UNKNOWN') for t in tried],
                     'minimal_approval': approvals or ['UNKNOWN: no option works here; the Owner decides whether to '

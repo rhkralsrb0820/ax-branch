@@ -1277,6 +1277,10 @@ class Engine:
     def _capability_gate(self, pid):
         plan = self.store.project(pid)['plan']
         missing = capabilities.gaps(plan, bool(runtime.browser()))
+        # Every gap goes through the same flow (capabilities.resolve): installed tools checked, free options tried,
+        # one recorded decision. Gaps without a runnable option are recorded too, then stop as before.
+        for name in [m for m in missing if not capabilities.options(m)]:
+            capabilities.resolve(self.store, pid, name, self.workspace / 'projects' / pid)
         for name in [m for m in missing if capabilities.options(m)]:
             resolved = next((e['detail'] for e in reversed(self.store.events(pid, {'capability_decision'}))
                              if e['detail'].get('capability') == name and e['detail'].get('status') == 'resolved'), None)

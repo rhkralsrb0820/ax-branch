@@ -348,14 +348,18 @@
       + `<details><summary>경험·검증 근거 펼치기</summary><pre>${esc(JSON.stringify({records: experience.records, searches: experience.searches, uses, errors: experience.errors || [], document_contract: p.document_contract || []}, null, 2))}</pre></details>`;
     renderOwner(p);
   }
-  const OPTION = {local_cpu_lora: '로컬 CPU 소형 LoRA (무료)', free_cloud_gpu: '무료 클라우드 GPU (Owner 로그인 필요)'};
+  const OPTION = {local_cpu_lora: '로컬 CPU 소형 LoRA (무료)', free_cloud_gpu: '무료 클라우드 GPU (Owner 로그인 필요)',
+    installed_browser: '설치된 Chrome·Edge 확인', installed_tool: '설치된 프로그램 확인', pyinstaller_native_build: 'PyInstaller로 .exe 만들기 (무료, 지원)',
+    supported_runtime_modes: '지원하는 실행 방식으로 다시 계획'};
+  const CAP_STATUS = {resolved: '확보됨', needs_owner: 'Owner 승인 필요', needs_replan: '지원되는 대안으로 다시 계획 필요 (아직 확보 안 됨)', unsupported: '지원하지 않는 기능'};
   function renderCapabilities(list) {
     const box = $('#capabilities');
     box.hidden = !list.length;
     box.innerHTML = '<h3>필요한 기능 확보</h3><div class="muted">부족한 기능은 무료 대안부터 실제로 시도한 결과만 표시합니다. 권한·비용은 자동으로 부여하지 않습니다.</div>'
-      + list.map(c => `<div class="kv"><b>${esc(c.capability)}</b> · ${c.status === 'resolved' ? '확보됨: ' + esc(OPTION[c.chosen] || c.chosen) : 'Owner 결정 필요'}`
+      + list.map(c => `<div class="kv"><b>${esc(c.capability)}</b> · ${c.status === 'resolved' ? '확보됨: ' + esc(OPTION[c.chosen] || c.chosen) : esc(CAP_STATUS[c.status] || c.status)}`
         + (c.tried || []).map(t => `<div class="muted">시도: ${esc(OPTION[t.option] || t.option)} → ${t.ok ? '성공' : '실패'}${t.why ? ' · ' + esc(String(t.why).slice(0, 200)) : ''} (${t.seconds}초)</div>`).join('')
-        + (c.status !== 'resolved' ? `<div>필요한 최소 승인: ${esc((c.minimal_approval || []).join(' / '))}</div><div class="muted">비용: ${esc((c.cost || []).join(' / '))} · 다음 행동: ${esc(c.next_action || '')}</div>` : '')
+        + (c.status !== 'resolved' ? ((c.minimal_approval || []).length ? `<div>필요한 최소 승인: ${esc(c.minimal_approval.join(' / '))}</div>` : '')
+          + `<div class="muted">비용: ${esc((c.cost || []).join(' / ') || '-')} · 다음 행동: ${esc(c.next_action || '')}</div>` : '')
         + '</div>').join('');
   }
   function improvementsLine(im) {

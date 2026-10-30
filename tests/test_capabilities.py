@@ -33,6 +33,27 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(len(script.prompts), 1)
         self.assertFalse(self.store.artifacts(pid))
         self.assert_revoked(pid)
+        decision = self.store.events(pid, {'capability_decision'})[-1]['detail']
+        self.assertEqual((decision['capability'], decision['status']), ('gui_interaction', 'unsupported'))
+
+    def test_every_gap_is_resolved_or_recorded_never_claimed(self):
+        pid = self.store.new_project('gap flow')
+        native = C.resolve(self.store, pid, 'native_executable_launch', self.tmp)
+        self.assertEqual(native['status'], 'needs_replan')                   # supported free alternative, nothing obtained
+        self.assertIn('pyinstaller', native['alternative'][0])
+        with mock.patch.object(C.shutil, 'which', lambda t: r'C:\\tools\\ffmpeg.exe' if t == 'ffmpeg' else None):
+            video = C.resolve(self.store, pid, 'video_editing', self.tmp)
+        self.assertEqual(video['status'], 'unsupported')                     # an installed program is not an adapter
+        self.assertIn('ffmpeg', video['tried'][0]['why'])
+        from axbranch import runtime
+        with mock.patch.object(runtime, 'browser', lambda: None):
+            browser = C.resolve(self.store, pid, 'runtime_browser', self.tmp)
+        self.assertEqual(browser['status'], 'needs_owner')
+        self.assertIn('Chrome', browser['minimal_approval'][0])
+        with mock.patch.object(runtime, 'browser', lambda: r'C:\\chrome.exe'):
+            self.assertEqual(C.resolve(self.store, pid, 'runtime_browser', self.tmp)['status'], 'resolved')
+        self.assertEqual([e['detail']['status'] for e in self.store.events(pid, {'capability_decision'})],
+                         ['needs_replan', 'unsupported', 'needs_owner', 'resolved'])
 
     def training_plan(self, options, runs=1):
         """A plan whose builder stage declares model_training; the resolver's options are stand-ins."""

@@ -434,7 +434,9 @@ def _now(p, status, pipeline):
     stop = stop_outcome(p)
     if stop and status != 'ACTIVE':
         code, reason = stop
-        if code == 'BLOCKED':
+        if 'CAPABILITY_GAP' in reason or 'Owner action needed: capability' in reason:
+            nxt = '필요한 기능이 없어 제작 전에 멈췄습니다. 아래 "필요한 기능 확보" 카드에서 시도 결과와 대안·필요한 승인을 확인하고, 요구를 바꾸거나 승인하세요.'
+        elif code == 'BLOCKED':
             nxt = ('사용량 한도에 걸렸습니다. 한도가 풀린 뒤 [계속 실행 / 재개]하면 기록에서 이어서 실행합니다 (같은 단계를 두 번 돌리지 않음).'
                    if 'RateLimited' in reason or 'No provider' in reason else
                    '실행 환경 문제로 멈췄습니다. 타임라인의 원인을 확인한 뒤 [계속 실행 / 재개]하세요.')
