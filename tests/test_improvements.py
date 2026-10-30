@@ -125,6 +125,16 @@ class ImprovementTests(unittest.TestCase):
         with self.assertRaises(Rejected):          # the page must send an explicit approval
             web.route(app, self.store, 'POST', f'/api/improvement/{cid}/evaluate', {}, {'approve': 'yes'})
         self.assertIn('improvements', app.project(self.store, pid))
+        c = I.start_eval(self.store, self.engine, catalog()[0], cid, lambda p: None, approved=True)
+        evals = {p['project'] for p in c['eval']['projects']}
+        ov = app.overview(self.store)
+        self.assertFalse(evals & {r['id'] for r in ov['projects']})          # not in the work list
+        self.assertEqual(ov['evaluation_projects'], 2)
+        self.assertIn(pid, {r['id'] for r in ov['projects']})
+        listed = web.route(app, self.store, 'GET', '/api/improvements', {}, {})['candidates'][0]['eval']['projects']
+        self.assertEqual({p['project'] for p in listed}, evals)            # found from the candidate instead
+        self.assertTrue(all(p['state'] == 'CREATED' for p in listed))
+        self.assertEqual(app.project(self.store, listed[0]['project'])['improvements']['evaluation']['candidate'], cid)
 
     def test_learning_paths_report_real_state(self):
         paths = {p['id']: p for p in I.learning_paths(self.store)}

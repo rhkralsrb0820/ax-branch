@@ -62,7 +62,8 @@ class App:
     # ---- read models ----
     def overview(self, store):
         statuses, rows = {}, []
-        for p in store.projects():
+        hidden = improvements.evaluation_projects(store)       # evaluation runs live under '개선 후보', not the work list
+        for p in [p for p in store.projects() if p['id'] not in hidden]:
             # The summary rows omit plan, including the CEO's saved display title.
             # Use the same full record as the project page; never rewrite the original goal.
             p = store.project(p['id'])
@@ -82,7 +83,9 @@ class App:
                 if name not in delegated:
                     delegated.append(name)
         return {'version': __version__, 'projects': rows, 'orb': orb, 'delegated': delegated,
-                'groups': [{'label': l, 'count': n, 'color': c} for l, n, c in home.state_groups(store.projects())],
+                'groups': [{'label': l, 'count': n, 'color': c} for l, n, c in
+                           home.state_groups([p for p in store.projects() if p['id'] not in hidden])],
+                'evaluation_projects': len(hidden),
                 'departments': [dict(departments.summary(s), knowledge=s['knowledge'], lifecycle=departments.lifecycle(s['id']))
                                 for s in self.specs.values()],
                 'refused': sorted(self.refused), 'settings': self.settings(), 'test_mode': self.test_mode,
@@ -308,10 +311,12 @@ def route(app, store, method, path, query, body):
             f = Path(os.environ['AXB_TEST_FIXTURE'])
             return {'name': f.name, 'text': f.read_text(encoding='utf-8-sig')}
         if parts == ['improvements']:
-            return {'candidates': improvements.all_(store), 'learning': improvements.learning_paths(store)}
+            return {'candidates': improvements.with_states(store, improvements.all_(store)),
+                    'learning': improvements.learning_paths(store)}
         if parts == ['library']:
             from . import library
-            return {'types': list(library.TYPES), 'entries': library.entries(store)}
+            hidden = improvements.evaluation_projects(store)
+            return {'types': list(library.TYPES), 'entries': [e for e in library.entries(store) if e['project'] not in hidden]}
         if len(parts) == 2 and parts[0] == 'project' and PID_RE.fullmatch(parts[1]):
             return app.project(store, parts[1])
         if len(parts) == 3 and parts[0] == 'project' and parts[2] == 'records' and PID_RE.fullmatch(parts[1]):

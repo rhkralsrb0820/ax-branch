@@ -49,6 +49,21 @@ def _save(store, c, state, what, by):
     return get(store, c['id'])
 
 
+def evaluation_projects(store):
+    """Projects created to evaluate a candidate: kept with all their records, listed under the candidate instead of
+    the Owner's work list."""
+    return {r[0] for r in store.db.execute("SELECT DISTINCT project_id FROM events WHERE kind='improvement_policy'")}
+
+
+def with_states(store, candidates):
+    for c in candidates:
+        for p in (c.get('eval') or {}).get('projects', []):
+            proj = store.project(p['project'])
+            vs = store.verifications(p['project'])
+            p.update(state=proj['state'], last_verdict=vs[-1]['verdict'] if vs else None)
+    return candidates
+
+
 def _policy(store, pid):
     found = store.events(pid, {'improvement_policy'})
     return found[-1]['detail'] if found else None

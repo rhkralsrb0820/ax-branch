@@ -375,11 +375,11 @@
     const when = t => t ? new Date(t * 1000).toLocaleString() : '';
     const arm = a => a ? `${a.passed}/${a.n} 통과 · 같은 실패 재발 ${a.recurred}회` : '-';
     box.innerHTML = '<h3>학습·개선 경로 (이 PC에서 실제로 하는 일)</h3>' + d.learning.map(l => `<div class="kv"><b>${esc(l.name)}</b> <span class="tag">${esc(l.status)}</span><br>${esc(l.detail)}<br><span class="muted">효과: ${esc(l.effect)}</span></div>`).join('')
-      + `<h3>개선 후보 (${d.candidates.length})</h3>`
+      + `<h3>개선 후보 (${d.candidates.length})</h3><div class="muted">평가용 프로젝트는 업무 목록에 나오지 않고 아래 각 후보에서 열 수 있습니다. 기록은 모두 보존됩니다.</div>`
       + (d.candidates.map(c => `<div class="item"><h4>${esc(c.id)} <span class="tag">${esc(c.label)}</span></h4>
         <div class="kv">반복 실패: <code>${esc(c.signature)}</code><br>근거: ${c.evidence.map(e => esc(e.project)).join(', ')} (${c.evidence.length}건) · 갱신 ${esc(when(c.updated))}</div>
         <div class="kv">개선안: ${c.proposal ? esc(c.proposal.rule) + `<br><span class="muted">${esc(c.proposal.origin)}</span>` : '아직 없음 — 같은 실패가 해결된 기록이 생기면 자동으로 붙습니다.'}</div>`
-        + (c.eval ? `<div class="kv">평가: 원래 업무 ${c.eval.cases.length}건 × (기준·개선안) · 경험 검색 꺼짐 · 최대 ${Number(c.eval.max_tokens_total).toLocaleString()} 토큰${(c.eval.projects || []).length ? '<br>평가 프로젝트: ' + c.eval.projects.map(p => `<a href="#" data-proj="${esc(p.project)}">${esc(p.project)}</a>(${p.arm === 'variant' ? '개선안' : '기준'})`).join(' ') : ''}</div>` : '')
+        + (c.eval ? `<div class="kv">평가: 원래 업무 ${c.eval.cases.length}건 × (기준·개선안) · 경험 검색 꺼짐 · 최대 ${Number(c.eval.max_tokens_total).toLocaleString()} 토큰${(c.eval.projects || []).length ? '<br>평가 프로젝트: ' + c.eval.projects.map(p => `<a href="#" data-proj="${esc(p.project)}">${esc(p.project)}</a>(${p.arm === 'variant' ? '개선안' : '기준'} · ${esc(p.state || '')}${p.last_verdict ? ' · 검증 ' + esc(p.last_verdict) : ''})`).join(' ') : ''}</div>` : '')
         + (c.comparison ? `<div class="kv">비교 결과 — 기준: ${arm(c.comparison.baseline)} / 개선안: ${arm(c.comparison.variant)}<br><b>${c.comparison.not_worse ? (c.comparison.better ? '개선안이 더 나았음' : '개선안이 나쁘지 않았음') : '개선안이 더 나빴음'}</b> · <span class="muted">${esc(c.comparison.limits)}</span></div>` : '')
         + `<div class="row">${improvementButtons(c)}</div>`
         + `<details><summary>상태 기록</summary>${(c.history || []).map(h => `<div class="muted">${esc(when(h.at))} ${esc(h.from)} → ${esc(h.to)} · ${esc(h.what)} · ${esc(h.by)}</div>`).join('')}</details></div>`).join('')
