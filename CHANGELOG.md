@@ -3,6 +3,31 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.64] - 2026-10-30
+
+### Added
+- Improvement candidates (`axbranch/improvements.py`, view '개선 후보 · 학습'): a repeated failure signature registers a candidate with its evidence; the strategy change after which that project later passed becomes its proposal; evaluation is prepared (source goals, baseline vs. variant, experience retrieval disabled), runs only on explicit Owner approval through the normal project path, records the comparison automatically, and only a not-worse result can be applied by the Owner; rollback removes it. Applied rules reach CEO planning/strategy as reference context only.
+- Learning paths shown from real state: experience retrieval (in use, effect unverified), approved rules, LoRA for generated results (free options tried for real), fine-tuning of AX Branch's own models (unsupported, with the reason).
+- Department recommendations state the capability the attached departments lack; the project shows which departments the Owner connected directly and which came from an accepted recommendation; capability attempts (free options tried, results, cost, minimal approval) are shown.
+- Project page: current stage and who does it, why it stopped and the next action.
+- Home: running or waiting work is shown with its real pipeline and the info cards fold.
+- Owner data across the library lineage: a project continued from the library starts from the nearest ancestor's last good data and saves under itself; the original is never changed.
+- Experience: bounded event-derived lesson candidates and recorded decision changes in the project view (integrated from uncommitted working-tree changes).
+
+### Changed
+- Plan schema: `recommended_departments[].gap`.
+
+### Fixed
+- Improvement view crashed for candidates without a comparison (found by the browser self-test before release).
+
+### Verification
+- Focused: test_improvements 5/5, test_recommendations 8/8, test_now 2/2, test_owner_data 12/12 (real AppContainer, fixed developer test app), test_department_lessons 1/1, test_web OK; headless browser self-test 36/36 (synthetic fixtures, no model).
+- Full regression and package checks: see the evidence file for this release.
+
+### Known issues
+- No real-model run on this code: the CEO writing `gap`, a real evaluation run and any quality effect are unverified. A/B stays on hold.
+- Evaluation projects appear in the Owner's project list (marked on their page).
+
 ## [0.1.63] - 2026-10-27
 
 ### Added

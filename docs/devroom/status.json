@@ -811,7 +811,7 @@
     "개발 소스",
     "후보 빌드"
    ],
-   "note": "청월이 데이터 명세(경로·형식·데이터 형식 버전·호환 범위·쓰기/읽기 요청)를 계획에 넣고, 제작자가 받고, 검증이 실제로 쓰고-저장하고-복원해 다시 읽으며, 실행기는 명세가 있을 때만 그 범위로 저장·복원",
+   "note": "청월이 데이터 명세(경로·형식·데이터 형식 버전·호환 범위·쓰기/읽기 요청)를 계획에 넣고, 제작자가 받고, 검증이 실제로 쓰고-저장하고-복원해 다시 읽으며, 실행기는 명세가 있을 때만 그 범위로 저장·복원 · 라이브러리에서 이어서 개발한 프로젝트는 원본의 마지막 데이터로 시작(원본 불변)",
    "remaining": "실제 모델(청월·제작자)이 이 명세를 쓰는지는 아직 미확인(모델 호출 없는 자동 테스트와 고정 시험 앱만) · 명세 없는 기존 프로젝트는 저장·복원하지 않음 · 지원 형식은 JSON·CSV·TXT·SQLite만",
    "next": "실제 모델 웹앱 흐름 1회로 명세 작성·구현 확인(Owner 결정)",
    "evidence": [
@@ -879,6 +879,132 @@
    "next": "Owner 결정 전 실행 안 함",
    "evidence": [
     "axbranch/product_experiment.py"
+   ]
+  },
+  {
+   "id": "departments",
+   "title": "부서 라이브러리 → 프로젝트 연결 → 청월 추천(이유·부족한 기능) → 위임 → 결과 반환",
+   "impl": "구현됨",
+   "verified": [
+    "자동 테스트",
+    "브라우저 시험"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "Owner가 직접 연결한 부서와 추천을 수락해 연결한 부서를 구분 표시. 추천 수락은 권한·비용을 부여하지 않음",
+   "remaining": "실제 모델이 부족한 기능(gap)을 쓰는지 미확인",
+   "next": "제한된 실제 모델 실행에서 확인",
+   "evidence": [
+    "tests/test_recommendations.py",
+    "tests/browser_web_selftest.py"
+   ]
+  },
+  {
+   "id": "capability-gaps",
+   "title": "필요한 기능이 없을 때 무료 대안 실제 시도·결과·필요한 최소 승인 표시",
+   "impl": "구현됨",
+   "verified": [
+    "자동 테스트",
+    "브라우저 시험"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "현재 자동 시도 대상은 모델 학습 기능(로컬 CPU LoRA → 무료 클라우드 GPU)",
+   "remaining": "그 밖의 기능은 계획 단계에서 중단·사유 표시만",
+   "next": "-",
+   "evidence": [
+    "axbranch/capabilities.py",
+    "tests/browser_web_selftest.py"
+   ]
+  },
+  {
+   "id": "run-status",
+   "title": "프로젝트 화면: 지금 단계·담당, 멈춘 이유, 다음 행동",
+   "impl": "구현됨",
+   "verified": [
+    "자동 테스트"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "기록된 상태에서만 만듦",
+   "remaining": "-",
+   "next": "-",
+   "evidence": [
+    "tests/test_now.py"
+   ]
+  },
+  {
+   "id": "experience",
+   "title": "업무 경험 기록·다음 업무 검색·채택/거절 이유·교훈 후보 표시",
+   "impl": "구현됨",
+   "verified": [
+    "자동 테스트"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "교훈 후보는 고정 규칙으로 이벤트에서 추출(모델 문장 아님). 품질 개선 효과는 미검증",
+   "remaining": "효과 검증(A/B)은 Owner 지시로 보류",
+   "next": "-",
+   "evidence": [
+    "tests/test_department_lessons.py",
+    "tests/test_decision_trace.py"
+   ]
+  },
+  {
+   "id": "improvements",
+   "title": "개선 후보: 반복 실패 → 해결안 → 평가 준비 → (승인) 비교 평가 → 승인 적용 → 되돌리기",
+   "impl": "구현됨",
+   "verified": [
+    "자동 테스트",
+    "브라우저 시험"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "적용된 규칙만 청월 계획·전략에 참고로 전달. 비교 결과 없이는 적용 불가",
+   "remaining": "실제 평가 실행(모델 호출)은 아직 한 번도 하지 않음",
+   "next": "후보가 생기면 Owner 승인 후 평가 1회",
+   "evidence": [
+    "tests/test_improvements.py"
+   ]
+  },
+  {
+   "id": "learning-paths",
+   "title": "학습 경로 상태(경험 검색·승인 규칙·LoRA·Fine-tuning)",
+   "impl": "일부 구현",
+   "verified": [
+    "자동 테스트",
+    "브라우저 시험"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "실제 상태만 표시. AX Branch 자체 모델 학습·Fine-tuning은 미지원(이유 표시)",
+   "remaining": "AX Branch 자체 모델 학습은 하지 않음",
+   "next": "-",
+   "evidence": [
+    "axbranch/improvements.py"
+   ]
+  },
+  {
+   "id": "home-active",
+   "title": "청월 홈: 진행·대기 업무의 실제 파이프라인 중심, 정보 카드 접기",
+   "impl": "구현됨",
+   "verified": [
+    "브라우저 시험"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "대기 시 AI 동향·취업 정보 각 3개",
+   "remaining": "-",
+   "next": "-",
+   "evidence": [
+    "tests/browser_web_selftest.py"
    ]
   }
  ],
