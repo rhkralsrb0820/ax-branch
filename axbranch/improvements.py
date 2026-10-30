@@ -10,6 +10,7 @@ This is retrieval of approved operating notes, never model training; no quality 
 import hashlib
 import json
 import time
+from pathlib import Path
 
 from .state import ACTIVE, Rejected
 
@@ -207,12 +208,56 @@ def for_project(store, pid):
     return [{'id': c['id'], 'signature': c['signature'], 'rule': c['proposal']['rule']} for c in rules if c.get('proposal')]
 
 
+def _base_model(run):
+    """The base model a run declares (metrics.json or a PEFT adapter_config.json it wrote), else UNKNOWN."""
+    if isinstance(run.get('metrics'), dict):
+        for k in ('base_model', 'model', 'model_name'):
+            if isinstance(run['metrics'].get(k), str):
+                return run['metrics'][k]
+    for f in run.get('files', []):
+        if f['path'].endswith('adapter_config.json'):
+            try:
+                return json.loads((Path(run['dir']) / f['path']).read_text(encoding='utf-8')).get('base_model_name_or_path') or 'UNKNOWN'
+            except (OSError, ValueError, KeyError):
+                pass
+    return 'UNKNOWN'
+
+
+def training_runs(store, limit=20):
+    """Real training runs of generated results (engine._training_run), split into run / result / evaluation / applied.
+    The metrics are the training script's own dev-split numbers; the independent check is the verification verdict."""
+    out = []
+    rows = store.db.execute("SELECT project_id, at, detail FROM events WHERE kind='training_run' ORDER BY id DESC LIMIT ?", (limit,))
+    for pid, at, detail in rows.fetchall():
+        run = json.loads(detail)
+        verdicts = [v for v in store.verifications(pid) if v['artifact_id'] == run.get('artifact')]
+        project = store.project(pid)
+        delivered = bool(verdicts and verdicts[-1]['verdict'] == 'PASS' and project['state'] in ('OWNER_REVIEW', 'PENDING_CLOSE', 'CLOSED'))
+        inputs = [f for e in store.events(pid, {'owner_inputs'}) for f in e['detail'].get('files', [])]
+        out.append({
+            'project': pid, 'at': at, 'artifact': run.get('artifact'),
+            'run': {'status': '재사용(이미 끝난 학습)' if run.get('reused') else ('완료' if run.get('ok') else '실패'),
+                    'why': run.get('why', ''), 'seconds': run.get('seconds'), 'time_limit': run.get('time_limit'),
+                    'pins': run.get('pins', [])},
+            'inputs': [{'name': f.get('name') or f.get('path'), 'sha256': (f.get('sha256') or '')[:12]} for f in inputs][:10],
+            'base_model': _base_model(run),
+            'result': {'files': len(run.get('files', [])),
+                       'adapter_files': [f['path'] for f in run.get('files', []) if 'adapter' in f['path'].lower()][:10]},
+            'evaluation': {'self_reported_metrics': run.get('metrics'),
+                           'independent_verification': verdicts[-1]['verdict'] if verdicts else '미검증'},
+            'applied': ('Owner에게 결과로 전달됨' if delivered else '전달 전 (적용 안 됨)'),
+        })
+    return out
+
+
 def learning_paths(store):
     """What each learning path really does on this PC, from recorded state (no claimed effect)."""
     from . import training
     rows = store.db.execute("SELECT project_id, detail FROM events WHERE kind IN ('capability_decision') ORDER BY id DESC LIMIT 10").fetchall()
     venv, vpy = training.env_python()
     marker = venv / 'AXB_INSTALLED'
+    runs = store.db.execute("SELECT detail FROM events WHERE kind='training_run'").fetchall()
+    run_ok = sum(1 for (d,) in runs if json.loads(d).get('ok'))
     experience = store.db.execute("SELECT COUNT(*) FROM events WHERE kind='department_experience'").fetchone()[0]
     searches = store.db.execute("SELECT COUNT(*) FROM events WHERE kind='experience_search'").fetchone()[0]
     applied = [c['id'] for c in all_(store) if c['state'] == 'APPLIED']
@@ -229,6 +274,7 @@ def learning_paths(store):
                     f"최근 결정 {len(rows)}건: " + '; '.join(
                         f"{r['project_id']} {json.loads(r['detail']).get('status')}" for r in rows[:5]) if rows else
                     '결과물이 모델 학습을 요구하면 무료 대안(로컬 CPU 소형 LoRA → 무료 클라우드 GPU, Owner 로그인 필요)을 실제로 시도합니다. 아직 시도 기록 없음.'),
+         'runs': f'학습 실행 기록 {len(runs)}건 (성공 {run_ok}건) — 아래 학습 기록 표',
          'effect': 'AX Branch 자신의 청월·제작 모델은 학습하지 않습니다'},
         {'id': 'finetune', 'name': 'AX Branch 모델 Fine-tuning', 'status': '미지원',
          'detail': '구독 CLI 모델은 가중치를 바꿀 수 없고, 유료 학습 API는 비용·인증 승인 대상입니다. 대안: 경험 검색과 승인된 개선 규칙.',

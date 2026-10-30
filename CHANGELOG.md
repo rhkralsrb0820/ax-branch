@@ -13,15 +13,19 @@ Semantic versioning. Every release needs an entry with all five sections (enforc
 - Home: running or waiting work is shown with its real pipeline and the info cards fold.
 - Owner data across the library lineage: a project continued from the library starts from the nearest ancestor's last good data and saves under itself; the original is never changed.
 - Experience: bounded event-derived lesson candidates and recorded decision changes in the project view (integrated from uncommitted working-tree changes).
+- Evaluation projects are kept out of the work list, home counts and library and are found under their candidate.
+- Capability gaps: one flow for every gap (installed tools checked, allowed free options tried, decision resolved / needs_owner / needs_replan / unsupported); an installed Chrome/Edge is a real option for browser checks.
+- Training records: real training runs of generated results shown as run / inputs / base model / result (adapter files) / evaluation (self-reported metrics vs. independent verification) / applied (delivered or not).
 
 ### Changed
 - Plan schema: `recommended_departments[].gap`.
 
 ### Fixed
 - Improvement view crashed for candidates without a comparison (found by the browser self-test before release).
+- Devroom feature table used a verification value outside the allowed set (caught by test_web).
 
 ### Verification
-- Focused: test_improvements 5/5, test_recommendations 8/8, test_now 2/2, test_owner_data 12/12 (real AppContainer, fixed developer test app), test_department_lessons 1/1, test_web OK; headless browser self-test 36/36 (synthetic fixtures, no model).
+- Focused: test_improvements 5/5 (4/4 at b4d4dec; an earlier note said 5/5), test_recommendations 8/8, test_now 2/2, test_owner_data 12/12 (real AppContainer, fixed developer test app), test_department_lessons 1/1, test_web OK; headless browser self-test 36/36 (synthetic fixtures, no model).
 - Full regression and package checks: see the evidence file for this release.
 
 ### Known issues

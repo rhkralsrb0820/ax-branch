@@ -136,6 +136,25 @@ class ImprovementTests(unittest.TestCase):
         self.assertTrue(all(p['state'] == 'CREATED' for p in listed))
         self.assertEqual(app.project(self.store, listed[0]['project'])['improvements']['evaluation']['candidate'], cid)
 
+    def test_training_runs_keep_run_result_evaluation_and_applied_apart(self):
+        import json
+        pid = self.store.new_project('분류기 학습')
+        out = self.tmp / 'train'
+        (out / 'adapter').mkdir(parents=True)
+        (out / 'adapter' / 'adapter_config.json').write_text(json.dumps({'base_model_name_or_path': 'prajjwal1/bert-tiny'}), encoding='utf-8')
+        aid = self.store.add_artifact(pid, 1, self.tmp / 'a.py', 'sha', 'bundle', None)
+        self.store.event(pid, 'training_run', artifact=aid, ok=True, seconds=40, time_limit=1800, dir=str(out),
+                         files=[{'path': 'adapter/adapter_config.json', 'bytes': 1, 'sha256': 'x'}], metrics={'dev_f1': 0.8})
+        (run,) = I.training_runs(self.store)
+        self.assertEqual((run['run']['status'], run['base_model']), ('완료', 'prajjwal1/bert-tiny'))
+        self.assertEqual(run['result']['adapter_files'], ['adapter/adapter_config.json'])
+        self.assertEqual(run['evaluation'], {'self_reported_metrics': {'dev_f1': 0.8}, 'independent_verification': '미검증'})
+        self.assertEqual(run['applied'], '전달 전 (적용 안 됨)')
+        self.store.add_verification(pid, aid, 1, 'PASS', PASS, {'ok': True}, 'codex')
+        self.end(pid, 'OWNER_REVIEW')
+        (run,) = I.training_runs(self.store)
+        self.assertEqual((run['evaluation']['independent_verification'], run['applied']), ('PASS', 'Owner에게 결과로 전달됨'))
+
     def test_learning_paths_report_real_state(self):
         paths = {p['id']: p for p in I.learning_paths(self.store)}
         self.assertEqual(paths['finetune']['status'], '미지원')

@@ -374,7 +374,13 @@
     const d = await api('improvements'), box = $('#improvementList');
     const when = t => t ? new Date(t * 1000).toLocaleString() : '';
     const arm = a => a ? `${a.passed}/${a.n} 통과 · 같은 실패 재발 ${a.recurred}회` : '-';
-    box.innerHTML = '<h3>학습·개선 경로 (이 PC에서 실제로 하는 일)</h3>' + d.learning.map(l => `<div class="kv"><b>${esc(l.name)}</b> <span class="tag">${esc(l.status)}</span><br>${esc(l.detail)}<br><span class="muted">효과: ${esc(l.effect)}</span></div>`).join('')
+    box.innerHTML = '<h3>학습·개선 경로 (이 PC에서 실제로 하는 일)</h3>' + d.learning.map(l => `<div class="kv"><b>${esc(l.name)}</b> <span class="tag">${esc(l.status)}</span><br>${esc(l.detail)}${l.runs ? '<br>' + esc(l.runs) : ''}<br><span class="muted">효과: ${esc(l.effect)}</span></div>`).join('')
+      + '<h3>학습 기록 (생성 결과물의 실제 학습 실행)</h3>'
+      + ((d.training || []).map(t => `<div class="kv"><b>${esc(t.project)}</b> · ${esc(when(t.at))}<br>실행: ${esc(t.run.status)}${t.run.why ? ' · ' + esc(t.run.why) : ''}${t.run.seconds != null ? ` (${t.run.seconds}초 / 한도 ${t.run.time_limit}초)` : ''}
+        <br>입력 자료: ${t.inputs.length ? t.inputs.map(i => esc(i.name) + ' ' + esc(i.sha256)).join(', ') : '없음'} · 기반 모델: ${esc(t.base_model)}
+        <br>결과: 파일 ${t.result.files}개${t.result.adapter_files.length ? ' · 어댑터 ' + esc(t.result.adapter_files.join(', ')) : ''}
+        <br>평가: 학습 스크립트 자체 지표 ${esc(t.evaluation.self_reported_metrics ? JSON.stringify(t.evaluation.self_reported_metrics).slice(0, 200) : '없음')} · 독립 검증 ${esc(t.evaluation.independent_verification)}
+        <br>적용: ${esc(t.applied)}</div>`).join('') || '<div class="muted">아직 학습 실행 기록이 없습니다. 결과물이 모델 학습을 요구하면 여기에 실행·결과·평가·적용 상태가 따로 기록됩니다.</div>')
       + `<h3>개선 후보 (${d.candidates.length})</h3><div class="muted">평가용 프로젝트는 업무 목록에 나오지 않고 아래 각 후보에서 열 수 있습니다. 기록은 모두 보존됩니다.</div>`
       + (d.candidates.map(c => `<div class="item"><h4>${esc(c.id)} <span class="tag">${esc(c.label)}</span></h4>
         <div class="kv">반복 실패: <code>${esc(c.signature)}</code><br>근거: ${c.evidence.map(e => esc(e.project)).join(', ')} (${c.evidence.length}건) · 갱신 ${esc(when(c.updated))}</div>

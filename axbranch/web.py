@@ -312,7 +312,7 @@ def route(app, store, method, path, query, body):
             return {'name': f.name, 'text': f.read_text(encoding='utf-8-sig')}
         if parts == ['improvements']:
             return {'candidates': improvements.with_states(store, improvements.all_(store)),
-                    'learning': improvements.learning_paths(store)}
+                    'learning': improvements.learning_paths(store), 'training': improvements.training_runs(store)}
         if parts == ['library']:
             from . import library
             hidden = improvements.evaluation_projects(store)
