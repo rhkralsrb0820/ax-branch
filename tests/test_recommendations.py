@@ -39,6 +39,17 @@ class RecommendationTests(unittest.TestCase):
         self.assertEqual([d['id'] for d in D.attached(self.store, self.pid)], ['research'])
         self.assertEqual(rows[0]['lifecycle'], 'legacy')
 
+    def test_gap_is_shown_and_owner_vs_recommended_connections_are_distinguished(self):
+        from axbranch import web
+        D.attach(self.store, self.pid, 'operations', self.specs)                 # the Owner connected it directly
+        D.record_recommendations(self.store, self.pid, [{'id': 'research', 'reason': 'compare sources',
+                                                         'gap': 'no attached department checks sources'}])
+        rec = D.recommendations(self.store, self.pid)[-1]
+        self.assertEqual(rec['gap'], 'no attached department checks sources')
+        D.decide_recommendation(self.store, self.pid, rec['id'], 'accepted')
+        self.assertEqual({d['id']: d['via'] for d in web._attached_view(self.store, self.pid)},
+                         {'operations': 'owner', 'research': 'ceo_recommendation'})
+
     def test_max_three_and_empty_without_any_model_call(self):
         specs = {}
         for n in range(5):

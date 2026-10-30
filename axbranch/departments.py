@@ -377,7 +377,9 @@ def record_recommendations(store, pid, proposed):
             continue
         seen.add(dep)
         if (scope, dep) not in existing:
+            gap = item.get('gap')
             store.event(pid, 'department_recommended', department=dep, reason=reason.strip()[:1000],
+                        gap=gap.strip()[:500] if isinstance(gap, str) else '',
                         scope=scope, plan_version=store.project(pid)['plan_version'],
                         spec_sha256=spec_digest(specs[dep]), version=specs[dep]['version'])
         if len(seen) >= 3:
@@ -399,7 +401,7 @@ def recommendations(store, pid):
         spec = specs.get(dep)
         state = lifecycle(dep)
         valid = bool(spec and not blocked(dep) and spec_digest(spec) == d['spec_sha256'])
-        out.append(dict(id=event['id'], department=dep, reason=d['reason'], version=d['version'],
+        out.append(dict(id=event['id'], department=dep, reason=d['reason'], gap=d.get('gap', ''), version=d['version'],
                         lifecycle=state['status'], status=decisions.get(event['id'], 'pending'),
                         available=valid and dep not in linked,
                         note='연결은 기능만 추가합니다. 실행 중인 계획은 변경하거나 재시작하지 않습니다.'))

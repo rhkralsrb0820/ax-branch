@@ -111,6 +111,17 @@
       sessionStorage.setItem('axb-st', '3'); location.reload(); return;
     }
     if (phase === '3') {
+      window.AXB.show('home');
+      await report('home centres on the waiting project and folds the info cards',
+        await until(() => !$('#homeActive').hidden && /Owner 확인을 기다리는 업무/.test($('#homeActive').textContent) && !$('#homeFeeds').open), $('#homeActive').textContent.slice(0, 120));
+      const fixturePid = (window.AXB.ov.projects.find(p => /improvement evidence/.test(p.goal)) || {}).id;
+      await window.AXB.openProject(fixturePid);
+      await report('capability card shows tried free option and minimal approval', await until(() => /로컬 CPU 소형 LoRA/.test($('#capabilities').textContent) && /synthetic sign-in/.test($('#capabilities').textContent)), $('#capabilities').textContent.slice(0, 200));
+      window.AXB.show('improve');
+      await report('improvement view shows learning paths from real state', await until(() => /경험 검색/.test($('#improvementList').textContent) && /미지원/.test($('#improvementList').textContent)));
+      await report('candidate with resolution offers evaluation preparation', await until(() => $('#improvementList [data-act="prepare"]')));
+      $('#improvementList [data-act="prepare"]').click();
+      await report('prepare moves it to 평가 준비됨 with an approval-gated run button', await until(() => /평가 준비됨/.test($('#improvementList').textContent) && $('#improvementList [data-act="evaluate"]')), $('#improvementList').textContent.slice(0, 200));
       window.AXB.show('devroom');
       await until(() => window.AXDev && document.getElementById('copyTop'));
       await window.AXDev.setTab('notes'); await until(() => document.getElementById('notes'));

@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from axbranch import web, departments         # noqa: E402
+from axbranch import web, departments, improvements, engine as E   # noqa: E402
 from axbranch.state import Store              # noqa: E402
 
 CHROME = Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe')
@@ -40,6 +40,20 @@ def main(out=None):
     departments.record_recommendations(fixture, pid, [
         {'id': 'research', 'reason': 'Synthetic browser fixture: inspect supplied evidence'},
         {'id': 'operations', 'reason': 'Synthetic browser fixture: check quantities'}])
+    # Improvement candidate + capability decision + a project waiting for the Owner (synthetic records, no model).
+    review = fixture.new_project('Synthetic browser fixture: improvement evidence')
+    aid = fixture.add_artifact(review, 1, ws / 'a.py', 'sha', 'python', None)
+    fixture.add_verification(review, aid, 1, 'FAIL', {'verdict': 'FAIL', 'findings': [], 'note': 'x'}, {'ok': False, 'exit_code': 1}, 'codex')
+    sig = E.failure_code(fixture.verifications(review)[-1])
+    fixture.event(review, 'decision', what='strategy: replan', why='synthetic: run the self-test before handing over', by='fixture')
+    fixture.event(review, 'decision', what='repeated failure signature', why=sig, by='engine')
+    fixture.add_verification(review, aid, 1, 'PASS', {'verdict': 'PASS', 'findings': [], 'note': 'x'}, {'ok': True, 'exit_code': 0}, 'codex')
+    fixture.db.execute("UPDATE projects SET state='OWNER_REVIEW' WHERE id=?", (review,))
+    fixture.event(review, 'capability_decision', capability='lora_training', status='needs_owner',
+                  tried=[{'option': 'local_cpu_lora', 'ok': False, 'why': 'synthetic', 'seconds': 1}],
+                  cost=['0'], minimal_approval=['synthetic sign-in'], next_action='Owner decides')
+    fixture.db.commit()
+    improvements.observe(fixture, review)
     fixture.close()
     launched = []
 

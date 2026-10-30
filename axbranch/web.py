@@ -97,7 +97,8 @@ class App:
         view = live.view(self.workspace, store, pid)
         return {'id': pid, 'title': _title(p), 'goal': p['goal'], 'state': p['state'], 'status': rec['status'],
                 'pause_reason': p['pause_reason'], 'iteration': p['iteration'], 'banner': {'text': text, 'color': color},
-                'owner': {'mode': mode, 'note': note}, 'attached': departments.attached(store, pid),
+                'owner': {'mode': mode, 'note': note}, 'attached': _attached_view(store, pid),
+                'capabilities': [e['detail'] for e in store.events(pid, {'capability_decision'})][-5:],
                 'pipeline': view['pipeline'], 'header': view['header'], 'timeline': view['timeline'][-80:],
                 'verifications': [{'iteration': v['iteration'], 'verdict': v['verdict'], 'provider': v['provider'],
                                    'created': v['created']} for v in store.verifications(pid)],
@@ -416,6 +417,13 @@ def improvement_action(app, store, cid, action, body):
         if action == 'reject':
             return improvements.reject(store, cid, str(body.get('why', '')))
     raise KeyError('unknown action')
+
+
+def _attached_view(store, pid):
+    """Attached departments with who connected them: the Owner directly, or the Owner accepting a CEO recommendation."""
+    accepted = {e['detail']['department'] for e in store.events(pid, {'department_recommendation_decision'})
+                if e['detail'].get('decision') == 'accepted'}
+    return [dict(d, via='ceo_recommendation' if d['id'] in accepted else 'owner') for d in departments.attached(store, pid)]
 
 
 def _improvements_view(store, pid):

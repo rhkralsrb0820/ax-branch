@@ -67,9 +67,10 @@
       <h1 class="hello">좋은 하루예요. 청월입니다.</h1>
       <div class="muted">목표를 맡기고, 진행 과정과 결과를 한곳에서 확인하세요. 화면은 저장된 실제 상태만 보여 줍니다.</div>
       <div id="groups" class="groups"></div>
-      <div class="feeds-head"><h2>둘러보기</h2><button id="refreshFeeds" class="ghost">공개 정보 새로 수집</button></div>
+      <div class="card" id="homeActive" hidden aria-live="polite"></div>
+      <details id="homeFeeds" open><summary class="feeds-head"><h2>둘러보기</h2><button id="refreshFeeds" class="ghost">공개 정보 새로 수집</button></summary>
       <div class="muted">공개 출처의 실제 자료만 표시합니다. 수집 시 AI 호출 없음.</div>
-      <div class="feeds"><div class="card" id="feed-AI 동향"></div><div class="card" id="feed-AI 취업"></div></div>
+      <div class="feeds"><div class="card" id="feed-AI 동향"></div><div class="card" id="feed-AI 취업"></div></div></details>
     </section>
 
     <section id="view-feed" class="view" hidden><div class="card" id="feedFull"></div></section>
@@ -87,6 +88,7 @@
       <div id="pipeline" class="pipeline"></div>
       <div class="card budget-card" id="executionBudget" hidden aria-live="polite"></div>
       <div class="card" id="webRun" hidden aria-live="polite"></div>
+      <div class="card" id="capabilities" hidden aria-live="polite"></div>
       <div class="card" id="experience"></div>
       <div class="split">
         <div class="card"><h3>Agent 기록</h3><div id="records" class="records muted">Agent를 선택하면 그 Agent의 주장 · 근거 · 반론 · 결정 · 검증 기록이 표시됩니다.</div></div>

@@ -61,6 +61,25 @@
     if (!S.libraryBuilt) buildLibrary();
     $('#groups').innerHTML = S.ov.groups.map(g => `<div class="group" style="background:${g.color}22"><div>${esc(g.label)}</div><div class="n">${g.count}</div></div>`).join('');
     updateOrb();
+    if (S.view === 'home') renderHomeActive().catch(() => {});
+  }
+  // While work runs, the home centres on that project's real pipeline and folds the info cards (once per project:
+  // an Owner who reopens them keeps them open).
+  async function renderHomeActive() {
+    const box = $('#homeActive');
+    const run = S.ov.projects.find(p => ['ACTIVE', 'RECOVERING'].includes(p.status))
+      || S.ov.projects.find(p => p.status === 'WAITING_FOR_OWNER' && ['OWNER_REVIEW', 'PAUSED'].includes(p.state) && p.state !== 'CLOSED');
+    if (!run) { box.hidden = true; S.homeFolded = null; return; }
+    const p = await api('project/' + run.id);
+    if (S.view !== 'home') return;
+    const now = p.pipeline.find(r => r.mark === '●'), active = ['ACTIVE', 'RECOVERING'].includes(run.status);
+    box.hidden = false;
+    box.innerHTML = `<div class="row"><h3>${active ? '진행 중인 업무' : 'Owner 확인을 기다리는 업무'}: ${esc(p.title)}</h3><span class="grow"></span><button class="primary" id="homeOpen">파이프라인 보기</button></div>
+      <div class="banner" style="background:${esc(p.banner.color)}">${esc(p.banner.text)}</div>
+      <div class="muted">${esc(p.id)} · v${p.iteration} · ${now ? '현재 단계: ' + esc(now.title) + ' (' + esc(now.engine) + ')' : esc(p.state)}${S.ov.delegated.length && active ? ' · 위임 부서: ' + esc(S.ov.delegated.join(', ')) : ''}</div>
+      <div class="pipeline">${p.pipeline.map(r => `<div class="stage ${r.mark === '✓' ? 'done' : r.mark === '●' ? 'now' : ''}"><div class="h">${esc(r.mark)} ${esc(r.title)}</div><div class="muted">${esc(r.detail)}</div></div>`).join('')}</div>`;
+    $('#homeOpen').onclick = () => openProject(run.id);
+    if (S.homeFolded !== run.id) { S.homeFolded = run.id; $('#homeFeeds').open = false; }
   }
   const LC = {legacy: '기존 부서(행동 검증 미판정)', candidate: '후보', verified: '검증됨', quarantined: '격리됨', retired: '폐기됨'};
   function depName(id) { const d = S.ov.departments.find(x => x.id === id); return d ? d.name : id; }
@@ -253,7 +272,8 @@
   async function openProject(pid) {
     saveOwnerDraft(); S.navigation++; S.pid = pid; S.project = null; S.stageKey = null;
     $('#owner').hidden = true; $('#owner').dataset.mode = ''; $('#owner').innerHTML = '';
-    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience', 'executionBudget', 'webRun']) $('#' + id).textContent = '';
+    for (const id of ['records', 'pipeline', 'verifs', 'timeline', 'projectChips', 'pTitle', 'pState', 'banner', 'experience', 'executionBudget', 'webRun', 'capabilities']) $('#' + id).textContent = '';
+    $('#capabilities').hidden = true;
     $('#webRun').hidden = true;
     $('#executionBudget').hidden = true;
     show('project'); await refreshProject(); refreshOverview().catch(() => {});
@@ -270,8 +290,9 @@
     $('#pState').textContent = `${p.id} · ${p.state} · ${p.status} · v${p.iteration}` + (p.pause_reason ? ` · ${p.pause_reason.slice(0, 200)}` : '');
     renderExecutionBudget(p.execution_budget);
     renderWebRun(p.owner_web_run);
+    renderCapabilities(p.capabilities || []);
     $('#projectChips').innerHTML = (p.attached.map(d => { const req = d.mode === 'required';
-      return `<span class="chip${req ? ' req' : ''}">▣ ${esc(depName(d.id))} v${esc(d.version)}<button class="x mode" data-mode="${esc(d.id)}" data-req="${req}" title="${req ? '필수 해제 (이유 필요, 기록됨)' : '필수로 지정 (다음 계획·실행·수용부터 적용)'}">${req ? '🔒 필수' : '사용 가능'}</button>${req ? '' : `<button class="x" data-detach="${esc(d.id)}" title="해제 (다음 위임부터 적용)">×</button>`}</span>`; }).join('') || '<span class="muted">없음 — 부서를 이 칸으로 끌어 놓거나 부서를 클릭해 [프로젝트에 추가]</span>')
+      return `<span class="chip${req ? ' req' : ''}">▣ ${esc(depName(d.id))} v${esc(d.version)}${d.via === 'ceo_recommendation' ? ' <small title="청월이 추천하고 Owner가 수락해 연결">추천 수락</small>' : ''}<button class="x mode" data-mode="${esc(d.id)}" data-req="${req}" title="${req ? '필수 해제 (이유 필요, 기록됨)' : '필수로 지정 (다음 계획·실행·수용부터 적용)'}">${req ? '🔒 필수' : '사용 가능'}</button>${req ? '' : `<button class="x" data-detach="${esc(d.id)}" title="해제 (다음 위임부터 적용)">×</button>`}</span>`; }).join('') || '<span class="muted">없음 — 부서를 이 칸으로 끌어 놓거나 부서를 클릭해 [프로젝트에 추가]</span>')
       + (p.state === 'PAUSED' && (p.required_unmet.problems || p.required_unmet.reason) && /required department|quarantined|retired|candidate/.test(p.pause_reason || '')
          ? `<div class="kv" role="status">수용을 막는 검사: ${esc((p.required_unmet.problems || [p.required_unmet.reason]).join('; '))}</div>` : '');
     $('#projectChips').querySelectorAll('[data-mode]').forEach(b => b.onclick = async () => {
@@ -288,7 +309,7 @@
     $('#recommendations').hidden = !suggestions.length;
     $('#recommendations').innerHTML = '<h3>淸月의 부서 추천</h3><div class="muted">필요한 기능만 제안합니다. 수락은 부서를 연결하며 실행·권한 부여·필수 부서 변경은 하지 않습니다.</div>'
       + (!canConnect ? '<div role="status">작업이 멈추거나 결과가 도착하면 연결할 수 있습니다.</div>' : '')
-      + suggestions.map(d => `<div class="kv"><b>${esc(depName(d.department))}</b> · v${esc(d.version)} · ${esc(d.lifecycle === 'legacy' ? '기존 부서 · 작업 품질 미판정' : d.lifecycle)}<p>${esc(d.reason)}</p>`
+      + suggestions.map(d => `<div class="kv"><b>${esc(depName(d.department))}</b> · v${esc(d.version)} · ${esc(d.lifecycle === 'legacy' ? '기존 부서 · 작업 품질 미판정' : d.lifecycle)}<p>${esc(d.reason)}</p>${d.gap ? `<div class="muted">지금 연결된 부서로 부족한 기능: ${esc(d.gap)}</div>` : ''}`
         + (d.status === 'pending' ? `<button data-recommend="${esc(d.id)}" data-decision="accepted" ${!canConnect || !d.available ? 'disabled' : ''}>프로젝트에 연결</button> <button class="ghost" data-recommend="${esc(d.id)}" data-decision="dismissed" ${!canConnect ? 'disabled' : ''}>닫기</button>`
           + (!d.available ? '<span class="muted">명세·상태가 바뀌었거나 이미 연결된 부서입니다.</span>' : '')
           : `<span class="muted">${d.status === 'accepted' ? '연결됨' : '닫음'}</span>`)
@@ -324,6 +345,16 @@
       + `<details><summary>경험·검증 근거 펼치기</summary><pre>${esc(JSON.stringify({records: experience.records, searches: experience.searches, uses, errors: experience.errors || [], document_contract: p.document_contract || []}, null, 2))}</pre></details>`;
     renderOwner(p);
   }
+  const OPTION = {local_cpu_lora: '로컬 CPU 소형 LoRA (무료)', free_cloud_gpu: '무료 클라우드 GPU (Owner 로그인 필요)'};
+  function renderCapabilities(list) {
+    const box = $('#capabilities');
+    box.hidden = !list.length;
+    box.innerHTML = '<h3>필요한 기능 확보</h3><div class="muted">부족한 기능은 무료 대안부터 실제로 시도한 결과만 표시합니다. 권한·비용은 자동으로 부여하지 않습니다.</div>'
+      + list.map(c => `<div class="kv"><b>${esc(c.capability)}</b> · ${c.status === 'resolved' ? '확보됨: ' + esc(OPTION[c.chosen] || c.chosen) : 'Owner 결정 필요'}`
+        + (c.tried || []).map(t => `<div class="muted">시도: ${esc(OPTION[t.option] || t.option)} → ${t.ok ? '성공' : '실패'}${t.why ? ' · ' + esc(String(t.why).slice(0, 200)) : ''} (${t.seconds}초)</div>`).join('')
+        + (c.status !== 'resolved' ? `<div>필요한 최소 승인: ${esc((c.minimal_approval || []).join(' / '))}</div><div class="muted">비용: ${esc((c.cost || []).join(' / '))} · 다음 행동: ${esc(c.next_action || '')}</div>` : '')
+        + '</div>').join('');
+  }
   function improvementsLine(im) {
     if (!im) return '';
     const ev = im.evaluation, used = im.used || [];
@@ -354,7 +385,7 @@
     return {CANDIDATE: (c.proposal ? b('prepare', '평가 준비', 'primary') : '') + b('reject', '거절'),
             EVAL_READY: b('evaluate', '평가 실행 승인 (실제 모델 호출)', 'primary') + b('reject', '거절'),
             EVALUATING: '<span class="muted">평가 프로젝트가 끝나면 비교 결과가 자동 기록됩니다.</span>',
-            COMPARED: (c.comparison.not_worse ? b('approve', '운영 규칙에 적용 승인', 'primary') : '') + b('reject', '거절'),
+            COMPARED: (c.comparison && c.comparison.not_worse ? b('approve', '운영 규칙에 적용 승인', 'primary') : '') + b('reject', '거절'),
             APPLIED: b('rollback', '되돌리기')}[c.state] || '';
   }
   async function improvementAction(cid, act, button) {
@@ -573,7 +604,7 @@
     if (target) $('#feedFull').innerHTML = render(target);
     else { document.getElementById('feed-AI 동향').innerHTML = render('AI 동향'); document.getElementById('feed-AI 취업').innerHTML = render('AI 취업'); }
   }
-  $('#refreshFeeds').onclick = async () => { notice('공개 출처에서 수집 중… (AI 호출 없음)', 0); try { await api('feeds/refresh', {}); notice('수집 결과를 확인하세요. 일부 출처만 포함하며 전체 시장 목록은 아닙니다.'); loadFeeds(); } catch (e) { fail(e); } };
+  $('#refreshFeeds').onclick = async (ev) => { ev.preventDefault(); ev.stopPropagation(); notice('공개 출처에서 수집 중… (AI 호출 없음)', 0); try { await api('feeds/refresh', {}); notice('수집 결과를 확인하세요. 일부 출처만 포함하며 전체 시장 목록은 아닙니다.'); loadFeeds(); } catch (e) { fail(e); } };
 
   // ---- settings ----
   for (const id of ['motionOff', 'lowPower']) $('#' + id).onchange = async () => {

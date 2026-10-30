@@ -44,7 +44,7 @@ NATIVE = S(tool=ENUM('none', 'pyinstaller'), exe_name=STR, windowed=BOOL)
 PLAN = S(title=STR, interpretation=STR, artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
          acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), required_tools=ARR(STR),
          runtime=runtime.SPEC, network_access=ARR(S(domain=STR, purpose=STR, risk=ENUM(*permissions.RISKS))), pipeline=ARR(STAGE),
-         native_build=NATIVE, recommended_departments=ARR(S(id=STR, reason=STR)))
+         native_build=NATIVE, recommended_departments=ARR(S(id=STR, reason=STR, gap=STR)))
 DIAGNOSIS = S(diagnosis=STR, root_cause=STR, change_summary=STR, interpretation=STR,
               artifact_kind=ENUM('markdown', 'python', 'bundle'), artifact_filename=STR,
               acceptance_criteria=ARR(STR), verification_lenses=ARR(STR), runtime=runtime.SPEC,
@@ -1061,7 +1061,7 @@ class Engine:
         out['recommendable_departments'] = [dict(departments.summary(s), lifecycle=departments.lifecycle(dep)['status'])
                                              for dep, s in library.items() if dep not in specs and not departments.blocked(dep)]
         out['recommendation_rule'] = ('Return recommended_departments: at most three unattached eligible departments '
-                                      'with concrete Goal-specific reasons, or []. This does NOT attach them or grant '
+                                      'with concrete Goal-specific reasons and, in gap, the capability the attached departments lack for this Goal, or []. This does NOT attach them or grant '
                                       'permission. Plan using only already attached capabilities; the Owner explicitly '
                                       'accepts recommendations for a later planning boundary. Do not add a stage for an '
                                       'unattached recommended department or call legacy packages behaviour-verified.')
