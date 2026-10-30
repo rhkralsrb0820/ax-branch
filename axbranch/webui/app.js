@@ -484,7 +484,7 @@
   }
   function webRunDetails(r) {
     const restored = r.restored
-      ? `이번 실행은 ${esc(r.restored.saved_at)}에 저장한 데이터(v${esc(r.restored.code_iteration)}, 파일 ${esc(r.restored.files)}개)를 복원해 시작했습니다.`
+      ? `이번 실행은 ${r.restored.from_project ? `원본 결과물(${esc(r.restored.from_project)})에서 ` : ''}${esc(r.restored.saved_at)}에 저장한 데이터(v${esc(r.restored.code_iteration)}, 파일 ${esc(r.restored.files)}개)를 복원해 시작했습니다.${r.restored.from_project ? ' 원본의 데이터는 바꾸지 않으며, 이제부터는 이 프로젝트에 따로 저장됩니다.' : ''}`
       : (r.choice === 'empty' ? '빈 데이터로 시작했습니다(저장된 데이터는 그대로 보존).' : '복원할 저장 데이터가 없어 처음 상태로 시작했습니다.');
     if (r.data_kept === false) return `<div class="kv">사용 중인 결과: <b>v${esc(r.version)}</b></div>
       <div class="kv" role="status">이 결과에는 데이터 저장 명세가 없어, 입력한 데이터는 종료하면 남지 않습니다. 같은 프로젝트에 "입력한 데이터가 다음에도 남게 해 달라"고 수정 요청을 보내면 저장·복원되는 버전이 만들어집니다.</div>
@@ -522,9 +522,10 @@
   function showIncompatible(pid, r) {
     $('#modalBody').innerHTML = `<h3>저장 데이터와 맞지 않는 버전입니다</h3><p>${esc(r.reason)}</p>
       <p>저장된 데이터는 바꾸거나 지우지 않았습니다. 어떻게 열지 선택하세요.</p>
-      <div class="row">${(r.options || []).map(o => `<button class="ghost" data-choice="${esc(o.choice)}">${esc(o.label)}</button>`).join('')}</div>
+      <div class="row">${(r.options || []).map(o => `<button class="ghost" data-choice="${esc(o.choice)}">${esc(o.label)}</button>`).join('')}${r.origin_project ? `<button class="ghost" id="openOrigin">원본 결과물(${esc(r.origin_project)})을 데이터와 함께 열기</button>` : ''}</div>
       <div class="muted">또는 같은 프로젝트에 "기존 데이터 형식을 읽을 수 있게 해 달라"고 수정 요청을 보낼 수 있습니다.</div>`;
     $('#modal').showModal();
+    if (r.origin_project) $('#openOrigin').onclick = async () => { $('#modal').close(); await openProject(r.origin_project); runResult(r.origin_project); };
     $('#modalBody').querySelectorAll('[data-choice]').forEach(b => b.onclick = async () => {
       if (S.webRunBusy) return; S.webRunBusy = true; b.disabled = true;
       try { const again = await api(`project/${pid}/result`, {choice: b.dataset.choice}); showWebRun(pid, again); }

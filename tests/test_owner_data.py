@@ -143,6 +143,28 @@ class OwnerDataFlowTests(unittest.TestCase):
     def act(self, pid, action, **body):
         return web.project_action(self.app, self.store, pid, action, body, 'web')
 
+    def test_a_project_continued_from_the_library_starts_from_the_original_data_without_changing_it(self):
+        base = self.project('원본')
+        self.version(base, 'v1_inventory_app.py')
+        r = self.act(base, 'result')
+        update(r['url'], '빨대', 40)
+        self.act(base, 'result-stop')
+        before = userdata.current(self.ws / 'projects' / base)
+        child = self.project('이어서 개발')
+        self.store.event(child, 'develop_from', base_project=base)            # what engine.develop records
+        self.version(child, 'v2_inventory_app.py')
+        r = self.act(child, 'result')
+        self.assertEqual(r['restored']['from_project'], base)
+        self.assertIn('>40<', page(r['url']).replace(' ', ''))
+        update(r['url'], '종이컵', 7)
+        self.act(child, 'result-stop')
+        self.assertEqual(userdata.current(self.ws / 'projects' / base)['snapshot'], before['snapshot'])   # original kept
+        own = userdata.current(self.ws / 'projects' / child)
+        self.assertIsNotNone(own)
+        again = self.act(child, 'result')                                    # from now on its own data
+        self.assertIsNone(again['restored']['from_project'])
+        self.assertIn('>7<', page(again['url']).replace(' ', ''))
+
     def test_use_save_stop_reopen_and_keep_data_on_a_revised_version(self):
         pid = self.project()
         v1 = self.version(pid, 'v1_inventory_app.py')

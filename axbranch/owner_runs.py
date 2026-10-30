@@ -51,7 +51,8 @@ class OwnerRuns:
                 return self._view(run, reused=True)
             project_dir = engine.workspace / 'projects' / pid
             contract = data_contract(engine.store.project(pid))
-            snap = None if choice == 'empty' or contract is None else userdata.current(project_dir)
+            snap = None if choice == 'empty' or contract is None else (userdata.current(project_dir)
+                                                                        or _inherited(engine, pid, choice))
             artifact = _choose_artifact(engine, pid, snap if choice == 'previous' else None)
             other_code = snap and snap['code_version'].get('sha256') != artifact['sha256']
             schema = snap.get('data_schema') if snap else None
@@ -68,9 +69,12 @@ class OwnerRuns:
                        f"{snap['saved_at']} 저장)로 시작하지 못했습니다.")
                 engine.store.event(pid, 'owner_web_data_incompatible', version=artifact['iteration'],
                                    snapshot=snap['snapshot'], snapshot_code=snap['code_version'], reason=why)
+                origin = snap.get('inherited_from')
+                previous = ([] if origin else
+                            [{'choice': 'previous', 'label': f"이전 버전 v{snap['code_version'].get('iteration')}로 데이터와 함께 열기"}])
                 return {'running': False, 'incompatible': True, 'reason': why, 'snapshot': snap['snapshot'],
-                        'options': [{'choice': 'previous', 'label': f"이전 버전 v{snap['code_version'].get('iteration')}로 데이터와 함께 열기"},
-                                    {'choice': 'empty', 'label': f"새 버전 v{artifact['iteration']}을 빈 데이터로 열기 (저장된 데이터는 그대로 보존)"}]}
+                        'origin_project': origin,
+                        'options': previous + [{'choice': 'empty', 'label': f"새 버전 v{artifact['iteration']}을 빈 데이터로 열기 (저장된 데이터는 그대로 보존)"}]}
             run['choice'] = choice
             if choice == 'previous' and run['contract'] and isinstance(schema, int):
                 # The previous version writes ITS data format, not the latest plan's: keep the restored schema.
@@ -188,7 +192,8 @@ class OwnerRuns:
                 'data_kept': run['contract'] is not None,
                 'lifetime_seconds': LIFETIME, 'reused': reused, 'choice': run.get('choice'),
                 'restored': run['restored'] and {k: run['restored'][k] for k in ('snapshot', 'saved_at', 'data_version')}
-                | {'code_iteration': run['restored']['code_version'].get('iteration'), 'files': len(run['restored']['files'])},
+                | {'code_iteration': run['restored']['code_version'].get('iteration'), 'files': len(run['restored']['files']),
+                   'from_project': run['restored'].get('inherited_from')},
                 'last_saved': run.get('last_saved'), 'save_error': run.get('save_error'),
                 'save_interval_seconds': userdata.SAVE_INTERVAL,
                 'protection': 'AppContainer · 네트워크 차단 · 실행 전용 폴더만 접근 · 별도 출처(포트)'}
@@ -200,6 +205,19 @@ def data_contract(project):
     spec, _ = runtime.normalize((project['plan'] or {}).get('runtime'))
     data = spec.get('data') or {}
     return data if data.get('needed') and not data.get('invalid') else None
+
+
+def _inherited(engine, pid, choice):
+    """A project continued from the library ('이어서 개발') starts from the nearest ancestor's last good data. Read-only:
+    the copy is restored into this run and later saved under THIS project; the ancestor's snapshots never change."""
+    if choice == 'previous':
+        return None                              # 'previous' means this project's own earlier version
+    from . import library
+    for ancestor in reversed(library.ancestry(library._links(engine.store), pid)[:-1]):
+        snap = userdata.current(engine.workspace / 'projects' / ancestor)
+        if snap:
+            return {**snap, 'inherited_from': ancestor}
+    return None
 
 
 def _choose_artifact(engine, pid, snap):
