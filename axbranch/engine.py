@@ -18,7 +18,7 @@ import traceback
 from pathlib import Path
 
 from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, isolation, kindex, knowledge, library, metrics, native,
-               budgets, departments, permissions, providers, runtime, sandbox, sources, supervisor, training)
+               budgets, departments, improvements, permissions, providers, runtime, sandbox, sources, supervisor, training)
 from . import __version__
 from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
 
@@ -652,6 +652,18 @@ class Engine:
             knowledge.record_department_experience(self.store, pid)
         except Exception as e:
             self.store.event(pid, 'experience_record_error', error=type(e).__name__)
+        try:                                     # improvement candidates: observational, never stops the run
+            improvements.observe(self.store, pid)
+        except Exception as e:
+            self.store.event(pid, 'improvement_observe_error', error=f'{type(e).__name__}: {e}'[:300])
+
+    def _improvements(self, pid, stage):
+        """{'applied_improvements': ...} when Owner-approved rules exist (else nothing: prompts stay unchanged)."""
+        rules = improvements.for_project(self.store, pid)
+        if not rules:
+            return {}
+        self.store.event(pid, 'improvements_used', stage=stage, ids=[r['id'] for r in rules])
+        return {'applied_improvements': {'note': improvements.NOTE, 'rules': rules}}
 
     @staticmethod
     def _snap(hits, retriever, query, stage, role):
@@ -975,7 +987,8 @@ class Engine:
                                               'planning', 'CEO'),
                    'runtime_experience': self._snap(self._experience(pid, goal), 'X0:knowledge.experience', goal,
                                                     'planning', 'CEO'),
-                   'provider_track_record': metrics.provider_record(self.store), **self._owner_inputs(pid)}
+                   'provider_track_record': metrics.provider_record(self.store), **self._owner_inputs(pid),
+                   **self._improvements(pid, 'planning')}
         base = library.develops(self.store, pid)
         if base:
             context['develop_from'] = library.develop_context(self.store, base, lambda q: self._snap(self._vault_knowledge(pid, q), 'K0:knowledge.retrieve', q, 'develop', 'CEO'),
@@ -2457,6 +2470,7 @@ class Engine:
                        f['issue'] for v in [v for v in self.store.verifications(pid) if v['verdict'] == 'FAIL'][-1:]
                        for f in actionable(v['result'].get('findings', [])) if f['severity'] in ('critical', 'major'))[:900]),
                    'available_providers': providers.available() or list(gov.PROVIDERS), **self._department_context(pid),
+                   **self._improvements(pid, 'strategy'),
                    'provider_track_record': metrics.provider_record(self.store)}
         schema = STRATEGY
         if forbid_continue:

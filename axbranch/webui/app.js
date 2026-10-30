@@ -316,6 +316,7 @@
     const lessons = experience.records.flatMap(r => (r.lesson_candidates || []).map(l => ({...l, department: r.department})));
     $('#experience').innerHTML = `<h3>업무 경험</h3><div class="muted">최근 기록 ${count}개 · 이번 과제의 활용 판단 ${uses.length}개 · 품질 개선은 비교 평가 전까지 미확인</div>`
       + ((experience.errors || []).length ? '<div role="status">경험 기록에 실패한 항목이 있습니다. 기술 근거를 확인하세요.</div>' : '')
+      + improvementsLine(p.improvements)
       + (lessons.length ? `<details><summary>근거가 있는 교훈 후보 ${lessons.length}개 · 개선 효과 미확인</summary>`
         + lessons.slice(-12).map(l => `<div class="kv"><b>${esc(l.title)}</b> · ${esc(l.department)}<br>${esc(l.observation)}<br>다음 업무 참고: ${esc(l.suggestion)}<br><span class="muted">근거 이벤트: ${esc((l.evidence_events || []).join(', '))} · 자동 추출 규칙에 따른 후보</span></div>`).join('') + '</details>' : '')
       + (uses.length ? uses.map(u => `<div class="kv"><b>${esc(u.experience)}</b> · ${esc(u.disposition)}<br>선택·미사용 이유: ${esc(u.reason || '기록 없음')}<br>이번 과제와의 차이: ${esc(u.difference || '기록 없음')}<br>청월이 보고한 판단 변경: ${esc(u.claimed_change || '기록 없음')}<br>연결된 실행: ${esc(u.applied_action || '기록 없음')}<br><span class="muted">판단 반영 기록이며 품질 개선의 증거는 아닙니다.</span></div>`).join('')
@@ -323,6 +324,51 @@
       + `<details><summary>경험·검증 근거 펼치기</summary><pre>${esc(JSON.stringify({records: experience.records, searches: experience.searches, uses, errors: experience.errors || [], document_contract: p.document_contract || []}, null, 2))}</pre></details>`;
     renderOwner(p);
   }
+  function improvementsLine(im) {
+    if (!im) return '';
+    const ev = im.evaluation, used = im.used || [];
+    return (ev ? `<div class="kv" role="status">개선 후보 평가용 프로젝트입니다: ${esc(ev.candidate)} · ${ev.arm === 'variant' ? '개선안 적용' : '기준(개선안 없음)'} · 원래 업무 ${esc(ev.source)} · 경험 검색 꺼짐</div>` : '')
+      + (used.length ? `<div class="kv">청월에게 전달된 승인 개선 규칙: ${used.map(u => `${esc(u.stage)} 단계 ${esc((u.ids || []).join(', '))}`).join(' · ')}<br><span class="muted">참고 자료로만 전달되며 검증 기준·승인을 바꾸지 않습니다.</span></div>` : '');
+  }
+
+  // ---- 개선 후보 · 학습 경로 (axbranch/improvements.py through the API) ----
+  async function loadImprovements() {
+    const d = await api('improvements'), box = $('#improvementList');
+    const when = t => t ? new Date(t * 1000).toLocaleString() : '';
+    const arm = a => a ? `${a.passed}/${a.n} 통과 · 같은 실패 재발 ${a.recurred}회` : '-';
+    box.innerHTML = '<h3>학습·개선 경로 (이 PC에서 실제로 하는 일)</h3>' + d.learning.map(l => `<div class="kv"><b>${esc(l.name)}</b> <span class="tag">${esc(l.status)}</span><br>${esc(l.detail)}<br><span class="muted">효과: ${esc(l.effect)}</span></div>`).join('')
+      + `<h3>개선 후보 (${d.candidates.length})</h3>`
+      + (d.candidates.map(c => `<div class="item"><h4>${esc(c.id)} <span class="tag">${esc(c.label)}</span></h4>
+        <div class="kv">반복 실패: <code>${esc(c.signature)}</code><br>근거: ${c.evidence.map(e => esc(e.project)).join(', ')} (${c.evidence.length}건) · 갱신 ${esc(when(c.updated))}</div>
+        <div class="kv">개선안: ${c.proposal ? esc(c.proposal.rule) + `<br><span class="muted">${esc(c.proposal.origin)}</span>` : '아직 없음 — 같은 실패가 해결된 기록이 생기면 자동으로 붙습니다.'}</div>`
+        + (c.eval ? `<div class="kv">평가: 원래 업무 ${c.eval.cases.length}건 × (기준·개선안) · 경험 검색 꺼짐 · 최대 ${Number(c.eval.max_tokens_total).toLocaleString()} 토큰${(c.eval.projects || []).length ? '<br>평가 프로젝트: ' + c.eval.projects.map(p => `<a href="#" data-proj="${esc(p.project)}">${esc(p.project)}</a>(${p.arm === 'variant' ? '개선안' : '기준'})`).join(' ') : ''}</div>` : '')
+        + (c.comparison ? `<div class="kv">비교 결과 — 기준: ${arm(c.comparison.baseline)} / 개선안: ${arm(c.comparison.variant)}<br><b>${c.comparison.not_worse ? (c.comparison.better ? '개선안이 더 나았음' : '개선안이 나쁘지 않았음') : '개선안이 더 나빴음'}</b> · <span class="muted">${esc(c.comparison.limits)}</span></div>` : '')
+        + `<div class="row">${improvementButtons(c)}</div>`
+        + `<details><summary>상태 기록</summary>${(c.history || []).map(h => `<div class="muted">${esc(when(h.at))} ${esc(h.from)} → ${esc(h.to)} · ${esc(h.what)} · ${esc(h.by)}</div>`).join('')}</details></div>`).join('')
+        || '<div class="muted">아직 개선 후보가 없습니다. 같은 원인의 검증 실패가 연속으로 기록되면 근거와 함께 자동 등록됩니다.</div>');
+    box.querySelectorAll('[data-proj]').forEach(a => a.onclick = e => { e.preventDefault(); openProject(a.dataset.proj); });
+    box.querySelectorAll('[data-imp]').forEach(b => b.onclick = () => improvementAction(b.dataset.imp, b.dataset.act, b));
+  }
+  function improvementButtons(c) {
+    const b = (act, label, cls = 'ghost') => `<button class="${cls}" data-imp="${esc(c.id)}" data-act="${act}">${label}</button>`;
+    return {CANDIDATE: (c.proposal ? b('prepare', '평가 준비', 'primary') : '') + b('reject', '거절'),
+            EVAL_READY: b('evaluate', '평가 실행 승인 (실제 모델 호출)', 'primary') + b('reject', '거절'),
+            EVALUATING: '<span class="muted">평가 프로젝트가 끝나면 비교 결과가 자동 기록됩니다.</span>',
+            COMPARED: (c.comparison.not_worse ? b('approve', '운영 규칙에 적용 승인', 'primary') : '') + b('reject', '거절'),
+            APPLIED: b('rollback', '되돌리기')}[c.state] || '';
+  }
+  async function improvementAction(cid, act, button) {
+    const body = {};
+    if (act === 'evaluate') {
+      if (!window.confirm('원래 업무를 기준·개선안으로 새로 실행해 비교합니다. 실제 모델을 호출하며 토큰을 사용합니다. 승인할까요?')) return;
+      body.approve = true;
+    }
+    if (act === 'reject') { body.why = window.prompt('거절 이유 (기록됩니다)') || ''; }
+    button.disabled = true;
+    try { await api(`improvement/${cid}/${act}`, body); notice({prepare: '평가를 준비했습니다.', evaluate: '평가 프로젝트를 시작했습니다.', approve: '적용했습니다. 다음 계획·전략부터 청월에게 참고로 전달됩니다.', rollback: '되돌렸습니다. 다음 계획부터 전달하지 않습니다.', reject: '거절했습니다.'}[act]); await loadImprovements(); }
+    catch (e) { fail(e); button.disabled = false; }
+  }
+
   async function loadRecords() {
     if (!S.stageKey) return;
     const pid = S.pid, key = S.stageKey, navigation = S.navigation;
@@ -537,11 +583,12 @@
   // ---- views ----
   function show(view) {
     S.view = view.split(':')[0];
-    for (const v of ['home', 'feed', 'project', 'devroom', 'library']) $('#view-' + v).hidden = v !== S.view;
+    for (const v of ['home', 'feed', 'project', 'devroom', 'library', 'improve']) $('#view-' + v).hidden = v !== S.view;
     document.querySelectorAll('.nav').forEach(b => b.classList.toggle('on', b.dataset.view === view));
     if (S.view === 'home') { $('#crumb').textContent = '워크스페이스 / 청월 홈'; loadFeeds().catch(() => {}); orb.wake(); }
     if (S.view === 'feed') { $('#crumb').textContent = '워크스페이스 / ' + view.split(':')[1]; loadFeeds(view.split(':')[1]).catch(fail); }
     if (S.view === 'library') { $('#crumb').textContent = '워크스페이스 / 결과물 라이브러리'; loadLibrary().catch(fail); }
+    if (S.view === 'improve') { $('#crumb').textContent = '워크스페이스 / 개선 후보 · 학습'; loadImprovements().catch(fail); }
     if (S.view === 'devroom') { $('#crumb').textContent = '오너 개발실 — AX Branch 자체의 개발 현황 (사용자 업무 프로젝트 아님)'; window.AXDev && window.AXDev.render().catch(fail); }
   }
   document.querySelectorAll('.nav').forEach(b => b.onclick = () => show(b.dataset.view));
@@ -557,7 +604,7 @@
   setInterval(tick, 2000);
   refreshOverview().then(async () => {
     const start = decodeURIComponent((location.hash || '').slice(1));   // e.g. #devroom, #library (read-only views)
-    show(['library', 'devroom'].includes(start) ? start : 'home');
+    show(['library', 'devroom', 'improve'].includes(start) ? start : 'home');
     if (submission) await recoverSubmission();
     const q = new URLSearchParams(location.search);
     if (S.ov.test_mode && q.has('selftest')) { const s = document.createElement('script'); s.src = '/selftest.js'; document.body.appendChild(s); }

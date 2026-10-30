@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import WORKSPACE, __version__, actions, budgets, departments, home, knowledge, live, supervisor
+from . import WORKSPACE, __version__, actions, budgets, departments, home, improvements, knowledge, live, supervisor
 from .state import Rejected, Store, run_lock
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
@@ -109,7 +109,8 @@ class App:
                 'experience': knowledge.experience_view(store, pid),
                 'recommendations': departments.recommendations(store, pid),
                 'execution_budget': _execution_budget(store, p),
-                'owner_web_run': self.owner_runs.status(pid, self.workspace / 'projects' / pid)}
+                'owner_web_run': self.owner_runs.status(pid, self.workspace / 'projects' / pid),
+                'improvements': _improvements_view(store, pid)}
 
     def settings(self):
         try:
@@ -305,6 +306,8 @@ def route(app, store, method, path, query, body):
         if parts == ['test', 'fixture'] and app.test_mode and os.environ.get('AXB_TEST_FIXTURE'):
             f = Path(os.environ['AXB_TEST_FIXTURE'])
             return {'name': f.name, 'text': f.read_text(encoding='utf-8-sig')}
+        if parts == ['improvements']:
+            return {'candidates': improvements.all_(store), 'learning': improvements.learning_paths(store)}
         if parts == ['library']:
             from . import library
             return {'types': list(library.TYPES), 'entries': library.entries(store)}
@@ -362,6 +365,8 @@ def route(app, store, method, path, query, body):
         return {'ok': True}
     if len(parts) == 3 and parts[0] == 'project' and PID_RE.fullmatch(parts[1]):
         return project_action(app, store, parts[1], parts[2], body, channel)
+    if len(parts) == 3 and parts[0] == 'improvement' and re.fullmatch(r'I-[0-9a-f]{8}', parts[1]):
+        return improvement_action(app, store, parts[1], parts[2], body)
     raise KeyError('unknown endpoint')
 
 
@@ -394,6 +399,29 @@ def create_project(app, store, body, channel):
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)   # attach_inputs copied them into the project
+
+
+def improvement_action(app, store, cid, action, body):
+    with app.lock:                                   # one transition at a time (a double click never starts two evaluations)
+        if action == 'prepare':
+            return improvements.prepare_eval(store, cid)
+        if action == 'evaluate':
+            return improvements.start_eval(store, app.engine_factory, app.specs, cid,
+                                           lambda pid: actions.launch(app.workspace, store, pid, app.launcher),
+                                           approved=body.get('approve') is True)
+        if action == 'approve':
+            return improvements.approve(store, cid)
+        if action == 'rollback':
+            return improvements.rollback(store, cid)
+        if action == 'reject':
+            return improvements.reject(store, cid, str(body.get('why', '')))
+    raise KeyError('unknown action')
+
+
+def _improvements_view(store, pid):
+    used = store.events(pid, {'improvements_used'})
+    policy = store.events(pid, {'improvement_policy'})
+    return {'used': [e['detail'] for e in used][-4:], 'evaluation': policy[-1]['detail'] if policy else None}
 
 
 def project_action(app, store, pid, action, body, channel):
