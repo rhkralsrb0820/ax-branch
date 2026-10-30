@@ -3,6 +3,27 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.65] - 2026-10-30
+
+### Added
+- Trained results are usable under isolation: a training-stack isolated runtime (the private runtime plus a read-only grant on AX Branch's own pinned training stack) lets verification, the CLI result runner and the web result runner run trained results with their kept training outputs. Each use is recorded (`trained_output_used`).
+
+### Changed
+- Training records separate 'delivered to the Owner' (files handed over; not a model application), 'used in a run' (counted verification / Owner runs) and 'effect checked in an evaluation' (unverified: no comparison against an untrained baseline exists).
+- Devroom: serving build, stale Owner to-dos and issues updated.
+
+### Fixed
+- The isolated CLI and web runners refused every trained result although verification depended on its outputs.
+
+### Verification
+- test_trained_runs 1/1 (real AppContainer, installed pinned stack, synthetic training outputs; nothing trained or downloaded), isolation/owner_web_run/owner_data/capabilities 44/44, test_training 5/5, test_improvements 5/5, test_web 17/17.
+- Full regression and package checks: see the evidence file for this release.
+
+### Known issues
+- The first use of a trained result builds the training runtime once (about 2 minutes on this PC).
+- External installed programs are not execution adapters (granting their folders to isolated runs needs Owner approval).
+- No real-model run; training effect and improvement effect unverified.
+
 ## [0.1.64] - 2026-10-30
 
 ### Added
