@@ -362,6 +362,40 @@ def launch(args, cwd, env, stdin, stdout, stderr, manifest):
         _adv.FreeSid(psid)
 
 
+def training_runtime(root=None):
+    """The private runtime plus READ access to AX Branch's pinned training stack (training.env_python), for results
+    whose verified behaviour depends on their kept training outputs. Built once per stack; nothing is installed or
+    downloaded here and nothing outside AX Branch's own folders is granted. None when the stack is not installed."""
+    from . import training
+    venv, vpy = training.env_python()
+    done = venv / 'AXB_INSTALLED'
+    if not (vpy.is_file() and done.is_file()):
+        return None
+    base = runtime_dir(root)
+    target = base.parent / f'{base.name}-{venv.name}'
+    marker = target / 'READY.json'
+    if marker.is_file():
+        return target
+    staging = base.parent / f'.staging-{uuid.uuid4().hex[:8]}'
+    try:
+        shutil.copytree(base, staging, ignore=lambda d, names: ['READY.json'] if Path(d) == base else [])
+        site = venv / 'Lib' / 'site-packages'
+        (staging / 'Lib' / 'site-packages').mkdir(parents=True, exist_ok=True)
+        (staging / 'Lib' / 'site-packages' / 'axb-training-stack.pth').write_text(str(site) + '\n', encoding='utf-8')
+        cap = _capability_sid(RUNTIME_CAPABILITY)[1]
+        grant(staging, cap, write=False)
+        grant(venv, cap, write=False)                # read/execute only: library code of the pinned stack
+        (staging / 'READY.json').write_text(json.dumps({'base': str(base), 'training_stack': str(venv),
+                                                        'pins': done.read_text(encoding='utf-8')}), encoding='utf-8')
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        staging.rename(target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return target
+
+
 def isolated_args(args):
     """The same command for the isolated run: the AX Branch Python is swapped for its private runtime copy; a program
     inside the run folder (a built .exe) runs as is; any other interpreter is refused (it is not inside the boundary)."""
@@ -373,6 +407,11 @@ def isolated_args(args):
     if source is not None and first.name.lower() in ('python.exe', 'python', 'py.exe') and (
             first.resolve().parent == source.resolve() or first.resolve() == Path(sys.executable).resolve()):
         return [str(python_for()), *map(str, args[1:])]
+    from . import training
+    if first.resolve() == training.env_python()[1].resolve():   # the pinned training stack, read-only, same boundary
+        rt = training_runtime()
+        if rt is not None:
+            return [str(rt / 'python.exe'), *map(str, args[1:])]
     if first.is_absolute() and _under_temp(first):
         return list(map(str, args))
     raise IsolationUnavailable(f'{first} is not available inside the isolated runtime (only the AX Branch Python '

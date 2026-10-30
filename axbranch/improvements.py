@@ -234,6 +234,8 @@ def training_runs(store, limit=20):
         project = store.project(pid)
         delivered = bool(verdicts and verdicts[-1]['verdict'] == 'PASS' and project['state'] in ('OWNER_REVIEW', 'PENDING_CLOSE', 'CLOSED'))
         inputs = [f for e in store.events(pid, {'owner_inputs'}) for f in e['detail'].get('files', [])]
+        uses = [e['detail'] for e in store.events(pid, {'trained_output_used'}) if e['detail'].get('artifact') == run.get('artifact')]
+        count = lambda *kinds: sum(1 for u in uses if u.get('use') in kinds)
         out.append({
             'project': pid, 'at': at, 'artifact': run.get('artifact'),
             'run': {'status': '재사용(이미 끝난 학습)' if run.get('reused') else ('완료' if run.get('ok') else '실패'),
@@ -245,7 +247,11 @@ def training_runs(store, limit=20):
                        'adapter_files': [f['path'] for f in run.get('files', []) if 'adapter' in f['path'].lower()][:10]},
             'evaluation': {'self_reported_metrics': run.get('metrics'),
                            'independent_verification': verdicts[-1]['verdict'] if verdicts else '미검증'},
-            'applied': ('Owner에게 결과로 전달됨' if delivered else '전달 전 (적용 안 됨)'),
+            # Three separate facts: files handed over, outputs actually given to a running program, effect measured.
+            'delivered': ('Owner에게 결과 파일과 프로그램 전달됨 (모델 적용 완료를 뜻하지 않음)' if delivered else '전달 전'),
+            'used': {'verification_runs': count('verification'), 'owner_runs': count('owner_run', 'owner_web_run'),
+                     'note': '실행할 때 학습 출력을 프로그램 폴더(./outputs)에 제공한 횟수. 프로그램이 실제로 불러 썼는지는 검증 통과 여부로만 판단'},
+            'effect': '미확인 — 학습하지 않은 기준과 비교한 평가가 없습니다 (학습 스크립트 자체 지표는 효과 확인이 아님)',
         })
     return out
 

@@ -149,11 +149,20 @@ class ImprovementTests(unittest.TestCase):
         self.assertEqual((run['run']['status'], run['base_model']), ('완료', 'prajjwal1/bert-tiny'))
         self.assertEqual(run['result']['adapter_files'], ['adapter/adapter_config.json'])
         self.assertEqual(run['evaluation'], {'self_reported_metrics': {'dev_f1': 0.8}, 'independent_verification': '미검증'})
-        self.assertEqual(run['applied'], '전달 전 (적용 안 됨)')
+        self.assertEqual(run['delivered'], '전달 전')
+        self.assertEqual(run['used']['owner_runs'], 0)
+        self.assertTrue(run['effect'].startswith('미확인'))
         self.store.add_verification(pid, aid, 1, 'PASS', PASS, {'ok': True}, 'codex')
         self.end(pid, 'OWNER_REVIEW')
         (run,) = I.training_runs(self.store)
-        self.assertEqual((run['evaluation']['independent_verification'], run['applied']), ('PASS', 'Owner에게 결과로 전달됨'))
+        self.store.event(pid, 'trained_output_used', use='verification', artifact=aid, training_dir=str(out))
+        self.store.event(pid, 'trained_output_used', use='owner_web_run', artifact=aid, training_dir=str(out))
+        (run,) = I.training_runs(self.store)
+        self.assertEqual(run['evaluation']['independent_verification'], 'PASS')
+        self.assertTrue(run['delivered'].startswith('Owner에게 결과 파일과 프로그램 전달됨'))
+        self.assertIn('모델 적용 완료를 뜻하지 않음', run['delivered'])         # handing files over is not applying a model
+        self.assertEqual((run['used']['verification_runs'], run['used']['owner_runs']), (1, 1))
+        self.assertTrue(run['effect'].startswith('미확인'))
 
     def test_learning_paths_report_real_state(self):
         paths = {p['id']: p for p in I.learning_paths(self.store)}

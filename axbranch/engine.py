@@ -2766,13 +2766,14 @@ class Engine:
         why = None
         if mode not in ('cli', 'none'):
             why = f'Owner launch mode {mode!r} is not supported by the isolated result runner'
-        elif self._trained(artifact) is not None:
-            why = 'the trained artifact requires an interpreter not available in the isolated runtime'
+        trained = self._trained(artifact)
+        if trained is not None and not exe and isolation.training_runtime() is None:
+            why = training.MISSING_ENV.format(path=training.env_python()[0])
         if why:
             self.store.event(pid, 'owner_run_blocked', reason=why, isolation_required=True)
             raise Rejected(why + '; no program started. An explicit project isolation exception is required '
                            'for reduced-protection execution.')
-        python = None if exe else self._python()
+        python = None if exe else (str(training.env_python()[1]) if trained is not None else self._python())
         if not exe and not python:
             raise Rejected('No Python interpreter found to run the result.')
         # PyInstaller onefile uses a parent bootloader and one contained application child.
@@ -2788,6 +2789,10 @@ class Engine:
                 target = Path(cwd)
                 artifacts.materialize(artifact, target)
                 self._copy_inputs(artifact['path'], target)
+                if trained is not None:          # the kept training outputs the verified behaviour depends on
+                    shutil.copytree(trained, target / 'outputs', dirs_exist_ok=True)
+                    self.store.event(pid, 'trained_output_used', use='owner_run', artifact=artifact['id'],
+                                     training_dir=str(trained))
                 name = exe.name if exe else entry.name
                 if exe:
                     shutil.copyfile(exe, target / name)
@@ -2951,6 +2956,9 @@ class Engine:
             self._copy_inputs(artifact['path'], cwd)
             if trained is not None:
                 shutil.copytree(trained, Path(cwd) / 'outputs', dirs_exist_ok=True)
+                if artifact.get('project_id'):
+                    self.store.event(artifact['project_id'], 'trained_output_used', use='verification',
+                                     artifact=artifact['id'], training_dir=str(trained))
             if exe is not None:
                 shutil.copyfile(exe, Path(cwd) / exe.name)
             rel = entry if artifact['kind'] == 'bundle' else Path(artifact['path']).name

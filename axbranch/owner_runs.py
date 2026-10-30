@@ -25,7 +25,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import artifacts, isolation, runtime, sandbox, userdata
+from . import artifacts, isolation, runtime, sandbox, training, userdata
 from .state import Rejected
 
 LIFETIME = 4 * 3600          # seconds an Owner-opened result may stay up; then it is saved, stopped and cleaned
@@ -85,6 +85,9 @@ class OwnerRuns:
                                restored=run['restored'] and {k: run['restored'][k] for k in ('snapshot', 'saved_at', 'data_version')},
                                port=run['program_port'], limits={'lifetime_seconds': LIFETIME, 'network': 'none',
                                                                  'child_processes': run['children']})
+            if run.get('trained_outputs'):
+                engine.store.event(pid, 'trained_output_used', use='owner_web_run', artifact=run['code_version']['artifact'],
+                                   training_dir=run['trained_outputs'])
             run['saver'] = threading.Thread(target=self._periodic, args=(pid, run), daemon=True)
             run['saver'].start()
             return self._view(run, reused=False)
@@ -241,15 +244,17 @@ def _launch(engine, pid, artifact, snap, contract=None):
     changed = artifacts.problems(artifact)
     if changed:
         raise Rejected(f"검증된 버전이 디스크에서 바뀌었습니다: {'; '.join(changed)}. 같은 프로젝트에 수정 요청을 보내 새 버전을 만드세요.")
-    if engine._trained(artifact) is not None:
-        raise Rejected('학습된 모델이 필요한 결과는 격리 실행기가 지원하지 않습니다. 실행하지 않았습니다.')
+    trained = engine._trained(artifact)
+    if trained is not None and isolation.training_runtime() is None:
+        raise Rejected('이 결과는 검증 때 사용한 학습 환경이 있어야 실행됩니다. 학습 환경이 없어 실행하지 않았습니다 '
+                       '(같은 프로젝트를 다시 검증하면 환경을 다시 준비합니다).')
     if not any('{port}' in str(a) for a in spec.get('launch_args', [])):
         raise Rejected('이 프로그램은 포트를 지정해 실행하는 방식({port})이 없어 격리된 채 열 수 없습니다. '
                        '같은 프로젝트에 "--port 옵션을 지원해 달라"고 수정 요청을 보내면 열 수 있게 됩니다.')
     exe = engine._dist_exe(artifact) if artifact['id'] == engine._verified(pid)['id'] else None
     if exe is None and (plan.get('native_build') or {}).get('tool') == 'pyinstaller':
         raise Rejected('검증된 .exe가 없거나 바뀌었습니다. 소스로 대신 실행하지 않습니다.')
-    python = None if exe else engine._python()
+    python = None if exe else (str(training.env_python()[1]) if trained is not None else engine._python())
     if not exe and not python:
         raise Rejected('결과를 실행할 Python을 찾지 못했습니다.')
     entry = plan['artifact_filename'] if artifact['kind'] == 'bundle' else Path(artifact['path']).name
@@ -259,6 +264,8 @@ def _launch(engine, pid, artifact, snap, contract=None):
         try:
             artifacts.materialize(artifact, cwd)
             engine._copy_inputs(artifact['path'], cwd)
+            if trained is not None:                  # the kept training outputs the verified behaviour depends on
+                shutil.copytree(trained, cwd / 'outputs', dirs_exist_ok=True)
             restored = userdata.restore(snap, cwd) if snap else []
             port = runtime.free_port()
             args = [a.replace('{port}', str(port)) for a in spec.get('launch_args', [])]
@@ -281,6 +288,7 @@ def _launch(engine, pid, artifact, snap, contract=None):
         if live:
             relay = proc.reach(live)
             return {'proc': proc, 'cwd': cwd, 'program_port': live, 'url': f'http://127.0.0.1:{relay}/',
+                    'trained_outputs': str(trained) if trained is not None else None,
                     'started': time.time(), 'version': artifact['iteration'], 'run_id': manifest.run_id,
                     'code_version': {'iteration': artifact['iteration'], 'sha256': artifact['sha256'], 'artifact': artifact['id']},
                     'manifest': manifest.record(), 'children': exe is not None, 'restored': snap and dict(snap),

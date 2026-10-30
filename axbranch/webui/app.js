@@ -380,7 +380,9 @@
         <br>입력 자료: ${t.inputs.length ? t.inputs.map(i => esc(i.name) + ' ' + esc(i.sha256)).join(', ') : '없음'} · 기반 모델: ${esc(t.base_model)}
         <br>결과: 파일 ${t.result.files}개${t.result.adapter_files.length ? ' · 어댑터 ' + esc(t.result.adapter_files.join(', ')) : ''}
         <br>평가: 학습 스크립트 자체 지표 ${esc(t.evaluation.self_reported_metrics ? JSON.stringify(t.evaluation.self_reported_metrics).slice(0, 200) : '없음')} · 독립 검증 ${esc(t.evaluation.independent_verification)}
-        <br>적용: ${esc(t.applied)}</div>`).join('') || '<div class="muted">아직 학습 실행 기록이 없습니다. 결과물이 모델 학습을 요구하면 여기에 실행·결과·평가·적용 상태가 따로 기록됩니다.</div>')
+        <br>Owner에게 전달: ${esc(t.delivered)}
+        <br>실행에 사용: 검증 실행 ${t.used.verification_runs}회 · Owner 실행 ${t.used.owner_runs}회 <span class="muted">(${esc(t.used.note)})</span>
+        <br>평가에서 효과 확인: ${esc(t.effect)}</div>`).join('') || '<div class="muted">아직 학습 실행 기록이 없습니다. 결과물이 모델 학습을 요구하면 여기에 실행·결과·전달·사용·효과 확인이 따로 기록됩니다.</div>')
       + `<h3>개선 후보 (${d.candidates.length})</h3><div class="muted">평가용 프로젝트는 업무 목록에 나오지 않고 아래 각 후보에서 열 수 있습니다. 기록은 모두 보존됩니다.</div>`
       + (d.candidates.map(c => `<div class="item"><h4>${esc(c.id)} <span class="tag">${esc(c.label)}</span></h4>
         <div class="kv">반복 실패: <code>${esc(c.signature)}</code><br>근거: ${c.evidence.map(e => esc(e.project)).join(', ')} (${c.evidence.length}건) · 갱신 ${esc(when(c.updated))}</div>
