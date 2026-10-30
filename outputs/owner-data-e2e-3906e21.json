@@ -1,0 +1,103 @@
+{
+ "exe": "C:\\Users\\HP\\Documents\\Codex\\axbranch-builds\\0.1.65-3906e21\\AXBranch\\AXBranch.exe",
+ "exe_sha256": "c375f7b04bbc2a7b7733c731ca59b86123e0d777c1e58707a5f5a5a6dcf83406",
+ "project": "P-20261030-7c9b94",
+ "isolated_root": "C:\\Users\\HP\\AppData\\Local\\Temp\\axb-owner-data-e2e-82ibeb37",
+ "seconds": 47,
+ "finished": true,
+ "fixture": "tests/fixtures/owner_data_app (developer fixture from generated P-20261029-99cea3; not AI-produced)",
+ "checks": [
+  {
+   "name": "od: opened v1",
+   "ok": true,
+   "detail": "{\"url\":\"http://127.0.0.1:58713/\",\"linked\":\"http://127.0.0.1:58713/\",\"version\":1,\"restored\":null,\"modal\":\"결과 웹앱 실행 중결과 웹앱 열기 (v1)사용 중인 결과: v1\\n      복원할 저장 데이터가 없어 처음 상태로 시작했습니다.\\n      아직 저장된 데이터가 없습니다. · 실행 중에는 2초마다 바뀐 데이터를 자동\"}"
+  },
+  {
+   "name": "od: saved from the page",
+   "ok": true,
+   "detail": "{\"snapshot\":\"000001\",\"saved_at\":\"2026-10-30 21:13:38\",\"data_version\":1,\"reason\":\"owner\",\"files\":1}"
+  },
+  {
+   "name": "od: stopped; last save shown",
+   "ok": true,
+   "detail": "결과 웹앱 · 꺼져 있음마지막 정상 저장: 2026-10-30 21:13:38 (데이터 1번째 저장, 파일 1개, v1에서 저장) [결과 보기]를 누르면 이 데이터를 복원해 다시 엽니다."
+  },
+  {
+   "name": "od: reopened with restored data",
+   "ok": true,
+   "detail": "{\"url\":\"http://127.0.0.1:52689/\",\"linked\":\"http://127.0.0.1:52689/\",\"version\":1,\"restored\":{\"snapshot\":\"000001\",\"saved_at\":\"2026-10-30 21:13:38\",\"data_version\":1,\"code_iteration\":1,\"files\":1,\"from_project\":null},\"modal\":\"결과 웹앱 실행 중결과 웹앱 열기 (v1)사용 중인 결과: v1\\n      이번 실행은 2026-10-30 21:13:38에 저장한 데이터("
+  },
+  {
+   "name": "od: restore recorded on reopen",
+   "ok": true,
+   "detail": "{\"snapshot\":\"000001\",\"saved_at\":\"2026-10-30 21:13:38\",\"data_version\":1,\"code_iteration\":1,\"files\":1,\"from_project\":null}"
+  },
+  {
+   "name": "od: revised version opened",
+   "ok": true,
+   "detail": "{\"url\":\"http://127.0.0.1:65013/\",\"linked\":\"http://127.0.0.1:65013/\",\"version\":2,\"restored\":{\"snapshot\":\"000001\",\"saved_at\":\"2026-10-30 21:13:38\",\"data_version\":1,\"code_iteration\":1,\"files\":1,\"from_project\":null},\"modal\":\"결과 웹앱 실행 중결과 웹앱 열기 (v2)사용 중인 결과: v2\\n      이번 실행은 2026-10-30 21:13:38에 저장한 데이터("
+  },
+  {
+   "name": "od: revised version keeps data",
+   "ok": true,
+   "detail": "{\"version\":2,\"restored\":{\"snapshot\":\"000001\",\"saved_at\":\"2026-10-30 21:13:38\",\"data_version\":1,\"code_iteration\":1,\"files\":1,\"from_project\":null}}"
+  },
+  {
+   "name": "od: incompatible version answered",
+   "ok": true,
+   "detail": "{\"linked\":null,\"modal\":\"저장 데이터와 맞지 않는 버전입니다이 결과 버전(v3)은 데이터 형식 3~3만 읽을 수 있는데, 마지막 저장 데이터는 형식 1입니다(v2, 2026-10-30 21:13:52).\\n      저장된 데이터는 바꾸거나 \"}"
+  },
+  {
+   "name": "od: incompatible data offers choices, nothing overwritten",
+   "ok": true,
+   "detail": "저장 데이터와 맞지 않는 버전입니다이 결과 버전(v3)은 데이터 형식 3~3만 읽을 수 있는데, 마지막 저장 데이터는 형식 1입니다(v2, 2026-10-30 21:13:52).\n      저장된 데이터는 바꾸거나 지우지 않았습니다. 어떻게 열지 선택하세요.\n      이전 버전 v2로 데이터와 함께 열기새 버전 v3을 빈 데이터로 열기 (저장된 데이터는 "
+  },
+  {
+   "name": "od: previous version opened with the data",
+   "ok": true,
+   "detail": "{\"version\":2,\"restored\":{\"snapshot\":\"000002\",\"saved_at\":\"2026-10-30 21:13:52\",\"data_version\":2,\"code_iteration\":2,\"files\":1,\"from_project\":null},\"url\":\"http://127.0.0.1:63191/\"}"
+  },
+  {
+   "name": "harness: data entered in the running v1",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "harness: reopened result shows the saved data",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "harness: revised v2 runs with the earlier data",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "harness: previous version shows the kept data",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "harness: periodic save while open",
+   "ok": true,
+   "detail": "{'snapshot': '000003', 'saved_at': '2026-10-30 21:14:05', 'data_version': 3, 'reason': 'periodic', 'files': 1}"
+  },
+  {
+   "name": "harness: result died with the killed AX Branch",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "harness: after restart the last periodic save is restored",
+   "ok": true,
+   "detail": "{\"snapshot\": \"000003\", \"saved_at\": \"2026-10-30 21:14:05\", \"data_version\": 3, \"code_iteration\": 2, \"files\": 1, \"from_project\": null}"
+  },
+  {
+   "name": "harness: incompatible latest version still refused, data intact",
+   "ok": true,
+   "detail": "이 결과 버전(v3)은 데이터 형식 3~3만 읽을 수 있는데, 마지막 저장 데이터는 형식 1입니다(v2, 2026-10-30 21:14:05)."
+  }
+ ],
+ "model_calls": 0,
+ "passed": true
+}

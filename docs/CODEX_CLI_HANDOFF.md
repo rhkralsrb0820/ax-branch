@@ -1,4 +1,19 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-30 20:30 KST (0.1.64 candidate built)
+## CURRENT CHECKPOINT — Claude, 2026-10-30 22:10 KST (server 0.1.64 applied; candidate 0.1.65 built; development stopped at a checkpoint)
+- Repo C:\Users\HP\Desktop\AX-Branch\ax-branch, branch dev/web-ui, code 3906e21 + records commit; working tree clean.
+- **Owner server switched (Owner-approved) to 0.1.64-42b1bd2**, same workspace/port; backup and rollback:
+  shared outputs/server-switch/switch-20261030-202747.json. Data preserved (rows, states, files manifest identical).
+- **New since 42b1bd2:** trained results usable under isolation (isolation.training_runtime, runners + verification),
+  training records delivered/used/effect split, devroom to-dos/issues refreshed, version 0.1.65.
+- **Tests (raw):** full regression 3906e21 "Ran 577 ... OK (skipped=1)" = 576 passed + 1 skipped (test_native real
+  PyInstaller build, opt-in AXB_NATIVE_E2E=1) + 0 failed + 0 errors. 42b1bd2 was 576 discovered = 575 passed + 1 skipped.
+- **Candidate 0.1.65-3906e21** (not serving): packaged data flow 18/18, packaged trained-result run in AppContainer.
+- External tool adapters: not implemented by design (docs/CAPABILITY_LIFECYCLE.md); granting an installed program's
+  folder to isolated runs is a permission expansion that needs the Owner.
+- **Usage:** provider usage numbers are not readable from this session's tools; not estimated.
+- Copy-paste prompt for Codex: docs/CODEX_HANDOFF_PROMPT.md (delivery to Codex NOT confirmed).
+- Evidence: docs/evidence/2026-10-30-0.1.65-trained-results.md.
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-30 20:30 KST (0.1.64 candidate built)
 - Branch dev/web-ui, code 42b1bd2 (+ records commit). Working tree clean. Owner server unchanged: 0.1.63-50aabe2.
 - New since 098759f: a744f5b generalized capability-gap flow; 5fab908 evaluation projects out of the work list
   (devroom verification values fixed: b4d4dec would have failed test_web); 612ea51 training records; 42b1bd2 devroom.
