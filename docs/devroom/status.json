@@ -1,6 +1,6 @@
 {
  "schema": 2,
- "updated_at": "2026-10-29 23:25 KST",
+ "updated_at": "2026-10-30 21:00 KST",
  "version": "0.1.63",
  "branch": "dev/web-ui",
  "commit": "2f4cdc5",
@@ -901,7 +901,7 @@
   },
   {
    "id": "capability-gaps",
-   "title": "필요한 기능이 없을 때 무료 대안 실제 시도·결과·필요한 최소 승인 표시",
+   "title": "부족한 기능: 식별 → 설치 도구 확인 → 허용된 무료 대안 실제 시도 → 기록 → 확보 / 최소 승인 / 재계획 대안 / 미지원",
    "impl": "구현됨",
    "verified": [
     "자동 테스트"
@@ -909,8 +909,8 @@
    "location": [
     "개발 소스"
    ],
-   "note": "현재 자동 시도 대상은 모델 학습 기능(로컬 CPU LoRA → 무료 클라우드 GPU)",
-   "remaining": "그 밖의 기능은 계획 단계에서 중단·사유 표시만",
+   "note": "모델 학습(로컬 CPU LoRA → 무료 클라우드 GPU), 브라우저 검사(설치된 Chrome·Edge), .exe 실행(PyInstaller 재계획 대안), 그 밖의 기능은 설치 도구 확인 후 미지원으로 기록",
+   "remaining": "설치된 외부 프로그램은 실행 어댑터가 아니어서 확보로 처리하지 않음",
    "next": "-",
    "evidence": [
     "axbranch/capabilities.py",
@@ -962,7 +962,7 @@
    "location": [
     "개발 소스"
    ],
-   "note": "적용된 규칙만 청월 계획·전략에 참고로 전달. 비교 결과 없이는 적용 불가",
+   "note": "적용된 규칙만 청월 계획·전략에 참고로 전달. 비교 결과 없이는 적용 불가 · 평가용 프로젝트는 업무 목록에서 빼고 후보 화면에서 열기",
    "remaining": "실제 평가 실행(모델 호출)은 아직 한 번도 하지 않음",
    "next": "후보가 생기면 Owner 승인 후 평가 1회",
    "evidence": [
@@ -971,7 +971,7 @@
   },
   {
    "id": "learning-paths",
-   "title": "학습 경로 상태(경험 검색·승인 규칙·LoRA·Fine-tuning)",
+   "title": "학습 경로 상태와 학습 기록(실행·입력·기반 모델·결과·평가·적용 구분)",
    "impl": "일부 구현",
    "verified": [
     "자동 테스트"
@@ -979,7 +979,7 @@
    "location": [
     "개발 소스"
    ],
-   "note": "실제 상태만 표시. AX Branch 자체 모델 학습·Fine-tuning은 미지원(이유 표시)",
+   "note": "생성 결과물의 실제 학습 실행 기록을 표시. AX Branch 자체 모델 학습·Fine-tuning은 미지원(이유 표시)",
    "remaining": "AX Branch 자체 모델 학습은 하지 않음",
    "next": "-",
    "evidence": [
