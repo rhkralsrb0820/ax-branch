@@ -223,6 +223,25 @@ def _base_model(run):
     return 'UNKNOWN'
 
 
+EFFECT = {'confirmed_in_this_evaluation': '이 평가에서 효과 확인됨 (해당 평가 자료·조건에서만)',
+          'not_confirmed': '이 평가에서 효과 없음 (학습 모델이 기준보다 낫지 않음)',
+          'not_verified': '판정 보류 (학습·평가 자료 중복 또는 확인 불가)',
+          'function_check_only': '기능 확인만 (고정 시험 모델 — 실제 학습 효과 아님)'}
+
+
+def _effect(store, pid, artifact):
+    """The latest complete before/after comparison of this artifact (model_compare), or why there is none."""
+    specs = {e['detail']['cid']: e['detail']['spec'] for e in store.events(pid, {'comparison_prepared'})
+             if e['detail']['spec']['artifact']['id'] == artifact}
+    results = [e['detail'] for e in store.events(pid, {'comparison_result'}) if e['detail']['cid'] in specs]
+    if not results:
+        return '미확인 — 학습 전후 비교 평가를 아직 하지 않았습니다 (학습 스크립트 자체 지표는 효과 확인이 아님)'
+    r = results[-1]
+    if r['status'] != 'complete':
+        return f"미확인 — 마지막 비교({r['cid']})가 {'미완료' if r['status'] == 'incomplete' else '무효'}입니다"
+    return f"{EFFECT[r['effect']]} · {r['cid']}"
+
+
 def training_runs(store, limit=20):
     """Real training runs of generated results (engine._training_run), split into run / result / evaluation / applied.
     The metrics are the training script's own dev-split numbers; the independent check is the verification verdict."""
@@ -251,7 +270,9 @@ def training_runs(store, limit=20):
             'delivered': ('Owner에게 결과 파일과 프로그램 전달됨 (모델 적용 완료를 뜻하지 않음)' if delivered else '전달 전'),
             'used': {'verification_runs': count('verification'), 'owner_runs': count('owner_run', 'owner_web_run'),
                      'note': '실행할 때 학습 출력을 프로그램 폴더(./outputs)에 제공한 횟수. 프로그램이 실제로 불러 썼는지는 검증 통과 여부로만 판단'},
-            'effect': '미확인 — 학습하지 않은 기준과 비교한 평가가 없습니다 (학습 스크립트 자체 지표는 효과 확인이 아님)',
+            'effect': _effect(store, pid, run.get('artifact')),
+            'applied_to_later_work': '연결된 기능 없음 — 비교와 분리되어 있으며, 모델을 다른 업무에 적용하는 기능은 아직 없습니다',
+            'comparable': bool(run.get('ok')),
         })
     return out
 

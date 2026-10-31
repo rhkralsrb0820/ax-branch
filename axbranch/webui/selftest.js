@@ -119,6 +119,8 @@
       await report('capability card shows tried free option and minimal approval', await until(() => /로컬 CPU 소형 LoRA/.test($('#capabilities').textContent) && /synthetic sign-in/.test($('#capabilities').textContent)), $('#capabilities').textContent.slice(0, 200));
       window.AXB.show('improve');
       await report('improvement view shows learning paths from real state', await until(() => /경험 검색/.test($('#improvementList').textContent) && /미지원/.test($('#improvementList').textContent)));
+      await report('comparison shows both arms, verdict and the fixture effect label', await until(() => /학습 전후 비교/.test($('#improvementList').textContent) && /학습 모델이 더 좋음/.test($('#improvementList').textContent) && /기능 확인만/.test($('#improvementList').textContent)));
+      await report('training record keeps delivered / used / effect / later-work apart', /Owner에게 전달/.test($('#improvementList').textContent) && /실행에 사용/.test($('#improvementList').textContent) && /특정 평가에서 효과 확인/.test($('#improvementList').textContent) && /후속 업무에 적용: 연결된 기능 없음/.test($('#improvementList').textContent));
       await report('candidate with resolution offers evaluation preparation', await until(() => $('#improvementList [data-act="prepare"]')));
       $('#improvementList [data-act="prepare"]').click();
       await report('prepare moves it to 평가 준비됨 with an approval-gated run button', await until(() => /평가 준비됨/.test($('#improvementList').textContent) && $('#improvementList [data-act="evaluate"]')), $('#improvementList').textContent.slice(0, 200));

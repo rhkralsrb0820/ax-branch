@@ -21,11 +21,12 @@ import sys
 import tempfile
 import threading
 import time
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import WORKSPACE, __version__, actions, budgets, departments, home, improvements, knowledge, live, supervisor
+from . import WORKSPACE, __version__, actions, budgets, departments, home, improvements, knowledge, live, model_compare, supervisor
 from .state import Rejected, Store, run_lock, stop_outcome
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
@@ -49,6 +50,7 @@ class App:
         self.lock = threading.Lock()                 # serialises project creation (idempotency)
         self.reports = []                            # test mode: in-browser self-test / perf reports
         self.started = time.time()
+        self.comparing = set()                       # before/after comparisons running in this server (one per id)
         from .owner_runs import OwnerRuns
         self.owner_runs = OwnerRuns(self.store)      # Owner-opened web/server results (isolated, one per project)
 
@@ -311,8 +313,12 @@ def route(app, store, method, path, query, body):
             f = Path(os.environ['AXB_TEST_FIXTURE'])
             return {'name': f.name, 'text': f.read_text(encoding='utf-8-sig')}
         if parts == ['improvements']:
+            ctx = types.SimpleNamespace(store=store, workspace=app.workspace)
+            pids = [r[0] for r in store.db.execute("SELECT DISTINCT project_id FROM events WHERE kind='comparison_prepared'")]
             return {'candidates': improvements.with_states(store, improvements.all_(store)),
-                    'learning': improvements.learning_paths(store), 'training': improvements.training_runs(store)}
+                    'learning': improvements.learning_paths(store), 'training': improvements.training_runs(store),
+                    'comparisons': [c for pid in pids for c in model_compare.project_comparisons(ctx, pid, app.comparing)],
+                    'comparison_scope': model_compare.SUPPORTED}
         if parts == ['library']:
             from . import library
             hidden = improvements.evaluation_projects(store)
@@ -526,6 +532,33 @@ def project_action(app, store, pid, action, body, channel):
         finally:
             engine.store.close()
         return {'how': how, 'path': str(path), **shown}
+    if action == 'compare-prepare':
+        engine = app.engine_factory()
+        try:
+            return model_compare.prepare(engine, pid, by='owner')
+        finally:
+            engine.store.close()
+    if action == 'compare-run':
+        cid = str(body.get('cid', ''))
+        if body.get('approve') is not True:
+            raise Rejected('비교 실행은 Owner 승인이 필요합니다.')
+        with app.lock:
+            if cid in app.comparing:
+                raise Rejected('이 비교는 이미 실행 중입니다.')
+            model_compare.view(types.SimpleNamespace(store=store, workspace=app.workspace), pid, cid)   # unknown id -> error
+            app.comparing.add(cid)
+
+        def work():
+            engine = app.engine_factory()
+            try:
+                model_compare.run(engine, pid, cid, approved=True, by='owner')
+            except Exception as e:                     # recorded; the page shows it as an interrupted, resumable run
+                engine.store.event(pid, 'comparison_error', cid=cid, error=f'{type(e).__name__}: {e}'[:500])
+            finally:
+                engine.store.close()
+                app.comparing.discard(cid)
+        threading.Thread(target=work, daemon=True).start()
+        return {'started': True, 'cid': cid}
     if action == 'result-stop':
         return app.owner_runs.stop(store, pid, reason='owner')
     if action == 'result-save':

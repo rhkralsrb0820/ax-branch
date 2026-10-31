@@ -18,7 +18,7 @@ import traceback
 from pathlib import Path
 
 from . import (GAI_DB, VAULT, WORKSPACE, artifacts, capabilities, governance as gov, isolation, kindex, knowledge, library, metrics, native,
-               budgets, departments, improvements, permissions, providers, runtime, sandbox, sources, supervisor, training)
+               budgets, departments, improvements, model_compare, permissions, providers, runtime, sandbox, sources, supervisor, training)
 from . import __version__
 from .state import ACTIVE, Rejected, Store, run_lock, stop_outcome
 
@@ -222,6 +222,9 @@ Rules:
   load them. Split train/dev/test; tune on dev only; the final test-split evaluation is a runtime check fixed in the
   plan, never a number the training script reports. Downloads (public datasets/models) are network_access.
   The entry's --self-test runs on the same stack BEFORE training: unit checks only, never needing ./outputs.
+  For a text CLASSIFIER, also write the official test split to ./outputs/data/test.csv and the training split to
+  ./outputs/data/train.csv (columns text,label) and ship predict.py so AX Branch can compare the baseline with the
+  trained model itself (it holds the answers): {model_compare.CONTRACT}
   Do not pretend an unsupported capability (e.g. GUI interaction) is available: declare its
   name so the engine records the gap and stops before production. Installed tools are not execution adapters.
   Harness capabilities belong to runtime, never to production agents. Limits in the inventory are binding.

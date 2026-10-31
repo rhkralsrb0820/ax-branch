@@ -382,7 +382,9 @@
         <br>평가: 학습 스크립트 자체 지표 ${esc(t.evaluation.self_reported_metrics ? JSON.stringify(t.evaluation.self_reported_metrics).slice(0, 200) : '없음')} · 독립 검증 ${esc(t.evaluation.independent_verification)}
         <br>Owner에게 전달: ${esc(t.delivered)}
         <br>실행에 사용: 검증 실행 ${t.used.verification_runs}회 · Owner 실행 ${t.used.owner_runs}회 <span class="muted">(${esc(t.used.note)})</span>
-        <br>평가에서 효과 확인: ${esc(t.effect)}</div>`).join('') || '<div class="muted">아직 학습 실행 기록이 없습니다. 결과물이 모델 학습을 요구하면 여기에 실행·결과·전달·사용·효과 확인이 따로 기록됩니다.</div>')
+        <br>특정 평가에서 효과 확인: ${esc(t.effect)}
+        <br>후속 업무에 적용: ${esc(t.applied_to_later_work)}
+        ${t.comparable ? `<div class="row"><button class="ghost" data-compare-prep="${esc(t.project)}">학습 전후 비교 준비</button></div>` : ''}</div>`).join('') || '<div class="muted">아직 학습 실행 기록이 없습니다. 결과물이 모델 학습을 요구하면 여기에 실행·결과·전달·사용·효과 확인이 따로 기록됩니다.</div>')
       + `<h3>개선 후보 (${d.candidates.length})</h3><div class="muted">평가용 프로젝트는 업무 목록에 나오지 않고 아래 각 후보에서 열 수 있습니다. 기록은 모두 보존됩니다.</div>`
       + (d.candidates.map(c => `<div class="item"><h4>${esc(c.id)} <span class="tag">${esc(c.label)}</span></h4>
         <div class="kv">반복 실패: <code>${esc(c.signature)}</code><br>근거: ${c.evidence.map(e => esc(e.project)).join(', ')} (${c.evidence.length}건) · 갱신 ${esc(when(c.updated))}</div>
@@ -392,8 +394,39 @@
         + `<div class="row">${improvementButtons(c)}</div>`
         + `<details><summary>상태 기록</summary>${(c.history || []).map(h => `<div class="muted">${esc(when(h.at))} ${esc(h.from)} → ${esc(h.to)} · ${esc(h.what)} · ${esc(h.by)}</div>`).join('')}</details></div>`).join('')
         || '<div class="muted">아직 개선 후보가 없습니다. 같은 원인의 검증 실패가 연속으로 기록되면 근거와 함께 자동 등록됩니다.</div>');
+    box.insertAdjacentHTML('beforeend', comparisonsHtml(d));
+    S.compareRunning = (d.comparisons || []).some(c => c.running);
+    box.querySelectorAll('[data-compare-prep]').forEach(b => b.onclick = () => compareAction(b.dataset.comparePrep, 'compare-prepare', {}, b));
+    box.querySelectorAll('[data-compare-run]').forEach(b => b.onclick = () => {
+      if (!window.confirm('기준 모델과 학습 모델을 같은 평가 입력으로 격리 실행해 비교합니다. 로컬 CPU에서만 실행하며 비용·모델 호출·학습은 없습니다. 실행할까요?')) return;
+      compareAction(b.dataset.pid, 'compare-run', {cid: b.dataset.compareRun, approve: true}, b);
+    });
     box.querySelectorAll('[data-proj]').forEach(a => a.onclick = e => { e.preventDefault(); openProject(a.dataset.proj); });
     box.querySelectorAll('[data-imp]').forEach(b => b.onclick = () => improvementAction(b.dataset.imp, b.dataset.act, b));
+  }
+  const EFFECT = {confirmed_in_this_evaluation: '이 평가에서 효과 확인됨 (이 자료·조건에서만, 일반적 품질 향상 아님)', not_confirmed: '이 평가에서 효과 없음',
+    not_verified: '판정 보류 (학습·평가 자료 중복 또는 확인 불가)', function_check_only: '기능 확인만 (고정 시험 모델 — 실제 학습 효과 아님)', not_checked: '비교하지 않음'};
+  const VERDICT = {trained_better: '학습 모델이 더 좋음', same: '차이 없음 (기준 이내)', trained_worse: '학습 모델이 더 나쁨'};
+  function comparisonsHtml(d) {
+    const m = x => x ? `정확도 ${x.accuracy} · macro-F1 ${x.macro_f1} · 오류 ${x.errors}/${x.samples} · ${x.seconds}초` : '-';
+    return '<h3>학습 전후 비교</h3>' + `<div class="muted">지원 범위: ${esc(d.comparison_scope || '')}. 정답은 AX Branch가 따로 보관하고, 두 모델을 같은 입력으로 격리 실행해 같은 평가 코드로 채점합니다.</div>`
+      + ((d.comparisons || []).map(c => { const s = c.spec, r = c.result, a = c.arms || {};
+        return `<div class="item"><h4>${esc(c.cid)} <span class="tag">${esc(c.state)}</span> <a href="#" data-proj="${esc(c.project)}">${esc(c.project)}</a></h4>
+        <div class="kv">결과물 v${esc(s.artifact.version)} · 기준: ${esc(s.arms.baseline.name)} · 학습: ${esc(s.arms.trained.name)}${s.arms.trained.base_model ? ' (기반 ' + esc(s.arms.trained.base_model) + ')' : ''}${s.fixture ? ' · <b>고정 시험 모델</b>' : ''}
+          <br>평가 자료: ${esc(s.evaluation.source)} ${esc(s.evaluation.source_sha256.slice(0, 12))} · ${s.evaluation.samples}건 · 라벨 ${s.evaluation.labels.length}종 · 학습 자료 대조: ${s.leakage.checked ? '겹침 ' + s.leakage.overlap + '건' : '확인 불가'}
+          <br>판단 기준: ${esc(s.rule.text)} · 한도: 한쪽 ${s.limits.seconds_per_arm}초</div>`
+        + (a.baseline || a.trained ? `<div class="kv">기준: ${a.baseline ? (a.baseline.status === 'ok' ? m(a.baseline.metrics) : '실패 — ' + esc(a.baseline.problems.join('; '))) : '실행 전'}
+          <br>학습: ${a.trained ? (a.trained.status === 'ok' ? m(a.trained.metrics) : '실패 — ' + esc(a.trained.problems.join('; '))) : '실행 전'}</div>` : '')
+        + (r ? `<div class="kv"><b>${esc(r.status === 'complete' ? VERDICT[r.verdict] + ' (macro-F1 차이 ' + r.delta + ')' : (r.problems || []).join('; '))}</b><br>효과 판정: ${esc(EFFECT[r.effect] || r.effect)}<br><span class="muted">${esc(r.note || '')}</span></div>` : '')
+        + (c.last_error ? `<div class="kv" role="alert">마지막 실행 오류: ${esc(c.last_error)} — 다시 실행하면 끝난 쪽은 건너뛰고 이어서 실행합니다.</div>` : '')
+        + (!r && !c.running ? `<div class="row"><button class="primary" data-compare-run="${esc(c.cid)}" data-pid="${esc(c.project)}">${c.resumable ? '비교 재개 (승인)' : '비교 실행 승인'}</button></div>` : '')
+        + `<details><summary>근거와 실행 기록</summary><pre>${esc(JSON.stringify({spec: s, spec_sha256: c.spec_sha256, arms: a, result: r}, null, 2))}</pre></details></div>`; }).join('')
+        || '<div class="muted">아직 비교가 없습니다. 위 학습 기록에서 [학습 전후 비교 준비]를 누르세요.</div>');
+  }
+  async function compareAction(pid, action, body, button) {
+    button.disabled = true;
+    try { await api(`project/${pid}/${action}`, body); notice(action === 'compare-prepare' ? '비교 조건을 고정했습니다. 내용을 확인한 뒤 실행을 승인하세요.' : '비교를 시작했습니다. 끝나면 결과가 표시됩니다.'); await loadImprovements(); }
+    catch (e) { fail(e); button.disabled = false; }
   }
   function improvementButtons(c) {
     const b = (act, label, cls = 'ghost') => `<button class="${cls}" data-imp="${esc(c.id)}" data-act="${act}">${label}</button>`;
@@ -646,7 +679,8 @@
   // ---- polling (stops while the tab is hidden; reading never starts work) ----
   async function tick() {
     if (document.hidden) return;
-    try { await refreshOverview(); if (S.view === 'project') await refreshProject(); } catch (e) { /* server gone: keep the page */ }
+    try { await refreshOverview(); if (S.view === 'project') await refreshProject();
+      if (S.view === 'improve' && S.compareRunning) await loadImprovements(); } catch (e) { /* server gone: keep the page */ }
   }
   setInterval(tick, 2000);
   refreshOverview().then(async () => {

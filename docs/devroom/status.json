@@ -1009,7 +1009,7 @@
     "후보 빌드",
     "현재 사용 서버"
    ],
-   "note": "생성 결과물의 실제 학습 실행 기록을 표시. AX Branch 자체 모델 학습·Fine-tuning은 미지원(이유 표시)",
+   "note": "생성 결과물의 실제 학습 실행 기록을 표시. AX Branch 자체 모델 학습·Fine-tuning은 미지원(이유 표시) · 학습 기록은 결과 파일 전달 / 실행에 사용 / 특정 평가에서 효과 확인 / 후속 업무에 적용을 따로 표시",
    "remaining": "AX Branch 자체 모델 학습은 하지 않음",
    "next": "-",
    "evidence": [
@@ -1052,6 +1052,24 @@
    "next": "-",
    "evidence": [
     "tests/test_trained_runs.py"
+   ]
+  },
+  {
+   "id": "model-compare",
+   "title": "학습 전후 비교: 명세 고정 → 승인된 격리 실행(기준·학습 모델) → AX Branch 채점 → 효과 판정(이 평가에서만)",
+   "impl": "구현됨",
+   "verified": [
+    "자동 테스트",
+    "실제 실행"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "지원 범위: 텍스트 분류(predict.py 계약). 실제 실행은 고정 시험 예측기로만 확인(기능 확인, 실제 학습 효과 아님)",
+   "remaining": "기존 BANKING77 결과물은 predict.py가 없어 수정 요청 후 비교 가능 · 후속 업무에 모델 적용하는 기능 없음 · 실제 학습 모델로 비교한 적 없음",
+   "next": "Owner가 원하면 BANKING77 프로젝트에 predict.py 추가 수정 요청(실제 모델 호출 필요)",
+   "evidence": [
+    "tests/test_model_compare.py"
    ]
   }
  ],

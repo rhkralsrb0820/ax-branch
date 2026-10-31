@@ -52,6 +52,20 @@ def main(out=None):
     fixture.event(review, 'capability_decision', capability='lora_training', status='needs_owner',
                   tried=[{'option': 'local_cpu_lora', 'ok': False, 'why': 'synthetic', 'seconds': 1}],
                   cost=['0'], minimal_approval=['synthetic sign-in'], next_action='Owner decides')
+    # A synthetic finished before/after comparison (records only; the real path is tests/test_model_compare.py).
+    fixture.event(review, 'training_run', artifact=aid, ok=True, dir=str(ws / 'none'), files=[])
+    spec = {'cid': 'C-20261031-aaaaaa', 'project': review, 'artifact': {'id': aid, 'version': 1, 'sha256': 'sha'},
+            'arms': {'baseline': {'name': 'synthetic baseline', 'base_model': '', 'files': {}},
+                     'trained': {'name': 'synthetic trained', 'base_model': 'synthetic', 'files': {}}},
+            'fixture': True, 'evaluation': {'source': 'outputs/data/test.csv', 'source_sha256': '0' * 64, 'samples': 6,
+                                            'labels': ['a', 'b'], 'label_column': 'label'},
+            'leakage': {'checked': True, 'overlap': 0}, 'rule': {'text': 'synthetic rule'}, 'limits': {'seconds_per_arm': 900}}
+    fixture.event(review, 'comparison_prepared', cid=spec['cid'], spec=spec, spec_sha256='x')
+    metrics = lambda f: {'accuracy': f, 'macro_f1': f, 'errors': 1, 'samples': 6, 'seconds': 1.0}
+    for arm, f in (('baseline', 0.5), ('trained', 0.83)):
+        fixture.event(review, 'comparison_arm', cid=spec['cid'], arm=arm, spec_sha256='x', status='ok', problems=[], metrics=metrics(f))
+    fixture.event(review, 'comparison_result', cid=spec['cid'], status='complete', verdict='trained_better', delta=0.33,
+                  baseline=metrics(0.5), trained=metrics(0.83), effect='function_check_only', note='synthetic')
     fixture.db.commit()
     improvements.observe(fixture, review)
     fixture.close()
