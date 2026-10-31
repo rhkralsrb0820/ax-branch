@@ -177,7 +177,7 @@ class OwnerRuns:
         except Rejected:
             pass
         run['proc'].cleanup()
-        shutil.rmtree(run['cwd'], ignore_errors=True)
+        _remove(run['cwd'])
         self._event(pid, 'owner_web_run_stop', run_id=run['run_id'], reason=reason,
                     seconds=round(time.time() - run['started']), last_saved=run.get('last_saved'),
                     save_error=run.get('save_error'))
@@ -279,10 +279,10 @@ def _launch(engine, pid, artifact, snap, contract=None):
                                           max_processes=3 if exe is not None else 8)
             proc = sandbox.start(argv, str(cwd), isolate=manifest)
         except userdata.SaveFailed as exc:
-            shutil.rmtree(cwd, ignore_errors=True)
+            _remove(cwd)
             raise Rejected(f'저장 데이터를 복원하지 못했습니다: {exc}. 실행하지 않았습니다(데이터는 그대로 보존).') from exc
         except (isolation.IsolationUnavailable, OSError) as exc:
-            shutil.rmtree(cwd, ignore_errors=True)
+            _remove(cwd)
             raise Rejected(f'격리된 결과 실행을 시작하지 못했습니다: {exc}. 격리 없이 실행하지 않습니다.') from exc
         live = _wait_ready(proc, port)
         if live:
@@ -298,7 +298,7 @@ def _launch(engine, pid, artifact, snap, contract=None):
         last_output = proc.output()[-600:]
         proc.stop()
         proc.cleanup()
-        shutil.rmtree(cwd, ignore_errors=True)
+        _remove(cwd)
         announced = [int(p) for p in _URL.findall(last_output)]
         if any(p in runtime.RESERVED_PORTS for p in announced):
             raise Rejected('이 프로그램이 AX Branch 전용 포트(8765)를 쓰려고 했습니다. 같은 프로젝트에 "기본 포트를 바꿔 달라"고 '
@@ -342,7 +342,18 @@ def _kill(run):
     run['stopped'].set()
     run['proc'].stop()
     run['proc'].cleanup()
-    shutil.rmtree(run['cwd'], ignore_errors=True)
+    _remove(run['cwd'])
+
+
+def _remove(folder, attempts=20):
+    """Delete a run folder. Windows can keep a just-killed process's file handles for a moment, so a single
+    rmtree(ignore_errors) sometimes left the folder (and its grants) behind; retry briefly, then sweep() is the backstop."""
+    for _ in range(attempts):
+        shutil.rmtree(folder, ignore_errors=True)
+        if not Path(folder).exists():
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def sweep(max_age=LIFETIME):

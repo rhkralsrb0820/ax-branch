@@ -15,7 +15,7 @@ Semantic versioning. Every release needs an entry with all five sections (enforc
 - Plan schema: `model_uses` (list of {model, input, why}).
 
 ### Fixed
-- (none)
+- Owner web-result runner: a run folder (with its isolation grants) could remain after stop because a single rmtree(ignore_errors) ran while Windows still held the just-killed process's handles; removal now retries briefly at every cleanup point (found by the full regression on 8d41f6a: test_owner_web_run.test_open_use_isolate_and_stop).
 
 ### Verification
 - test_model_registry 6/6 (real AppContainer, installed training stack, fixed developer test predictor; scripted CEO/producer): registration copies only model files; approval needs a passed runnable check; connected use succeeds and is recorded; unconnected / unapproved / changed package / wrong input format / the source project's data are blocked; previous selection restored; department link; CEO context and production context; a planned use of an unapproved model stops without substitution. Browser self-test 39/39.
