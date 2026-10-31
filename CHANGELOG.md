@@ -3,6 +3,27 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.66] - 2026-10-31
+
+### Added
+- Before/after-training comparison for text classification (`axbranch/model_compare.py`, '개선 후보 · 학습'): preparation fixes and hashes the result version, both models' files (from `predict.py --describe`), evaluation inputs and evaluator-held answers, source/split files, the train/eval overlap check, metrics, the decision rule and limits. An Owner-approved run executes both arms in the existing isolated runner, checks predictions (missing / duplicate / unknown / malformed) and scores them with AX Branch's own code (accuracy, macro-F1, errors, seconds). A failed arm leaves it incomplete; a change after preparation makes it invalid; an interrupted run resumes without re-running a finished arm; one run at a time.
+- Training records show four separate states: files delivered, used in a run, effect confirmed in a specific evaluation, applied to later work (not connected).
+- Production rule: a trained text classifier ships predict.py and writes its test/train splits under ./outputs/data.
+
+### Changed
+- Effects are claimed only 'in this evaluation', never for fixed test predictors or when train/eval overlap exists or cannot be checked.
+
+### Fixed
+- (none)
+
+### Verification
+- test_model_compare 8/8 on the fixed developer test predictor (real AppContainer, installed training stack): better / same / worse, crash, missing / duplicate / malformed, changed model, changed answers, overlap, unknown training data, approval, interruption + resume, concurrent-run refusal, web API. Browser self-test 38/38.
+- Full regression and package checks: see the evidence file for this release.
+
+### Known issues
+- The existing BANKING77 result has no predict.py; it needs a rework request (real model call) before it can be compared.
+- No real trained model has been compared yet; no training effect is established. Applying a model to later work is not implemented.
+
 ## [0.1.65] - 2026-10-30
 
 ### Added

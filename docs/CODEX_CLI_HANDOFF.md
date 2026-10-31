@@ -1,4 +1,10 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-30 22:10 KST (server 0.1.64 applied; candidate 0.1.65 built; development stopped at a checkpoint)
+## CURRENT CHECKPOINT — Claude, 2026-10-31 (in progress: 0.1.66 integration)
+- Branch dev/web-ui; 8894864 = before/after-training comparison (model_compare.py) + UI + tests; 0.1.66 release
+  records next. Owner server unchanged 0.1.64-42b1bd2. Candidate 0.1.65-3906e21 preserved.
+- Next in this session: full regression on the 0.1.66 commit, candidate build, packaged checks, final handoff.
+- Usage numbers are not readable from this session's tools (not estimated).
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-30 22:10 KST (server 0.1.64 applied; candidate 0.1.65 built; development stopped at a checkpoint)
 - Repo C:\Users\HP\Desktop\AX-Branch\ax-branch, branch dev/web-ui, code 3906e21 + records commit; working tree clean.
 - **Owner server switched (Owner-approved) to 0.1.64-42b1bd2**, same workspace/port; backup and rollback:
   shared outputs/server-switch/switch-20261030-202747.json. Data preserved (rows, states, files manifest identical).
