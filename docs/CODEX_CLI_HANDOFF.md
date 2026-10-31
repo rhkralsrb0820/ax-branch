@@ -1,8 +1,17 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-31 (in progress: model reuse done in source; 0.1.67 integration next)
-- New in source: axbranch/model_registry.py + UI + engine model_uses (registered text classifiers reused in later work,
-  isolated, recorded, no substitution). Focused tests: test_model_registry 6/6, test_model_compare 8/8, browser 39/39.
-- Owner server unchanged 0.1.64-42b1bd2. Candidates 0.1.65-3906e21, 0.1.66-c192070 preserved.
-- Next in this session: release records, full regression (verbose, to name the skipped test), candidate build, packaged check.
+## CURRENT CHECKPOINT — Claude, 2026-10-31 (0.1.67 candidate built; development stopped at a checkpoint)
+- Repo C:\Users\HP\Desktop\AX-Branch\ax-branch, branch dev/web-ui, code a76dfbc + records commit; tree clean.
+- Owner server: 0.1.64-42b1bd2 (unchanged). Candidates preserved: 0.1.65-3906e21, 0.1.66-c192070, 0.1.67-a76dfbc (latest).
+- **New:** reusable trained models (model_registry.py, UI, engine model_uses) and the run-folder removal fix.
+- **Tests (raw):** verbose regression 8d41f6a had 1 failure (run folder left after stop) -> fixed in a76dfbc; verbose
+  regression a76dfbc = 591 discovered: 590 ok, 1 skipped (tests.test_native ... test_real_build_and_every_check_runs_the_exe,
+  "set AXB_NATIVE_E2E=1: acquires PyInstaller from PyPI into the project and builds"), 0 failed, 0 errors.
+  Packaged 0.1.67: data flow 18/18, registry flow via API.
+- **Unverified:** real trained model registration/use, real CEO model_uses planning, training effect, Owner confirmation.
+- **Processes:** only the Owner server (AXBranch.exe 0.1.64).
+- **Usage:** not readable from this session's tools; not estimated.
+- **Approvals needed:** server switch to 0.1.67; BANKING77 predict.py rework (model call); web E2E (250k); A/B (on hold);
+  external program folders for isolated runs.
+- Prompt: docs/CODEX_HANDOFF_PROMPT.md. Evidence: docs/evidence/2026-10-31-0.1.67-model-reuse.md.
 
 ## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-31 (0.1.66 candidate built; development stopped at a checkpoint)
 - Repo C:\Users\HP\Desktop\AX-Branch\ax-branch, branch dev/web-ui, code c192070 + records commit; tree clean.
