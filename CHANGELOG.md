@@ -3,6 +3,28 @@
 Semantic versioning. Every release needs an entry with all five sections (enforced by
 `tests/test_release.py`).
 
+## [0.1.67] - 2026-10-31
+
+### Added
+- Reusable trained models (`axbranch/model_registry.py`, '개선 후보 · 학습' → 재사용 모델): a project's trained text classifier is registered as a package holding predict.py and only the model files its describe step names, with hashes, source project/version, base model, stack pins, task, input/output contract and labels. Registered, runnable (isolated smoke run), evaluated (a complete before/after comparison) and approved for use are separate states.
+- Models connect to projects directly or through a linked department; connections are append-only events, so an earlier selection can be restored while results stay.
+- 淸月 sees the models available to a project with their scope and evidence and may plan `model_uses`; the engine runs each use before production in the existing isolated runner on THIS project's own input file only, records every attempt, and gives later stages and checks the predictions at ./model_outputs.
+- Training records' 'used in later work' now comes from recorded successful uses in other projects.
+
+### Changed
+- Plan schema: `model_uses` (list of {model, input, why}).
+
+### Fixed
+- (none)
+
+### Verification
+- test_model_registry 6/6 (real AppContainer, installed training stack, fixed developer test predictor; scripted CEO/producer): registration copies only model files; approval needs a passed runnable check; connected use succeeds and is recorded; unconnected / unapproved / changed package / wrong input format / the source project's data are blocked; previous selection restored; department link; CEO context and production context; a planned use of an unapproved model stops without substitution. Browser self-test 39/39.
+- Full regression and package checks: see the evidence file for this release.
+
+### Known issues
+- No real trained model has been registered or used; the BANKING77 result needs predict.py (a rework request with a model call).
+- Whether the real CEO model plans `model_uses` well is unverified.
+
 ## [0.1.66] - 2026-10-31
 
 ### Added
