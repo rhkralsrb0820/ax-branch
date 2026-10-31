@@ -1,4 +1,10 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-31 (0.1.66 candidate built; development stopped at a checkpoint)
+## CURRENT CHECKPOINT — Claude, 2026-10-31 (in progress: model reuse done in source; 0.1.67 integration next)
+- New in source: axbranch/model_registry.py + UI + engine model_uses (registered text classifiers reused in later work,
+  isolated, recorded, no substitution). Focused tests: test_model_registry 6/6, test_model_compare 8/8, browser 39/39.
+- Owner server unchanged 0.1.64-42b1bd2. Candidates 0.1.65-3906e21, 0.1.66-c192070 preserved.
+- Next in this session: release records, full regression (verbose, to name the skipped test), candidate build, packaged check.
+
+## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-31 (0.1.66 candidate built; development stopped at a checkpoint)
 - Repo C:\Users\HP\Desktop\AX-Branch\ax-branch, branch dev/web-ui, code c192070 + records commit; tree clean.
 - Owner server: 0.1.64-42b1bd2 (unchanged since the approved 2026-10-30 switch; rollback in shared
   outputs/server-switch/switch-20261030-202747.json). Candidates preserved: 0.1.65-3906e21, 0.1.66-c192070.

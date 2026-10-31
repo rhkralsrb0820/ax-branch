@@ -177,7 +177,7 @@ class CompareTests(unittest.TestCase):
         self.assertEqual((c['state'], c['result']['verdict']), ('비교 완료', 'trained_better'))
         run = next(t for t in got['training'] if t['project'] == pid)
         self.assertTrue(run['effect'].startswith('기능 확인만'))
-        self.assertTrue(run['applied_to_later_work'].startswith('연결된 기능 없음'))
+        self.assertTrue(run['applied_to_later_work'].startswith('사용 기록 없음'))       # not registered as a model
 
     def test_unsupported_results_say_what_is_missing(self):
         pid = self.project(WEAK, STRONG)

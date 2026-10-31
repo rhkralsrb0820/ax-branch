@@ -66,6 +66,13 @@ def main(out=None):
         fixture.event(review, 'comparison_arm', cid=spec['cid'], arm=arm, spec_sha256='x', status='ok', problems=[], metrics=metrics(f))
     fixture.event(review, 'comparison_result', cid=spec['cid'], status='complete', verdict='trained_better', delta=0.33,
                   baseline=metrics(0.5), trained=metrics(0.83), effect='function_check_only', note='synthetic')
+    from axbranch import model_registry
+    model_registry._db(fixture).execute('INSERT INTO models VALUES(?,?,?,?)', ('M-20261031-bbbbbb', json.dumps({
+        'name': 'synthetic model', 'base_model': 'synthetic', 'task': 'text classification', 'fixture': True,
+        'source': {'project': review, 'artifact': aid, 'version': 1, 'sha256': 'sha', 'training_dir': str(ws / 'none')},
+        'files': {}, 'package_sha256': '0' * 64, 'labels': ['a'], 'environment': {'training_stack_pins': ['x'], 'runner': 'AppContainer'},
+        'contract': {'input': 'jsonl', 'output': 'jsonl', 'command': 'predict.py'}, 'supported': 'text classification only',
+        'limits': '', 'runnable': None, 'approved': None, 'departments': [], 'history': []}), 1.0, 1.0))
     fixture.db.commit()
     improvements.observe(fixture, review)
     fixture.close()

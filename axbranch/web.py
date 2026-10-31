@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import WORKSPACE, __version__, actions, budgets, departments, home, improvements, knowledge, live, model_compare, supervisor
+from . import WORKSPACE, __version__, actions, budgets, departments, home, improvements, knowledge, live, model_compare, model_registry, supervisor
 from .state import Rejected, Store, run_lock, stop_outcome
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
@@ -116,7 +116,10 @@ class App:
                 'recommendations': departments.recommendations(store, pid),
                 'execution_budget': _execution_budget(store, p),
                 'owner_web_run': self.owner_runs.status(pid, self.workspace / 'projects' / pid),
-                'improvements': _improvements_view(store, pid), 'now': _now(p, rec['status'], view['pipeline'])}
+                'improvements': _improvements_view(store, pid), 'now': _now(p, rec['status'], view['pipeline']),
+                'models': {'available': [{'id': m['id'], 'name': m['name'], 'via': via, 'approved': bool(m['approved'])}
+                                         for m, via in model_registry.available(store, pid)],
+                           'uses': [e['detail'] for e in store.events(pid, {'model_use'})][-10:]}}
 
     def settings(self):
         try:
@@ -319,6 +322,11 @@ def route(app, store, method, path, query, body):
                     'learning': improvements.learning_paths(store), 'training': improvements.training_runs(store),
                     'comparisons': [c for pid in pids for c in model_compare.project_comparisons(ctx, pid, app.comparing)],
                     'comparison_scope': model_compare.SUPPORTED}
+        if parts == ['models']:
+            return {'models': model_registry.view(store, app.workspace), 'supported': model_registry.SUPPORTED,
+                    'departments': [{'id': k, 'name': s['name']} for k, s in app.specs.items()],
+                    'projects': [{'id': p['id'], 'title': _title(store.project(p['id']))} for p in store.projects()
+                                 if p['id'] not in improvements.evaluation_projects(store)]}
         if parts == ['library']:
             from . import library
             hidden = improvements.evaluation_projects(store)
@@ -377,6 +385,8 @@ def route(app, store, method, path, query, body):
         return {'ok': True}
     if len(parts) == 3 and parts[0] == 'project' and PID_RE.fullmatch(parts[1]):
         return project_action(app, store, parts[1], parts[2], body, channel)
+    if len(parts) == 3 and parts[0] == 'model' and re.fullmatch(r'M-\d{8}-[0-9a-f]{6}', parts[1]):
+        return model_action(app, store, parts[1], parts[2], body)
     if len(parts) == 3 and parts[0] == 'improvement' and re.fullmatch(r'I-[0-9a-f]{8}', parts[1]):
         return improvement_action(app, store, parts[1], parts[2], body)
     raise KeyError('unknown endpoint')
@@ -459,6 +469,31 @@ def _now(p, status, pipeline):
     return out
 
 
+def model_action(app, store, mid, action, body):
+    with app.lock:
+        if action == 'runnable':
+            engine = app.engine_factory()
+            try:
+                return model_registry.check_runnable(engine, mid)
+            finally:
+                engine.store.close()
+        if action == 'approve':
+            if body.get('approve') is not True:
+                raise Rejected('사용 승인은 Owner가 명시적으로 해야 합니다.')
+            return model_registry.approve(store, app.workspace, mid)
+        if action == 'revoke':
+            return model_registry.revoke(store, mid)
+        if action == 'department':
+            return model_registry.link_department(store, mid, str(body.get('id', '')), app.specs, link=body.get('link') is not False)
+        if action in ('attach', 'detach'):
+            pid = str(body.get('project', ''))
+            if not PID_RE.fullmatch(pid):
+                raise Rejected('프로젝트를 선택하세요.')
+            (model_registry.attach if action == 'attach' else model_registry.detach)(store, pid, mid)
+            return model_registry.get(store, mid)
+    raise KeyError('unknown action')
+
+
 def _attached_view(store, pid):
     """Attached departments with who connected them: the Owner directly, or the Owner accepting a CEO recommendation."""
     accepted = {e['detail']['department'] for e in store.events(pid, {'department_recommendation_decision'})
@@ -532,6 +567,12 @@ def project_action(app, store, pid, action, body, channel):
         finally:
             engine.store.close()
         return {'how': how, 'path': str(path), **shown}
+    if action == 'model-register':
+        engine = app.engine_factory()
+        try:
+            return model_registry.register(engine, pid)
+        finally:
+            engine.store.close()
     if action == 'compare-prepare':
         engine = app.engine_factory()
         try:

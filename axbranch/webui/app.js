@@ -340,7 +340,7 @@
     const lessons = experience.records.flatMap(r => (r.lesson_candidates || []).map(l => ({...l, department: r.department})));
     $('#experience').innerHTML = `<h3>업무 경험</h3><div class="muted">최근 기록 ${count}개 · 이번 과제의 활용 판단 ${uses.length}개 · 품질 개선은 비교 평가 전까지 미확인</div>`
       + ((experience.errors || []).length ? '<div role="status">경험 기록에 실패한 항목이 있습니다. 기술 근거를 확인하세요.</div>' : '')
-      + improvementsLine(p.improvements)
+      + improvementsLine(p.improvements) + modelsLine(p.models)
       + (lessons.length ? `<details><summary>근거가 있는 교훈 후보 ${lessons.length}개 · 개선 효과 미확인</summary>`
         + lessons.slice(-12).map(l => `<div class="kv"><b>${esc(l.title)}</b> · ${esc(l.department)}<br>${esc(l.observation)}<br>다음 업무 참고: ${esc(l.suggestion)}<br><span class="muted">근거 이벤트: ${esc((l.evidence_events || []).join(', '))} · 자동 추출 규칙에 따른 후보</span></div>`).join('') + '</details>' : '')
       + (uses.length ? uses.map(u => `<div class="kv"><b>${esc(u.experience)}</b> · ${esc(u.disposition)}<br>선택·미사용 이유: ${esc(u.reason || '기록 없음')}<br>이번 과제와의 차이: ${esc(u.difference || '기록 없음')}<br>청월이 보고한 판단 변경: ${esc(u.claimed_change || '기록 없음')}<br>연결된 실행: ${esc(u.applied_action || '기록 없음')}<br><span class="muted">판단 반영 기록이며 품질 개선의 증거는 아닙니다.</span></div>`).join('')
@@ -361,6 +361,11 @@
         + (c.status !== 'resolved' ? ((c.minimal_approval || []).length ? `<div>필요한 최소 승인: ${esc(c.minimal_approval.join(' / '))}</div>` : '')
           + `<div class="muted">비용: ${esc((c.cost || []).join(' / ') || '-')} · 다음 행동: ${esc(c.next_action || '')}</div>` : '')
         + '</div>').join('');
+  }
+  function modelsLine(md) {
+    if (!md || (!md.available.length && !md.uses.length)) return '';
+    return `<div class="kv">이 프로젝트에서 쓸 수 있는 재사용 모델: ${md.available.map(a => `${esc(a.id)} (${a.via === 'project' ? '프로젝트 연결' : '부서 연결'}${a.approved ? '' : ', 사용 승인 전'})`).join(', ') || '없음'}`
+      + (md.uses.length ? '<br>사용 기록: ' + md.uses.map(u => `${esc(u.model)} · ${esc(u.input)} · ${u.status === 'ok' ? '성공 ' + u.rows + '건' : '실패 — ' + esc(u.reason || '')}`).join(' / ') : '') + '</div>';
   }
   function improvementsLine(im) {
     if (!im) return '';
@@ -383,8 +388,8 @@
         <br>Owner에게 전달: ${esc(t.delivered)}
         <br>실행에 사용: 검증 실행 ${t.used.verification_runs}회 · Owner 실행 ${t.used.owner_runs}회 <span class="muted">(${esc(t.used.note)})</span>
         <br>특정 평가에서 효과 확인: ${esc(t.effect)}
-        <br>후속 업무에 적용: ${esc(t.applied_to_later_work)}
-        ${t.comparable ? `<div class="row"><button class="ghost" data-compare-prep="${esc(t.project)}">학습 전후 비교 준비</button></div>` : ''}</div>`).join('') || '<div class="muted">아직 학습 실행 기록이 없습니다. 결과물이 모델 학습을 요구하면 여기에 실행·결과·전달·사용·효과 확인이 따로 기록됩니다.</div>')
+        <br>후속 업무에서 사용: ${esc(t.applied_to_later_work)}
+        ${t.comparable ? `<div class="row"><button class="ghost" data-compare-prep="${esc(t.project)}">학습 전후 비교 준비</button><button class="ghost" data-model-reg="${esc(t.project)}">재사용 모델로 등록</button></div>` : ''}</div>`).join('') || '<div class="muted">아직 학습 실행 기록이 없습니다. 결과물이 모델 학습을 요구하면 여기에 실행·결과·전달·사용·효과 확인이 따로 기록됩니다.</div>')
       + `<h3>개선 후보 (${d.candidates.length})</h3><div class="muted">평가용 프로젝트는 업무 목록에 나오지 않고 아래 각 후보에서 열 수 있습니다. 기록은 모두 보존됩니다.</div>`
       + (d.candidates.map(c => `<div class="item"><h4>${esc(c.id)} <span class="tag">${esc(c.label)}</span></h4>
         <div class="kv">반복 실패: <code>${esc(c.signature)}</code><br>근거: ${c.evidence.map(e => esc(e.project)).join(', ')} (${c.evidence.length}건) · 갱신 ${esc(when(c.updated))}</div>
@@ -395,6 +400,12 @@
         + `<details><summary>상태 기록</summary>${(c.history || []).map(h => `<div class="muted">${esc(when(h.at))} ${esc(h.from)} → ${esc(h.to)} · ${esc(h.what)} · ${esc(h.by)}</div>`).join('')}</details></div>`).join('')
         || '<div class="muted">아직 개선 후보가 없습니다. 같은 원인의 검증 실패가 연속으로 기록되면 근거와 함께 자동 등록됩니다.</div>');
     box.insertAdjacentHTML('beforeend', comparisonsHtml(d));
+    const md = await api('models');
+    box.insertAdjacentHTML('beforeend', modelsHtml(md));
+    box.querySelectorAll('[data-model-reg]').forEach(b => b.onclick = () => compareAction(b.dataset.modelReg, 'model-register', {}, b, '재사용 모델로 등록했습니다. 등록은 승인이 아닙니다. 실행 가능 확인 후 사용 승인을 결정하세요.'));
+    box.querySelectorAll('[data-model-act]').forEach(b => b.onclick = () => modelAction(b));
+    box.querySelectorAll('[data-model-dep]').forEach(s => s.onchange = () => { if (!s.value) return; Object.assign(s.dataset, {modelAct: 'department', mid: s.dataset.modelDep, id: s.value, link: 'true'}); modelAction(s); });
+    box.querySelectorAll('[data-model-proj]').forEach(s => s.onchange = () => { if (!s.value) return; Object.assign(s.dataset, {modelAct: 'attach', mid: s.dataset.modelProj, project: s.value}); modelAction(s); });
     S.compareRunning = (d.comparisons || []).some(c => c.running);
     box.querySelectorAll('[data-compare-prep]').forEach(b => b.onclick = () => compareAction(b.dataset.comparePrep, 'compare-prepare', {}, b));
     box.querySelectorAll('[data-compare-run]').forEach(b => b.onclick = () => {
@@ -423,10 +434,40 @@
         + `<details><summary>근거와 실행 기록</summary><pre>${esc(JSON.stringify({spec: s, spec_sha256: c.spec_sha256, arms: a, result: r}, null, 2))}</pre></details></div>`; }).join('')
         || '<div class="muted">아직 비교가 없습니다. 위 학습 기록에서 [학습 전후 비교 준비]를 누르세요.</div>');
   }
-  async function compareAction(pid, action, body, button) {
+  async function compareAction(pid, action, body, button, done) {
     button.disabled = true;
-    try { await api(`project/${pid}/${action}`, body); notice(action === 'compare-prepare' ? '비교 조건을 고정했습니다. 내용을 확인한 뒤 실행을 승인하세요.' : '비교를 시작했습니다. 끝나면 결과가 표시됩니다.'); await loadImprovements(); }
+    try { await api(`project/${pid}/${action}`, body); notice(done || (action === 'compare-prepare' ? '비교 조건을 고정했습니다. 내용을 확인한 뒤 실행을 승인하세요.' : '비교를 시작했습니다. 끝나면 결과가 표시됩니다.')); await loadImprovements(); }
     catch (e) { fail(e); button.disabled = false; }
+  }
+  function modelsHtml(md) {
+    const when = t => t ? new Date(t * 1000).toLocaleString() : '';
+    const deps = md.departments || [], projs = md.projects || [];
+    return '<h3>재사용 모델</h3>' + `<div class="muted">지원 범위: ${esc(md.supported)}. 등록 · 실행 가능 · 평가 완료 · 사용 승인은 서로 다른 상태입니다. 연결해도 원본 프로젝트의 입력 자료나 사용자 데이터에는 접근하지 않습니다.</div>`
+      + ((md.models || []).map(m => { const run = m.runnable, ok = run && run.ok;
+        return `<div class="item"><h4>${esc(m.id)} <span class="tag">등록됨</span> <span class="tag">${ok ? '실행 가능' : run ? '실행 불가' : '실행 확인 전'}</span> <span class="tag">${m.evaluation.done ? '평가 완료' : '평가 전'}</span> <span class="tag">${m.approved ? '사용 승인됨' : '사용 승인 전'}</span>${m.fixture ? ' <span class="tag">고정 시험 모델</span>' : ''}</h4>
+        <div class="kv">${esc(m.name)} · 기반 ${esc(m.base_model)} · 출처 <a href="#" data-proj="${esc(m.source.project)}">${esc(m.source.project)}</a> v${esc(m.source.version)} · 패키지 ${esc(m.package_sha256.slice(0, 12))}
+          <br>업무: ${esc(m.task)} · 라벨 ${m.labels.length}종 · 입력: ${esc(m.contract.input)} · 출력: ${esc(m.contract.output)}
+          <br>실행 환경: ${esc(m.environment.runner)} · ${esc(m.environment.training_stack_pins.join(', '))}
+          <br>평가 근거: ${esc(m.evaluation.label)}${run ? '<br>실행 가능 확인: ' + (ok ? `통과 (${run.seconds}초, ${esc(run.probe)})` : '실패 — ' + esc(run.problems.join('; '))) : ''}
+          ${m.package_problems.length ? `<br><b role="alert">모델 파일 문제: ${esc(m.package_problems.join('; '))} — 사용 차단</b>` : ''}</div>
+        <div class="kv">연결된 부서: ${m.departments.length ? m.departments.map(d => esc(depName(d)) + ` <button class="x" data-model-act="department" data-mid="${esc(m.id)}" data-id="${esc(d)}" data-link="false" title="부서 연결 해제">×</button>`).join(', ') : '없음'}
+          · 연결된 프로젝트: ${m.projects.length ? m.projects.map(p => `<a href="#" data-proj="${esc(p)}">${esc(p)}</a> <button class="x" data-model-act="detach" data-mid="${esc(m.id)}" data-project="${esc(p)}" title="프로젝트 연결 해제">×</button>`).join(', ') : '없음'}
+          <br>실제 사용: 성공 ${m.used_ok}회 · 실패 ${m.used_failed}회${m.uses.length ? m.uses.slice(0, 5).map(u => `<div class="muted">${esc(when(u.at))} ${esc(u.project)} · ${esc(u.input)} · ${u.status === 'ok' ? '성공 ' + u.rows + '건' : '실패 — ' + esc(u.reason || '')}</div>`).join('') : ''}</div>
+        <div class="row">${!ok ? `<button class="ghost" data-model-act="runnable" data-mid="${esc(m.id)}">실행 가능 확인 (격리 시험 실행)</button>` : ''}
+          ${ok && !m.approved ? `<button class="primary" data-model-act="approve" data-mid="${esc(m.id)}">사용 승인</button>` : ''}${m.approved ? `<button class="ghost" data-model-act="revoke" data-mid="${esc(m.id)}">사용 승인 취소</button>` : ''}
+          <select data-model-dep="${esc(m.id)}"><option value="">부서에 연결…</option>${deps.filter(d => !m.departments.includes(d.id)).map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('')}</select>
+          <select data-model-proj="${esc(m.id)}"><option value="">프로젝트에 연결…</option>${projs.filter(p => !m.projects.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join('')}</select></div>
+        <details><summary>연결 기록과 근거</summary><pre>${esc(JSON.stringify({connections: m.connections, history: m.history, files: m.files, approved: m.approved, uses: m.uses}, null, 2))}</pre></details></div>`; }).join('')
+        || '<div class="muted">등록된 모델이 없습니다. 위 학습 기록에서 [재사용 모델로 등록]을 누르세요.</div>');
+  }
+  async function modelAction(b) {
+    const act = b.dataset.modelAct, body = {};
+    if (act === 'approve') { if (!window.confirm('이 모델을 후속 업무에서 사용하도록 승인할까요? 승인은 품질 검증이 아닙니다. 평가 근거를 확인하세요.')) return; body.approve = true; }
+    if (act === 'department') { body.id = b.dataset.id; body.link = b.dataset.link !== 'false'; }
+    if (act === 'attach' || act === 'detach') body.project = b.dataset.project;
+    b.disabled = true;
+    try { await api(`model/${b.dataset.mid}/${act}`, body); notice({runnable: '실행 가능 확인을 기록했습니다.', approve: '사용 승인했습니다.', revoke: '사용 승인을 취소했습니다. 다음 사용부터 차단됩니다.', department: '부서 연결을 바꿨습니다.', attach: '프로젝트에 연결했습니다. 다음 계획부터 청월이 사용할 수 있습니다.', detach: '연결을 해제했습니다. 기존 결과와 기록은 보존됩니다.'}[act]); await loadImprovements(); }
+    catch (e) { fail(e); b.disabled = false; }
   }
   function improvementButtons(c) {
     const b = (act, label, cls = 'ghost') => `<button class="${cls}" data-imp="${esc(c.id)}" data-act="${act}">${label}</button>`;

@@ -1072,10 +1072,28 @@
     "후보 빌드"
    ],
    "note": "지원 범위: 텍스트 분류(predict.py 계약). 실제 실행은 고정 시험 예측기로만 확인(기능 확인, 실제 학습 효과 아님)",
-   "remaining": "기존 BANKING77 결과물은 predict.py가 없어 수정 요청 후 비교 가능 · 후속 업무에 모델 적용하는 기능 없음 · 실제 학습 모델로 비교한 적 없음",
+   "remaining": "기존 BANKING77 결과물은 predict.py가 없어 수정 요청 후 비교 가능 · 실제 학습 모델로 비교한 적 없음",
    "next": "Owner가 원하면 BANKING77 프로젝트에 predict.py 추가 수정 요청(실제 모델 호출 필요)",
    "evidence": [
     "tests/test_model_compare.py"
+   ]
+  },
+  {
+   "id": "model-reuse",
+   "title": "학습 결과 재사용: 모델 등록 → 실행 가능 확인 → 사용 승인 → 부서·프로젝트 연결 → 청월 계획(model_uses) → 제작 전 격리 실행 → 기록 → 해제·이전 선택",
+   "impl": "구현됨",
+   "verified": [
+    "자동 테스트",
+    "실제 실행"
+   ],
+   "location": [
+    "개발 소스"
+   ],
+   "note": "지원 범위: 텍스트 분류. 실제 실행은 고정 시험 예측기로만 확인(기능 확인). 연결해도 원본 프로젝트 입력·사용자 데이터에는 접근 불가",
+   "remaining": "실제 학습 모델로 등록·사용한 적 없음(BANKING77은 predict.py 필요) · 실제 청월 모델이 model_uses를 쓰는지 미확인",
+   "next": "BANKING77 predict.py 수정 요청(승인 필요) 후 등록",
+   "evidence": [
+    "tests/test_model_registry.py"
    ]
   }
  ],

@@ -242,6 +242,19 @@ def _effect(store, pid, artifact):
     return f"{EFFECT[r['effect']]} · {r['cid']}"
 
 
+def _later_use(store, pid, artifact):
+    """From real records: registered models of this training result and their successful uses in other projects."""
+    from . import model_registry
+    models = [m for m in model_registry.all_(store) if m['source']['project'] == pid and m['source']['artifact'] == artifact]
+    if not models:
+        return '사용 기록 없음 — 재사용 모델로 등록되지 않았습니다'
+    ok = [u for m in models for u in model_registry.uses(store, m['id']) if u['status'] == 'ok' and u['project'] != pid]
+    ids = ', '.join(m['id'] for m in models)
+    if not ok:
+        return f'등록됨({ids}) · 후속 업무 사용 기록 없음'
+    return f"후속 업무에서 사용됨 {len(ok)}회 ({', '.join(sorted({u['project'] for u in ok}))}) · 모델 {ids}"
+
+
 def training_runs(store, limit=20):
     """Real training runs of generated results (engine._training_run), split into run / result / evaluation / applied.
     The metrics are the training script's own dev-split numbers; the independent check is the verification verdict."""
@@ -271,7 +284,7 @@ def training_runs(store, limit=20):
             'used': {'verification_runs': count('verification'), 'owner_runs': count('owner_run', 'owner_web_run'),
                      'note': '실행할 때 학습 출력을 프로그램 폴더(./outputs)에 제공한 횟수. 프로그램이 실제로 불러 썼는지는 검증 통과 여부로만 판단'},
             'effect': _effect(store, pid, run.get('artifact')),
-            'applied_to_later_work': '연결된 기능 없음 — 비교와 분리되어 있으며, 모델을 다른 업무에 적용하는 기능은 아직 없습니다',
+            'applied_to_later_work': _later_use(store, pid, run.get('artifact')),
             'comparable': bool(run.get('ok')),
         })
     return out
