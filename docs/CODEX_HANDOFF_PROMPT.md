@@ -13,7 +13,7 @@
   2026-10-30 20:28 Owner 승인으로 교체.
 - 백업·복구: C:\Users\HP\Documents\Codex\2026-10-17\referenced-chatgpt-conversation-this-is-an\outputs\server-switch\
   switch-20261030-202747.json (복구 순서), owner-db-before-42b1bd2-20261030-202747.sqlite3.
-- 후보 빌드: C:\Users\HP\Documents\Codex\axbranch-builds\0.1.65-3906e21 (BUILD.json). 사용 서버에 적용하지 않음 — 적용은 Owner 승인 필요.
+- 후보 빌드: C:\Users\HP\Documents\Codex\axbranch-builds\0.1.66-c192070 (최신, BUILD.json), 0.1.65-3906e21 보존. 사용 서버에 적용하지 않음 — 적용은 Owner 승인 필요.
 
 ## 이번에 구현된 기능 (0.1.64 → 0.1.66)
 - 학습 전후 비교(텍스트 분류, axbranch/model_compare.py): 명세 고정·해시, 정답 별도 보관, 승인된 격리 실행, 예측 검사, AX Branch 채점, 미완료/무효/재개/중복 실행 방지, 효과는 이 평가에서만 판정. 학습 기록에 결과 파일 전달/실행에 사용/특정 평가에서 효과 확인/후속 업무에 적용(미연결) 구분.
