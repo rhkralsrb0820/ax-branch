@@ -1,8 +1,16 @@
-## CURRENT CHECKPOINT — Claude, 2026-10-31 (in progress: 0.1.66 integration)
-- Branch dev/web-ui; 8894864 = before/after-training comparison (model_compare.py) + UI + tests; 0.1.66 release
-  records next. Owner server unchanged 0.1.64-42b1bd2. Candidate 0.1.65-3906e21 preserved.
-- Next in this session: full regression on the 0.1.66 commit, candidate build, packaged checks, final handoff.
-- Usage numbers are not readable from this session's tools (not estimated).
+## CURRENT CHECKPOINT — Claude, 2026-10-31 (0.1.66 candidate built; development stopped at a checkpoint)
+- Repo C:\Users\HP\Desktop\AX-Branch\ax-branch, branch dev/web-ui, code c192070 + records commit; tree clean.
+- Owner server: 0.1.64-42b1bd2 (unchanged since the approved 2026-10-30 switch; rollback in shared
+  outputs/server-switch/switch-20261030-202747.json). Candidates preserved: 0.1.65-3906e21, 0.1.66-c192070.
+- **New:** before/after-training comparison (model_compare.py) + UI; four training states; producer predict.py rule.
+- **Tests (raw):** full regression c192070 = 585 discovered: 584 passed, 1 skipped (test_native opt-in PyInstaller
+  build), 0 failed, 0 errors. test_model_compare 8/8, browser 38/38. Packaged 0.1.66: data flow 18/18, comparison OK.
+- **Unverified:** a real trained model comparison, any training effect, real-model behaviour, Owner confirmation.
+- **Processes:** only the Owner server (AXBranch.exe 0.1.64, PID 64080 at last check).
+- **Usage:** not readable from this session's tools; not estimated.
+- **Approvals needed:** server switch to 0.1.66; BANKING77 predict.py rework (model call); web E2E (250k budget); A/B
+  (on hold); external program folders for isolated runs.
+- Next tasks and the copy-paste prompt: docs/CODEX_HANDOFF_PROMPT.md. Evidence: docs/evidence/2026-10-31-0.1.66-model-compare.md.
 
 ## HISTORICAL CHECKPOINT — superseded: — Claude, 2026-10-30 22:10 KST (server 0.1.64 applied; candidate 0.1.65 built; development stopped at a checkpoint)
 - Repo C:\Users\HP\Desktop\AX-Branch\ax-branch, branch dev/web-ui, code 3906e21 + records commit; working tree clean.
