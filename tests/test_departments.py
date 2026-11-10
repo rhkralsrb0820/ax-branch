@@ -145,6 +145,42 @@ class DepartmentTests(unittest.TestCase):
                 self.assertFalse(any(s in (E.WORK, E.BUILD) for s, _ in script.contexts))
                 self.assertFalse(self.store.artifacts(pid))
 
+    def test_refused_plan_is_replanned_within_departments_never_resumed_unchanged(self):
+        # P-20261031-171763: 淸月 asked web_research of a reasoning-only research department; three resumes re-ran
+        # the same refused plan. Now: one re-plan within the attached tools per Owner action, nothing granted.
+        web = [dict(DepartmentScript().pipeline[0], capabilities=['web_research'], web=True), DepartmentScript().pipeline[1]]
+
+        class Replans(DepartmentScript):
+            fixed = True
+            def __call__(inner, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if 'decision' in schema.get('properties', {}) and inner.fixed:   # forbid_continue copies STRATEGY
+                    result = dict(result, decision='change_pipeline', pipeline=[dict(s) for s in DepartmentScript().pipeline])
+                return result, used, notes
+
+        script = Replans(web)
+        pid = self.project('research', 'operations')
+        p = self.engine(script).run(pid)
+        self.assertEqual(p['state'], 'OWNER_REVIEW', p['pause_reason'])
+        self.assertEqual(len(self.store.events(pid, {'delegation_replan'})), 1)
+        self.assertFalse(self.store.events(pid, {'delegation_refused'}))
+        self.assertFalse(any(s.get('web') for s in p['plan']['pipeline']))
+        self.assertIn('delegation_rule', script.contexts[0][1])
+        # 淸月 insists: it waits for the Owner; each Owner resume allows exactly one more re-plan, never a loop.
+        script = Replans(web); script.fixed = False
+        pid = self.project('research', 'operations')
+        eng = self.engine(script)
+        p = eng.run(pid)
+        self.assertEqual(p['state'], 'PAUSED')
+        self.assertIn('delegation refused', p['pause_reason'])
+        strategies = lambda: sum('decision' in s.get('properties', {}) for s, _ in script.contexts)
+        self.assertEqual(strategies(), 1)
+        self.assertEqual(eng.run(pid)['state'], 'PAUSED')                         # not resumed: nothing runs
+        self.store.resume(pid); self.store.event(pid, 'owner_action', action='resume', channel='test')
+        self.assertEqual(eng.run(pid)['state'], 'PAUSED')
+        self.assertEqual(strategies(), 2)
+        self.assertFalse(any(s in (E.WORK, E.BUILD) for s, _ in script.contexts))
+
     def test_no_fitting_department_is_a_recorded_temporary_agent(self):
         pipeline = [dict(DepartmentScript().pipeline[0]),
                     dict(DepartmentScript().pipeline[1], department='', agent_role='Interim builder',
@@ -322,6 +358,9 @@ class DepartmentTests(unittest.TestCase):
                 if judged == 'conflict':
                     self.assertTrue(self.store.events(pid, {'criteria_conflict'}))
                     self.assertIn('re-plan', self.store.events(pid, {'criteria_conflict'})[0]['detail']['decision'])
+                    # P-20261031-171763: a conflict is never rebuilt (6 rounds there); one build, then the Owner rules.
+                    self.assertEqual((p['state'], len(self.store.artifacts(pid))), ('PAUSED', 1))
+                    self.assertIn('criteria conflict', p['pause_reason'])
 
     def test_replan_reuses_unchanged_stages_and_reruns_dependents_with_reasons(self):
         three = [dict(DepartmentScript().pipeline[0]),

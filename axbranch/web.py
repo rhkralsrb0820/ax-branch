@@ -457,12 +457,17 @@ def _now(p, status, pipeline):
         code, reason = stop
         if 'CAPABILITY_GAP' in reason or 'Owner action needed: capability' in reason:
             nxt = '필요한 기능이 없어 제작 전에 멈췄습니다. 아래 "필요한 기능 확보" 카드에서 시도 결과와 대안·필요한 승인을 확인하고, 요구를 바꾸거나 승인하세요.'
+        elif 'department delegation refused' in reason:
+            nxt = ('청월의 계획이 연결된 부서의 도구·권한을 넘었습니다(멈춘 이유 참고). 같은 계획은 다시 실행하지 않습니다. '
+                   '[계속 실행 / 재개]를 누르면 청월이 연결된 부서의 범위 안에서 한 번 더 다시 계획합니다(모델 호출 1회). '
+                   '[수정 요청 / 계속]으로 방향을 적을 수도 있습니다(예: "웹 조사 없이, 확인하지 못한 내용은 미확인으로 표시"). '
+                   '웹 조사가 꼭 필요하면 네트워크 권한이 있는 부서가 있어야 합니다. 새 권한이므로 Owner 승인이 필요하며, 현재 부서 라이브러리에는 그런 부서가 없습니다.')
+        elif 'budget' in reason.lower():
+            nxt = '업무의 토큰 또는 호출·시간 한도를 확인하세요. 예산 카드에서 토큰 한도를 늘린 후 직접 재개할 수 있습니다.'
         elif code == 'BLOCKED':
             nxt = ('사용량 한도에 걸렸습니다. 한도가 풀린 뒤 [계속 실행 / 재개]하면 기록에서 이어서 실행합니다 (같은 단계를 두 번 돌리지 않음).'
                    if 'RateLimited' in reason or 'No provider' in reason else
                    '실행 환경 문제로 멈췄습니다. 타임라인의 원인을 확인한 뒤 [계속 실행 / 재개]하세요.')
-        elif 'budget' in reason.lower():
-            nxt = '이번 업무의 사용 한도에 도달했습니다. 아래 예산 카드에서 한도를 늘리거나 결과를 그대로 검토하세요.'
         else:
             nxt = NEXT.get(code, '')
         out.update(stop=code, reason=reason, next=nxt)
@@ -508,6 +513,12 @@ def _improvements_view(store, pid):
 
 
 def project_action(app, store, pid, action, body, channel):
+    if action == 'budget-increase':
+        if body.get('confirm') is not True:
+            raise Rejected('Owner가 한도 변경을 명시적으로 확인해야 합니다.')
+        with app.lock, run_lock(app.workspace / 'projects' / pid / 'run.lock'):
+            budgets.increase(store, pid, body.get('max_reported_tokens'), channel=channel)
+        return {'execution_budget': _execution_budget(store, store.project(pid))}
     if action == 'recommendation':
         with run_lock(app.workspace / 'projects' / pid / 'run.lock'):
             changed = departments.decide_recommendation(store, pid, body.get('id'), body.get('decision'))
@@ -527,8 +538,9 @@ def project_action(app, store, pid, action, body, channel):
             raise Rejected('action must be attach, detach, require or optional')
         return {'attached': departments.attached(store, pid)}
     if action == 'resume':
-        if actions.resume(store, pid, channel):
-            actions.launch(app.workspace, store, pid, app.launcher)
+        with app.lock:
+            if actions.resume(store, pid, channel):
+                actions.launch(app.workspace, store, pid, app.launcher)
         return {'ok': True}
     if action == 'stop':
         actions.stop(app.workspace, store, pid, channel, via='web')

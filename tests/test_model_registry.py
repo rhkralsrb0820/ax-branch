@@ -192,6 +192,25 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('다른 모델로 대체하지 않았습니다', p['pause_reason'])
         self.assertFalse(self.store.artifacts(pid))                               # nothing was built without it
 
+    def test_model_uses_without_any_available_model_is_a_recorded_no_op(self):
+        # 2026-10-31 measurement: with no registered model, the CEO listed its provider "claude"; the report stopped.
+        class NamesProvider(TE.Script):
+            def __call__(self, prompt, schema, *args, **kw):
+                result, used, notes = super().__call__(prompt, schema, *args, **kw)
+                if schema is E.PLAN:
+                    result['model_uses'] = [{'model': 'claude', 'input': 'goal', 'why': 'x'}]
+                return result, used, notes
+        store = Store(self.ws / 'axbranch.sqlite3')
+        pid = store.new_project('report')
+        eng = E.Engine(store, workspace=self.ws, vault=self.tmp / 'v', gai_db=self.tmp / 'x', llm=NamesProvider([TE.GOOD], ['PASS']))
+        try:
+            p = eng.run(pid)
+            self.assertNotIn('model use', p['pause_reason'] or '')
+            self.assertTrue(store.artifacts(pid))
+            self.assertTrue(any('model_uses ignored' in e['detail']['what'] for e in store.events(pid, {'decision'})))
+        finally:
+            store.close()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -38,6 +38,10 @@ LABEL = {'claude': 'Claude Code', 'codex': 'Codex'}
 # every AX Branch process on this PC (window, CLI, Codex session) shares these slots.
 MAX_PARALLEL_CLI = 2
 SLOT_DIR = Path(tempfile.gettempdir()) / 'axbranch-provider-slots'
+# One fixed, empty working directory for every CLI turn: both CLIs put the working directory into their system
+# prompt, so a fresh random folder per call changed the prompt prefix and defeated the provider's prompt (KV) cache
+# (P-20261031-171763: Claude wrote 219k tokens to cache and read 10.6k). Our own files stay in per-call scratch.
+CLI_CWD = Path(tempfile.gettempdir()) / 'axbranch-cli-cwd'
 MIN_FREE_MB, MEMORY_WAIT = 1024, 300
 SLEEP_GAP = 30          # a poll gap longer than this means the PC slept / the process was suspended
 
@@ -212,7 +216,8 @@ def run_claude(prompt, schema, web=False, cancel=None, on_tick=None):
             '--mcp-config', '{"mcpServers":{}}', '--no-session-persistence']
     scratch = Path(tempfile.mkdtemp(prefix='axb-claude-'))
     try:
-        code, stream = _contained('claude', args, prompt, str(scratch), cancel, on_tick)
+        CLI_CWD.mkdir(exist_ok=True)
+        code, stream = _contained('claude', args, prompt, str(CLI_CWD), cancel, on_tick)
         raw = _claude_result(stream)
         if code != 0:
             _check_rate_limit(_claude_failure_text(raw))
@@ -246,7 +251,8 @@ def run_codex(prompt, schema, web=False, cancel=None, on_tick=None):
                 '--ignore-user-config', '--ephemeral', '--output-schema', str(scratch / 'schema.json'),
                 '-c', 'forced_login_method="chatgpt"', '-c', f'web_search="{"live" if web else "disabled"}"',
                 '-c', 'features.shell_tool=false', '-c', 'features.unified_exec=false', '-o', str(out)]
-        code, events = _contained('codex', args, prompt, str(scratch), cancel, on_tick)
+        CLI_CWD.mkdir(exist_ok=True)
+        code, events = _contained('codex', args, prompt, str(CLI_CWD), cancel, on_tick)
         if code != 0 or not out.exists():
             _check_rate_limit(_codex_failure_text(events))
             raise Rejected(f'Codex exited {code}: {_codex_failure_text(events)[-300:]}')

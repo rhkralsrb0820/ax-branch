@@ -14,6 +14,26 @@ from axbranch.state import Store, run_lock
 
 
 class WebTests(unittest.TestCase):
+    def test_owner_increases_paused_budget_without_resuming(self):
+        from axbranch import budgets
+        store = Store(self.ws / 'axbranch.sqlite3')
+        pid = store.new_project('budget test')
+        budgets.configure(store, pid, max_reported_tokens=250000, time_basis='call_seconds')
+        store.pause(pid, 'Execution budget reached')
+        store.close()
+        url = f'/api/project/{pid}/budget-increase'
+        self.assertEqual(self.call(url, {'max_reported_tokens': 450000})[0], 400)
+        self.assertEqual(self.call(url, {'confirm': True, 'max_reported_tokens': 250000})[0], 400)
+        code, result = self.call(url, {'confirm': True, 'max_reported_tokens': 450000})
+        self.assertEqual(code, 200)
+        self.assertEqual(result['execution_budget']['max_reported_tokens'], 450000)
+        store = Store(self.ws / 'axbranch.sqlite3')
+        self.assertEqual(store.project(pid)['state'], 'PAUSED')
+        self.assertEqual(len(store.events(pid, {'execution_budget'})), 2)
+        self.assertEqual(store.events(pid, {'owner_action'})[-1]['detail']['previous_tokens'], 250000)
+        store.close()
+        self.assertEqual(self.launched, [])
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.ws = self.tmp / 'ws'

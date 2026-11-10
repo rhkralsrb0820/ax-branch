@@ -686,6 +686,33 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(self.store.projects()), 1)
         self.assertIn('infinite descent', Path(self.store.artifacts(pid)[-1]['path']).read_text(encoding='utf-8'))
 
+    def test_document_gets_one_automatic_fix_then_waits_for_the_owner(self):
+        # Owner 2026-10-31: a report spent 13 min / 510k tokens on automatic rebuilds that all failed.
+        doc = '# Report\n' + 'A claim without a source.\n' * 8
+        script = Script([doc + 'v1', doc + 'v2', doc + 'v3', doc + 'v4'], ['FAIL', 'FAIL', 'FAIL', 'PASS'])
+        base = Script.__call__
+
+        def as_document(self_, prompt, schema, prefer='claude', web=False, cancel=None, **kw):
+            result = base(self_, prompt, schema, prefer, web, cancel, **kw)
+            if schema is E.PLAN:
+                result[0].update(artifact_kind='markdown', artifact_filename='report.md',
+                                 runtime={'mode': 'none', 'owner_launch': 'read it', 'launch_args': [], 'probes': []})
+            return result
+        with mock.patch.object(Script, '__call__', as_document):
+            eng = self.engine(script)
+            pid = self.store.new_project('보고서 작성')
+            self.store.event(pid, 'owner_action', action='new', channel='test')
+            p = eng.run(pid)
+            self.assertEqual((p['state'], len(self.store.artifacts(pid))), ('PAUSED', 2))       # draft + one fix
+            self.assertIn('document draft v2 failed verification after one automatic fix', p['pause_reason'])
+            self.assertFalse(self.store.events(pid, {'strategy_pending'})[-1:] and
+                             self.store.events(pid, {'strategy_done'}) == [])               # no model call after the stop
+            calls = len(script.prompts)
+            self.store.resume(pid); self.store.event(pid, 'owner_action', action='resume', channel='test')
+            p = eng.run(pid)                                                                   # resume = exactly one more fix
+            self.assertEqual((p['state'], len(self.store.artifacts(pid))), ('PAUSED', 3))
+            self.assertGreater(len(script.prompts), calls)
+
     def test_declined_domain_proposed_again_can_be_approved(self):
         script = Script([LAUNCHABLE], ['PASS'])
         script.network = [{'domain': 'data.sec.gov', 'purpose': 'facts', 'risk': 'public_read'}]

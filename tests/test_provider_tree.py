@@ -86,6 +86,19 @@ class AuthorityTests(unittest.TestCase):
                 self.assertFalse(providers.authority('claude', web)['shell'] or providers.authority('codex', web)['file_write'])
         self.assertIsNone(providers.authority('gemini', False))                   # unknown provider: fail closed
 
+    def test_every_turn_runs_in_one_fixed_working_directory(self):
+        # The CLIs put the working directory into their system prompt: a new folder per turn defeats prompt caching.
+        cwds = []
+
+        def fake(provider, args, prompt, cwd, cancel, on_tick):
+            cwds.append(cwd)
+            raise providers.Rejected('stop here')
+        with mock.patch.object(providers, '_contained', fake), mock.patch.object(providers.shutil, 'which', lambda b: b):
+            for name in ('claude', 'claude', 'codex', 'codex'):
+                with self.assertRaises(providers.Rejected):
+                    providers.RUN[name]('p', {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False})
+        self.assertEqual(set(cwds), {str(providers.CLI_CWD)})
+
 
 class UsageTests(unittest.TestCase):
     """Shapes captured from the real CLIs on 2026-10-22 (claude result envelope, codex exec --json)."""

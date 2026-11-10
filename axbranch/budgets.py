@@ -35,6 +35,27 @@ def configure(store, pid, *, max_calls=12, max_seconds=1200, max_prompt_chars=32
                        provider_attempt_upper_bound_per_turn=len(gov.PROVIDERS))
 
 
+def increase(store, pid, new_limit, *, channel):
+    """Record an Owner-approved increase; retain all other limits and the cumulative ledger."""
+    with store.tx():
+        project = store.project(pid)
+        if project['state'] != 'PAUSED':
+            raise Rejected('일시 중단된 프로젝트에서만 한도를 변경할 수 있습니다.')
+        records = store.events(pid, {'execution_budget'})
+        if not records:
+            raise Rejected('기존 예산 기록이 없어 변경할 수 없습니다.')
+        previous = records[-1]['detail']
+        if previous.get('time_basis', 'wall_clock') != 'call_seconds':
+            raise Rejected('이 프로젝트는 경과 시간 기준 예산이라 웹에서 변경할 수 없습니다.')
+        if type(new_limit) is not int or new_limit <= previous['max_reported_tokens'] or new_limit > 10000000:
+            raise Rejected('기존 한도보다 큰 정수(최대 10,000,000)를 입력하세요.')
+        updated = dict(previous, max_reported_tokens=new_limit)
+        store.event(pid, 'execution_budget', **updated)
+        store.event(pid, 'owner_action', action='budget_increase', channel=channel,
+                    previous_tokens=previous['max_reported_tokens'], new_tokens=new_limit)
+    return new_limit
+
+
 def usage_tokens(detail):
     """Count reported totals without counting Codex cache/reasoning subsets twice."""
     usage = detail.get('tokens')

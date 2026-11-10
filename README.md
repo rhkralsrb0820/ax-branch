@@ -4,7 +4,102 @@
 
 AX Branch is a local workspace where an Owner hands over a goal and AX Branch's AI CEO, **淸月 (Cheongwol)**, does the rest. The CEO plans the work, splits it across the departments the Owner attached, and runs temporary specialist agents on the Owner's Claude Code / Codex CLI subscriptions. Each result is checked by a separate verification step and reworked until it passes. Only then does it reach the Owner for review. The Owner sets the goal and the limits; AX Branch handles the AI work inside them.
 
-> 상태: 개발 중인 개인 프로젝트입니다. 현재 소스는 **0.1.63 후보**이고, Owner가 실제로 쓰는 서버는 이전 빌드 **0.1.61-67d9095**입니다. 두 버전은 같지 않습니다(아래 [버전](#버전-현재-소스와-사용-중인-빌드)).
+> 상태: 개발 중인 개인 프로젝트입니다. 현재 소스는 **0.1.67** (`dev/web-ui`)이며 전체 회귀 테스트 591건 중 590건 통과, 1건 건너뜀(사유 기록), 실패 0건입니다(커밋 `a76dfbc`). 표준 라이브러리만 쓰는 Python 3.11+ 프로젝트입니다.
+
+**1분 요약:** [아키텍처](#아키텍처) → [오케스트레이션](#오케스트레이션) → [평가 방법](#평가-방법) → [실패 재현과 수정 기록](#실패-재현과-수정-기록)
+
+## 아키텍처
+
+```mermaid
+flowchart LR
+    subgraph UI["Owner 인터페이스"]
+        W["웹 (127.0.0.1, 토큰)"]
+        T["Tk 창"]
+        C["CLI"]
+    end
+
+    subgraph GOV["governance.py: 모든 단계에 적용되는 정책 경계<br/>유료 API 차단 · 예산(라운드/토큰) · 네트워크 도메인 승인 · 부서 권한"]
+        E["engine.py<br/>淸月 CEO 오케스트레이터<br/>계획 · 배분 · 전략 검토"]
+        P["providers.py<br/>claude -p ⇄ codex exec<br/>쿼터 소진 시 같은 턴을 다른 엔진으로"]
+        X["sandbox.py / isolation.py<br/>Job Object · AppContainer"]
+        V["검증 에이전트<br/>생산과 다른 엔진 · 수정 불가 스키마"]
+        R["runtime.py<br/>Owner와 같은 방식으로 실행해 확인"]
+    end
+
+    DB[("SQLite<br/>단일 기준 데이터")]
+    K["knowledge.py<br/>Obsidian Vault · GAI DB (읽기 전용)"]
+
+    UI --> E
+    E -- "프롬프트" --> P
+    P -- "JSON만 반환<br/>(셸·파일 쓰기 없음)" --> E
+    E --> X --> R --> V
+    V -- "판정" --> E
+    E <--> DB
+    K -. "관련 발췌만" .-> E
+```
+
+- **에이전트에는 셸과 파일 쓰기 권한이 없습니다.** 에이전트는 JSON만 돌려주고, 파일은 엔진이 씁니다. 실행은 격리된 프로세스(Job Object, AppContainer)에서 합니다.
+- **SQLite가 기준 데이터입니다.** 각 단계는 다음 단계 전에 커밋됩니다. 엔진이 중단돼도 `python -m axbranch run <id>`로 이어서 실행되고, 이때 어느 엔진(Claude/Codex)이든 이어받을 수 있습니다.
+- **엔진은 교체 가능한 실행 수단입니다.** 에이전트는 역할, 목표, 맥락, 권한, 도구로 정의되고, provider는 한 턴을 실행하는 엔진일 뿐입니다.
+
+## 오케스트레이션
+
+```mermaid
+stateDiagram-v2
+    [*] --> PLANNING: Owner 목표 + 파일 + 부서
+    PLANNING --> STAFFING: 계획 · 수용 기준 · 단계별 엔진
+    STAFFING --> EXECUTING: 단계마다 임시 전문 에이전트 생성
+    EXECUTING --> VERIFYING
+    VERIFYING --> REWORK: FAIL
+    REWORK --> STAFFING: FAIL 2회마다 CEO 전략 검토<br/>(계속 / 엔진 교체 / 파이프라인 재설계)
+    VERIFYING --> OWNER_REVIEW: PASS (코드 게이트)
+    OWNER_REVIEW --> REWORK: "고장" 또는 글로 수정 요청
+    OWNER_REVIEW --> PENDING_CLOSE: Owner가 완료 선택
+    PENDING_CLOSE --> CLOSED: 승인 후 Vault에 기록하고 다시 읽어 확인
+```
+
+| 장치 | 동작 |
+|---|---|
+| 재개 | `run()`은 매번 SQLite 상태에서 다음 단계를 다시 계산합니다. 프로젝트마다 OS 파일 잠금으로 세션은 하나만 실행됩니다. |
+| 엔진 장애 대응 | 쿼터를 넘어 거절되면 같은 턴을 다른 엔진으로 넘깁니다. 다음 턴에는 원래 엔진을 다시 시도합니다. |
+| 일시정지 | 예산 소진, 두 엔진 모두 쿼터 소진, 도구 부족, 네트워크 미승인이면 PAUSED로 멈추고 `resume_state`를 기억합니다. 재개는 Owner만 할 수 있습니다. |
+| Owner 피드백 | 전달된 버전을 먼저 재현하고, 수정한 수용 기준으로 **옛 버전이 실패하는지** 확인합니다. 그다음 다시 만들고 다시 검증합니다. |
+| 트랜잭션 | REWORK 전환, 전략 검토 의무, 예산 정지는 하나의 트랜잭션으로 커밋됩니다. |
+
+## 평가 방법
+
+**PASS는 모델이 아니라 코드가 판정합니다.** 아래 다섯 조건을 모두 만족해야 PASS입니다.
+
+1. 검증 모델의 판정이 PASS
+2. 수용 기준을 **전부** 충족
+3. critical/major 지적이 0건
+4. 결정적 검사(생성된 프로그램의 `--self-test` 등)를 통과
+5. Runtime Acceptance 통과: 결과물을 Owner가 실행하는 방식(cli/web/gui) 그대로 실행하고 주요 흐름을 시험
+
+| 층위 | 방법 |
+|---|---|
+| 독립 검증 | 생산자와 다른 프롬프트를 쓰고, 출력 스키마에 내용 필드가 없어 결과를 직접 고칠 수 없습니다. 가능하면 다른 엔진이 맡고, 실제로 어느 쪽이 맡았는지(다른 엔진 / 같은 엔진·역할 분리 / 불명) 기록합니다. |
+| 출처 검증 | 주장마다 실제로 가져온 출처와 원문 그대로의 인용을 대조합니다. 재검증 때는 출처 원본이 바이트 단위로 같을 때만 이전 판정을 재사용합니다. |
+| 실패 원인 분리 | FAIL마다 원인 기록(`attribution_trace`)을 남기고 **하네스 결함**과 **제품 결함**을 구분합니다. 하네스 결함은 제품 예산을 쓰지 않습니다. |
+| 학습 효과 (`model_compare.py`) | 모델 파일, 평가 입력, 정답의 해시를 고정합니다. 학습·평가 데이터 중복을 검사하고, 정답은 평가자만 가집니다. 점수(정확도, macro-F1)는 AX Branch 코드가 계산하며, 효과는 "이 평가에서"로만 주장합니다. |
+| 회귀 테스트 | 표준 `unittest`로 591건입니다. 실제 AppContainer와 헤드리스 브라우저를 포함합니다. 버전과 CHANGELOG가 어긋나면 `test_release.py`가 실패합니다. |
+
+**부정적 결과도 그대로 기록합니다.**
+- 데모에서 LoRA를 실제로 학습했지만 정확도가 0.9159로 기준 모델(0.9669)보다 낮았습니다. `lora_not_better`로 기록했습니다.
+- 경험 활용 A/B 실험은 두 번 모두 결과 없이 멈췄습니다(토큰 64,487개로 한도 60,000 초과). 효과는 미확인으로 남겼습니다.
+
+## 실패 재현과 수정 기록
+
+각 항목의 근거는 [CHANGELOG](CHANGELOG.md)의 Fixed 항목과 [`docs/evidence/`](docs/evidence/)에 있습니다.
+
+| 버전 | 증상 | 원인 | 수정 | 재발 방지 |
+|---|---|---|---|---|
+| 0.1.34 | 올바른 제품이 "status 201, expected -1"로 4번 실패했고, 재빌드를 반복하다 예산을 소진(EXHAUSTED)했습니다 | 시험 프로브의 오류를 제품 결함으로 판정했습니다. CEO가 프로브를 올바르게 고쳤는데 다른 단계(T5)가 그 수정을 되돌렸습니다 | 하네스 결함과 제품 결함을 분리했습니다. T5는 정확한 상태 코드와 assertion을 그대로 유지합니다 | 원인 기록 v1, 전체 284/284 |
+| 0.1.39 | 전략 검토 도중 프로세스가 죽으면 계획 변경이 두 번 적용될 수 있었습니다 | 계획 변경과 완료 표시가 따로 커밋됐습니다 | 둘을 하나의 트랜잭션으로 묶었습니다 | 회귀 테스트 |
+| 0.1.50 | 목표 1 하나에 검증 호출이 16회 발생했습니다 | 재검증할 때마다 보고서와 근거 전체를 다시 보냈습니다 | `verification_basis` 해시를 도입하고, 출처가 바이트 단위로 같고 인용이 그대로인 주장만 재사용합니다 | `test_sources` 35/35 (출처 변경, 읽기 불가, 인용 소실 시 PASS 불가) |
+| 0.1.51 | 실제 학습 환경 준비가 실패했습니다(pip가 torch 헤더를 쓰지 못함) | 깊은 프로젝트 폴더에서 Windows 경로 260자 제한에 걸렸습니다 | 짧은 경로를 사용합니다. 관리자 설정(long paths)은 건드리지 않았습니다 | 재실행 성공 (273초) |
+| 0.1.67 | 전체 회귀 591건 중 1건 실패(`test_open_use_isolate_and_stop`) | 강제 종료한 프로세스의 핸들을 Windows가 아직 잡고 있는 동안 `rmtree(ignore_errors)`를 한 번만 실행했습니다. 그 결과 격리 권한이 걸린 실행 폴더가 남았습니다 | 모든 정리 지점에서 짧게 재시도합니다 | `a76dfbc`에서 전체 재실행: 590 통과, 1 건너뜀, 0 실패 |
+| 미해결 | 브라우저 런타임 테스트가 간헐적으로 90초 제한을 넘깁니다 | **원인 미확인.** 분리 재현 결과 이 브랜치 2/10, `main` 1/10으로 실패했고, 관련 코드는 두 브랜치가 동일합니다 | 제한 시간 연장이나 재시도는 실패를 가리므로 **일부러 넣지 않았습니다** | [재현 기록](docs/evidence/2026-10-24-F160b-runtime-failure.md) |
 
 
 ## 무엇을 해결하나
@@ -19,7 +114,7 @@ AI 도구로 일을 맡기면 결국 사람이 계획을 쪼개고, 도구를 �
 4. 통과한 결과만 Owner 검토에 올라옵니다. Owner가 "제목을 바꿔 줘"처럼 글로 요청하면 **같은 프로젝트**에서 재작업·재검증을 거쳐 고친 버전이 다시 올라옵니다.
 5. 기록된 실행·검증 결과는 다음 업무에서 범위를 제한해 참고 자료로 다시 쓰입니다. 이것은 "경험의 재사용"이지 학습이 아닙니다.
 
-## 구조
+## 상세 구조
 
 ### 전체 흐름
 
@@ -107,7 +202,7 @@ flowchart LR
 
 **확인 수준**은 네 가지로 구분합니다.
 
-- **자동 테스트**: 단일 프로세스 전체 회귀 504/504 통과 (커밋 9684256, 해시 일치).
+- **자동 테스트**: 전체 회귀 591건: 590 통과 + 1 건너뜀(사유 기록) + 0 실패 (커밋 a76dfbc).
 - **실제 모델 실행**: 실제 구독 모델을 호출한 실행입니다. 근거는 [`docs/evidence/`](docs/evidence/)에 있습니다.
 - **빌드 후보**: 보존된 패키지로 확인한 것입니다.
 - **미확인**: 위 어느 것으로도 확인하지 않은 것입니다.
@@ -197,8 +292,8 @@ python -X utf8 build_exe.py
 
 | | 버전 | 비고 |
 |---|---|---|
-| 이 브랜치의 소스 | 0.1.63 후보 (`dev/web-ui`) | 전체 회귀 504/504 (9684256). 후보 빌드 0.1.63-18fbd6d — 그 뒤 바뀐 것은 테스트와 문서뿐 |
-| Owner가 쓰는 서버 | 0.1.61-67d9095 빌드 | 이전 빌드. 이 README의 일부 기능(검증 출처 기록 등)은 포함되지 않음 |
+| 이 브랜치의 소스 | 0.1.67 (`dev/web-ui`) | 전체 회귀 591건: 590 통과 + 1 건너뜀 (a76dfbc). 후보 빌드 0.1.67-a76dfbc |
+| Owner가 쓰는 서버 | 이전 빌드 | 실제 적용 빌드는 [오너 개발실](docs/devroom/status.json)의 `serving_build` 참고 |
 | `main` 브랜치 | 0.1.59 시점 | 이전 README가 표시됨 |
 
 ## 문서

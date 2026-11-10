@@ -178,7 +178,8 @@ Rules:
   or, only when the goal truly needs several files, a bundle (artifact_kind bundle; artifact_filename
   is then the relative path of the python entry file that runs the bundle's self-test). Earlier stages produce notes
   (research, design, analysis) that are handed to later stages. Use as few stages as the goal
-  truly needs (1-{gov.MAX_STAGES}).
+  truly needs (1-{gov.MAX_STAGES}). A document (report, plan, memo) with no attached inputs and no web research
+  is ONE stage: a separate notes stage would only restate the same model knowledge and double time and tokens.
 - Pipeline stages are PRODUCTION work done by specialists who write designs, content or code.
   Never create reviewer/verifier/approver stages that are expected to run, test, inspect a browser or
   sign off: production agents cannot execute anything, and independent verification is done afterwards
@@ -1070,6 +1071,10 @@ class Engine:
                                       'permission. Plan using only already attached capabilities; the Owner explicitly '
                                       'accepts recommendations for a later planning boundary. Do not add a stage for an '
                                       'unattached recommended department or call legacy packages behaviour-verified.')
+        if specs:
+            out['delegation_rule'] = ('A stage may request only the tools of the department it is delegated to (a temporary '
+                                      'agent: tools one attached department provides); web: true / web_research only through '
+                                      'an attached department with network: true. A stage beyond this is refused before any work.')
         if 'required' in modes.values():
             out['required_rule'] = ('A department with mode "required" must have at least one pipeline stage delegated '
                                     'to it (stage.department = its id); a temporary agent or a renamed role does not '
@@ -1180,8 +1185,10 @@ class Engine:
             if status == 'conflict':
                 self.store.event(pid, 'criteria_conflict', iteration=p['iteration'], department=e['department'],
                                  criterion=e['criterion'], evidence=(j or {}).get('evidence', '')[:500],
-                                 decision='kept both; blocks PASS; 淸月 CEO re-plans (or the Owner rules)')
-            findings.append({'severity': 'major', 'kind': 'product' if status in ('unmet', 'conflict') else 'harness',
+                                 decision='kept both; blocks PASS; no rebuild: the Owner rules (or directs a re-plan)')
+            # A conflict is between criteria, not a defect a rebuild can repair (P-20261031-171763 rebuilt 6 times on
+            # one): it blocks PASS and waits for the Owner, like other non-product findings.
+            findings.append({'severity': 'major', 'kind': 'product' if status == 'unmet' else 'harness',
                              'criterion': -1, 'deterministic': True,
                              'issue': f"Department acceptance {status}: [{e['department']}] {e['criterion']}"[:400],
                              'evidence': (j or {}).get('evidence', 'not judged by the verifier')[:500]})
@@ -1270,8 +1277,25 @@ class Engine:
 
     def _delegation_refused(self, pid, why):
         self.store.event(pid, 'delegation_refused', reason=why)
-        self.store.pause(pid, f'Owner action needed: department delegation refused - {why}. '
-                              '연결된 부서를 확인한 뒤 [수정 요청 / 계속]으로 다시 계획하게 하세요.'[:400])
+        self.store.pause(pid, (f'Owner action needed: department delegation refused - {why}. '
+                               '연결된 부서를 확인한 뒤 [수정 요청 / 계속]으로 다시 계획하게 하세요.')[:400])
+
+    def _replan_within_departments(self, pid, why):
+        """A plan beyond the attached departments' tools/permissions never runs, and a resume must not re-submit it
+        unchanged (P-20261031-171763: the same refused plan was resumed three times). 淸月 re-plans once within what
+        is attached, at most once per Owner action; nothing is granted. A second refusal waits for the Owner."""
+        events = self.store.events(pid, {'owner_action', 'delegation_replan'})
+        last = max((i for i, e in enumerate(events) if e['kind'] == 'owner_action'), default=-1)
+        if any(e['kind'] == 'delegation_replan' for e in events[last + 1:]):
+            return self._delegation_refused(pid, why)
+        self.store.event(pid, 'delegation_replan', reason=why)
+        self._strategy(pid, forbid_continue=True, recovery_note=(
+            f'The current plan was refused before any work: {why}. A stage may request only the tools of the department '
+            'it is delegated to; web: true / web_research needs an attached department with network: true. Return '
+            'change_pipeline using ONLY the attached departments\' tools and permissions. If no attached department allows '
+            'web research, do not request it: research from Owner inputs and earlier results, mark every fact you cannot '
+            'verify as 미확인 or 추정, and say in the rationale which capability is missing (the Owner decides on new '
+            'permissions). Keep all completed, still-valid work.'))
 
     def _agent_caps(self, pid, stage):
         """A stage's agent capabilities; a resolved harness capability (e.g. model_training) is run by the engine,
@@ -1337,7 +1361,7 @@ class Engine:
         for stage in plan['pipeline']:
             why = departments.check_stage(stage, specs, library, final=stage is plan['pipeline'][-1])
             if why:
-                return self._delegation_refused(pid, why)
+                return self._replan_within_departments(pid, why)
         conflicts = departments.preflight(plan, specs) + departments.required_problems(self.store, pid, plan)
         if conflicts:
             return self._delegation_refused(pid, '; '.join(conflicts))
@@ -1965,7 +1989,7 @@ class Engine:
             # No product defect shown: a rebuild cannot fix the verifier or the machine. Same version, same
             # iteration; resume re-verifies it (INFRA_FAILED automatically, HARNESS_BLOCKED after a verifier fix).
             code = 'HARNESS_BLOCKED' if 'harness' in kinds else 'INFRA_FAILED'
-            return self.store.pause(pid, f"{code}: v{p['iteration']} failed verification only on "
+            return self._conflict_pause(pid, p) or self.store.pause(pid, f"{code}: v{p['iteration']} failed verification only on "
                                          f"{'/'.join(sorted(kinds))} findings; no product rebuild. "
                                          'Resume re-verifies this version.', resume_state='VERIFYING')
         self._after_fail(pid, p)
@@ -2194,10 +2218,22 @@ class Engine:
                 failed[v['artifact_id'] or ('build', v['iteration'])] = v
         return list(failed.values())
 
+    def _conflict_pause(self, pid, p):
+        """Criteria that conflict with the goal block PASS but cannot be repaired by rebuilding: the Owner rules."""
+        conflicts = [e['detail'] for e in self.store.events(pid, {'criteria_conflict'})
+                     if e['detail'].get('iteration') == p['iteration']]
+        if conflicts:
+            self.store.pause(pid, ('Owner action needed: criteria conflict - '
+                                   + '; '.join(f"[{c['department']}] {c['criterion']}" for c in conflicts)
+                                   + '. 이 기준은 목표와 충돌해 다시 만들어도 통과할 수 없어 재작업하지 않았습니다. '
+                                   '결과를 검토해 완료하거나, [수정 요청 / 계속]으로 기준 적용 방법을 정해 주세요.')[:400],
+                             resume_state='VERIFYING')
+            return True
+
     def _after_fail(self, pid, p, review=None):
         latest = self.store.verifications(pid)[-1]
         if not any(v['id'] == latest['id'] for v in self._product_failures(pid)):
-            return self.store.pause(pid, 'HARNESS_BLOCKED: no product failure; no rebuild.', resume_state='VERIFYING')
+            return self._conflict_pause(pid, p) or self.store.pause(pid, 'HARNESS_BLOCKED: no product failure; no rebuild.', resume_state='VERIFYING')
         fails = len(self._product_failures(pid))
         repeated = self._repeated_failure(pid)
         recurred = repeated and any(e['detail'].get('why') == repeated for e in self.store.events(pid, {'decision'})
@@ -2218,10 +2254,22 @@ class Engine:
                               forbid_continue=True, trigger='repeated', signature=repeated)
         elif fails % gov.STRATEGY_EVERY == 0:
             obligation = dict(recovery_note=None, forbid_continue=False, trigger='periodic')
+        # A document gets ONE fix per Owner action (Owner 2026-10-31: a report must not spend 13 min / 510k tokens on
+        # automatic rebuilds that all failed); then the draft and its findings wait for the Owner. Standard unchanged.
+        # From the Goal: the draft plus one fix; after an Owner resume/request: that one build.
+        last_owner = (self.store.events(pid, {'owner_action'}) or [{'at': 0, 'detail': {'action': 'new'}}])[-1]
+        doc_fails = (sum(v['created'] > last_owner['at'] for v in self._product_failures(pid))
+                     + (last_owner['detail'].get('action') not in ('new', 'develop'))
+                     if (p['plan'] or {}).get('artifact_kind') == 'markdown' else 0)
         stop = (f'{fails} builds failed verification. The standard is not lowered; Owner may resume with more '
                 f'rounds (resume --rounds N), or change/stop the goal.' if fails >= p['budget'] else
+                f'Owner action needed: document draft v{p["iteration"]} failed verification after one automatic fix. '
+                '기준은 낮추지 않았습니다. 초안과 검증 결과를 확인한 뒤 완료하거나 [수정 요청 / 계속]으로 방향을 주세요. '
+                '[계속 실행 / 재개]는 한 번 더 고쳐 봅니다.' if doc_fails >= 2 else
                 f'NEEDS_DECISION: the same failure ({repeated}) recurred after a forced change of approach. '
                 + self._decision_brief(pid) if recurred else None)
+        if doc_fails >= 2 and fails < p['budget']:
+            obligation = None                          # the document stop waits for the Owner: no strategy call now
         # One transaction: REWORK, the strategy obligation and any stop. A crash in between can no longer
         # leave REWORK without its decided strategy review (resumed by _rework) or without its stop.
         with self.store.tx():
@@ -2316,8 +2364,15 @@ class Engine:
     def _use_models(self, pid):
         """Run the plan's model_uses once per plan version before production. A failure stops; nothing is substituted."""
         p = self.store.project(pid)
+        uses = (p['plan'] or {}).get('model_uses') or []
+        if uses and not model_registry.available(self.store, pid):
+            # No registered model is offered to this project, so these entries can only be a planning slip (2026-10-31:
+            # the CEO listed its own provider "claude"). Nothing to run or substitute: dropped visibly, work continues.
+            self.store.event(pid, 'decision', what='model_uses ignored: no registered model is available to this project',
+                             why=', '.join(str(u.get('model', '')) for u in uses)[:300], by='engine')
+            return True
         done = {(d['model'], d['input']) for d in self._model_outputs(pid)}
-        for u in (p['plan'] or {}).get('model_uses') or []:
+        for u in uses:
             key = (str(u.get('model', '')), str(u.get('input', '')))
             if key in done:
                 continue

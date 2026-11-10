@@ -245,6 +245,7 @@
   // ---- project view ----
   function renderExecutionBudget(budget) {
     const box = $('#executionBudget');
+    const draft = $('#budgetNew'), typed = draft && draft.value, typing = draft && document.activeElement === draft;   // the 2 s refresh must not erase the Owner's input
     box.hidden = !budget;
     if (!budget) return;
     const known = budget.reported_tokens !== null && budget.reported_tokens !== undefined;
@@ -254,6 +255,7 @@
     const limit = budget.configured ? `${tokenNumber(budget.max_reported_tokens)}토큰` : '설정 기록 없음';
     const phaseNames = {planning: '계획', production: '제작', verification: '검증', acceptance: '최종 수락', decision: '다음 행동 판단'};
     const stop = budget.stop;
+    const needed = Math.min(10000000, Math.max(budget.max_reported_tokens + 1, stop && known ? budget.reported_tokens + (stop.reserve || 0) : 0));
     const reserve = stop ? `<p>다음 호출과 남은 필수 단계에 ${tokenNumber(stop.reserve || 0)}토큰을 남겨야 합니다.`
       + `${stop.remaining !== null && stop.remaining !== undefined ? ` 현재 남은 양은 ${tokenNumber(stop.remaining)}토큰입니다.` : ''}</p>`
       + ((stop.downstream || []).length ? `<div class="muted">남겨 둔 단계: ${stop.downstream.map(s => esc(phaseNames[s.phase] || s.phase)).join(' → ')}</div>` : '') : '';
@@ -263,7 +265,18 @@
       + (budget.acceptance_pending ? '<p>현재 버전의 검증은 통과했습니다. 최종 수락은 아직 끝나지 않았으며 결과와 검증 기록은 보존됩니다.</p>' : '')
       + reserve
       + '<div class="muted">수정·재시작에도 누적 사용량을 유지합니다. 토큰은 구독 사용량이며 추가 결제 승인이 아닙니다. 구독 한도가 먼저 끝날 수 있습니다.</div>'
-      + (budget.configured ? `<details><summary>사용 한도 상세</summary><div class="muted">호출 ${tokenNumber(budget.started_calls || 0)} / ${tokenNumber(budget.max_calls)}회 · 실행 시간 한도 ${tokenNumber(budget.max_seconds)}초 · 호출별 지시문 ${tokenNumber(budget.max_prompt_chars)}자 이하.<br>예약량은 이전 실측에 따른 추정치입니다. 제공자가 더 많이 사용하면 한 번의 호출이 토큰 한도를 넘을 수 있습니다.</div></details>` : '');
+      + (budget.configured ? `<details><summary>사용 한도 상세</summary><div class="muted">호출 ${tokenNumber(budget.started_calls || 0)} / ${tokenNumber(budget.max_calls)}회 · 실행 시간 한도 ${tokenNumber(budget.max_seconds)}초 · 호출별 지시문 ${tokenNumber(budget.max_prompt_chars)}자 이하.<br>예약량은 이전 실측에 따른 추정치입니다. 제공자가 더 많이 사용하면 한 번의 호출이 토큰 한도를 넘을 수 있습니다. 호출·시간 또는 제공자 구독 한도는 별도로 적용됩니다.</div></details>` : '')
+      + (budget.configured && S.project?.state === 'PAUSED' ? `<div class="row"><label>새 누적 토큰 한도 <input id="budgetNew" type="number" min="${budget.max_reported_tokens + 1}" max="10000000" value="${esc(typed || needed)}"></label><button id="budgetIncrease">한도 변경</button></div><p class="muted">${stop && known && budget.reported_tokens + (stop.reserve || 0) > budget.max_reported_tokens ? `멈춘 단계를 이어 가려면 최소 ${tokenNumber(needed)}토큰이 필요합니다. ` : ''}변경만 기록하며 자동 재개하지 않습니다.</p>` : '');
+    if (typing) $('#budgetNew').focus();
+    const button = $('#budgetIncrease');
+    if (button) button.onclick = async () => {
+      const pid = S.pid, value = Number($('#budgetNew').value);
+      if (!Number.isSafeInteger(value) || value <= budget.max_reported_tokens || value > 10000000) { notice('기존 한도보다 큰 정수를 입력하세요.'); return; }
+      if (!window.confirm(`이 프로젝트의 누적 한도를 ${tokenNumber(value)}토큰으로 늘릴까요? 자동 실행되지는 않습니다.`)) return;
+      button.disabled = true;
+      try { await api(`project/${pid}/budget-increase`, {confirm: true, max_reported_tokens: value}); await openProject(pid); }
+      catch (e) { notice(e.message); button.disabled = false; }
+    };
   }
   function saveOwnerDraft() {
     const box = $('#owner'), text = $('#oText') || $('#oNote'), works = $('input[name=works]:checked');
