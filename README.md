@@ -4,302 +4,302 @@
 
 AX Branch is a local workspace where an Owner hands over a goal and AX Branch's AI CEO, **淸月 (Cheongwol)**, does the rest. The CEO plans the work, splits it across the departments the Owner attached, and runs temporary specialist agents on the Owner's Claude Code / Codex CLI subscriptions. Each result is checked by a separate verification step and reworked until it passes. Only then does it reach the Owner for review. The Owner sets the goal and the limits; AX Branch handles the AI work inside them.
 
-> 상태: 개발 중인 개인 프로젝트입니다. 현재 소스는 **0.1.67** (`dev/web-ui`)이며 전체 회귀 테스트 591건 중 590건 통과, 1건 건너뜀(사유 기록), 실패 0건입니다(커밋 `a76dfbc`). 표준 라이브러리만 쓰는 Python 3.11+ 프로젝트입니다.
+> Status: a personal project under active development. Current source is **0.1.67** (`dev/web-ui`): full regression 591 tests = 590 passed, 1 skipped (reason recorded), 0 failed (commit `a76dfbc`). Python 3.11+, standard library only.
 
-**1분 요약:** [아키텍처](#아키텍처) → [오케스트레이션](#오케스트레이션) → [평가 방법](#평가-방법) → [실패 재현과 수정 기록](#실패-재현과-수정-기록)
+**1-minute tour:** [Architecture](#architecture) → [Orchestration](#orchestration) → [Evaluation](#evaluation) → [Failure reproduction and fixes](#failure-reproduction-and-fixes)
 
-## 아키텍처
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph UI["Owner 인터페이스"]
-        W["웹 (127.0.0.1, 토큰)"]
-        T["Tk 창"]
+    subgraph UI["Owner interfaces"]
+        W["Web (127.0.0.1, token)"]
+        T["Tk window"]
         C["CLI"]
     end
 
-    subgraph GOV["governance.py: 모든 단계에 적용되는 정책 경계<br/>유료 API 차단 · 예산(라운드/토큰) · 네트워크 도메인 승인 · 부서 권한"]
-        E["engine.py<br/>淸月 CEO 오케스트레이터<br/>계획 · 배분 · 전략 검토"]
-        P["providers.py<br/>claude -p ⇄ codex exec<br/>쿼터 소진 시 같은 턴을 다른 엔진으로"]
+    subgraph GOV["governance.py: policy boundary applied at every step<br/>paid API blocked · budgets (rounds/tokens) · network domain approval · department permissions"]
+        E["engine.py<br/>淸月 CEO orchestrator<br/>plan · assign · strategy review"]
+        P["providers.py<br/>claude -p ⇄ codex exec<br/>quota exhausted → same turn on the other engine"]
         X["sandbox.py / isolation.py<br/>Job Object · AppContainer"]
-        V["검증 에이전트<br/>생산과 다른 엔진 · 수정 불가 스키마"]
-        R["runtime.py<br/>Owner와 같은 방식으로 실행해 확인"]
+        V["Verification agent<br/>different engine · schema cannot edit content"]
+        R["runtime.py<br/>runs the result the way the Owner will"]
     end
 
-    DB[("SQLite<br/>단일 기준 데이터")]
-    K["knowledge.py<br/>Obsidian Vault · GAI DB (읽기 전용)"]
+    DB[("SQLite<br/>single source of truth")]
+    K["knowledge.py<br/>Obsidian vault · GAI DB (read-only)"]
 
     UI --> E
-    E -- "프롬프트" --> P
-    P -- "JSON만 반환<br/>(셸·파일 쓰기 없음)" --> E
+    E -- "prompt" --> P
+    P -- "JSON only<br/>(no shell, no file writes)" --> E
     E --> X --> R --> V
-    V -- "판정" --> E
+    V -- "verdict" --> E
     E <--> DB
-    K -. "관련 발췌만" .-> E
+    K -. "relevant excerpts only" .-> E
 ```
 
-- **에이전트에는 셸과 파일 쓰기 권한이 없습니다.** 에이전트는 JSON만 돌려주고, 파일은 엔진이 씁니다. 실행은 격리된 프로세스(Job Object, AppContainer)에서 합니다.
-- **SQLite가 기준 데이터입니다.** 각 단계는 다음 단계 전에 커밋됩니다. 엔진이 중단돼도 `python -m axbranch run <id>`로 이어서 실행되고, 이때 어느 엔진(Claude/Codex)이든 이어받을 수 있습니다.
-- **엔진은 교체 가능한 실행 수단입니다.** 에이전트는 역할, 목표, 맥락, 권한, 도구로 정의되고, provider는 한 턴을 실행하는 엔진일 뿐입니다.
+- **Agents have no shell and no file-write access.** They return JSON; the engine writes the files. Execution happens in isolated processes (Job Object, AppContainer).
+- **SQLite is the source of truth.** Every step commits before the next one. If the engine stops, `python -m axbranch run <id>` resumes, and either engine (Claude or Codex) can pick it up.
+- **Engines are interchangeable.** An agent is defined by role, goal, context, permissions and tools; the provider is just the engine that runs one turn.
 
-## 오케스트레이션
+## Orchestration
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PLANNING: Owner 목표 + 파일 + 부서
-    PLANNING --> STAFFING: 계획 · 수용 기준 · 단계별 엔진
-    STAFFING --> EXECUTING: 단계마다 임시 전문 에이전트 생성
+    [*] --> PLANNING: Owner goal + files + departments
+    PLANNING --> STAFFING: plan · acceptance criteria · engine per stage
+    STAFFING --> EXECUTING: one temporary specialist per stage
     EXECUTING --> VERIFYING
     VERIFYING --> REWORK: FAIL
-    REWORK --> STAFFING: FAIL 2회마다 CEO 전략 검토<br/>(계속 / 엔진 교체 / 파이프라인 재설계)
-    VERIFYING --> OWNER_REVIEW: PASS (코드 게이트)
-    OWNER_REVIEW --> REWORK: "고장" 또는 글로 수정 요청
-    OWNER_REVIEW --> PENDING_CLOSE: Owner가 완료 선택
-    PENDING_CLOSE --> CLOSED: 승인 후 Vault에 기록하고 다시 읽어 확인
+    REWORK --> STAFFING: CEO strategy review every 2 FAILs<br/>(continue / switch engine / redesign pipeline)
+    VERIFYING --> OWNER_REVIEW: PASS (gated in code)
+    OWNER_REVIEW --> REWORK: "broken" or a written change request
+    OWNER_REVIEW --> PENDING_CLOSE: Owner chooses finish
+    PENDING_CLOSE --> CLOSED: after approval, archived to the vault and read back
 ```
 
-| 장치 | 동작 |
+| Mechanism | Behavior |
 |---|---|
-| 재개 | `run()`은 매번 SQLite 상태에서 다음 단계를 다시 계산합니다. 프로젝트마다 OS 파일 잠금으로 세션은 하나만 실행됩니다. |
-| 엔진 장애 대응 | 쿼터를 넘어 거절되면 같은 턴을 다른 엔진으로 넘깁니다. 다음 턴에는 원래 엔진을 다시 시도합니다. |
-| 일시정지 | 예산 소진, 두 엔진 모두 쿼터 소진, 도구 부족, 네트워크 미승인이면 PAUSED로 멈추고 `resume_state`를 기억합니다. 재개는 Owner만 할 수 있습니다. |
-| Owner 피드백 | 전달된 버전을 먼저 재현하고, 수정한 수용 기준으로 **옛 버전이 실패하는지** 확인합니다. 그다음 다시 만들고 다시 검증합니다. |
-| 트랜잭션 | REWORK 전환, 전략 검토 의무, 예산 정지는 하나의 트랜잭션으로 커밋됩니다. |
+| Resume | `run()` recomputes the next step from SQLite every time. An OS file lock allows one session per project. |
+| Engine failover | A quota refusal moves the same turn to the other engine; the next turn tries the preferred engine again. |
+| Pause | Budget exhausted, both quotas exhausted, missing tool or unapproved network → PAUSED with `resume_state` remembered. Only the Owner resumes. |
+| Owner feedback | First reproduce the delivered version, then check that the revised acceptance criteria **fail on the old version**. Only then rebuild and re-verify. |
+| Transactions | The REWORK transition, the strategy-review obligation and any budget stop commit in one transaction. |
 
-## 평가 방법
+## Evaluation
 
-**PASS는 모델이 아니라 코드가 판정합니다.** 아래 다섯 조건을 모두 만족해야 PASS입니다.
+**PASS is decided by code, not by the model.** All five conditions must hold:
 
-1. 검증 모델의 판정이 PASS
-2. 수용 기준을 **전부** 충족
-3. critical/major 지적이 0건
-4. 결정적 검사(생성된 프로그램의 `--self-test` 등)를 통과
-5. Runtime Acceptance 통과: 결과물을 Owner가 실행하는 방식(cli/web/gui) 그대로 실행하고 주요 흐름을 시험
+1. The verification model's verdict is PASS
+2. **Every** acceptance criterion is met
+3. Zero critical/major findings
+4. Deterministic checks pass (e.g. the generated program's `--self-test`)
+5. Runtime Acceptance passes: the result is launched exactly as the Owner launches it (cli/web/gui) and its primary flow is exercised
 
-| 층위 | 방법 |
+| Layer | Method |
 |---|---|
-| 독립 검증 | 생산자와 다른 프롬프트를 쓰고, 출력 스키마에 내용 필드가 없어 결과를 직접 고칠 수 없습니다. 가능하면 다른 엔진이 맡고, 실제로 어느 쪽이 맡았는지(다른 엔진 / 같은 엔진·역할 분리 / 불명) 기록합니다. |
-| 출처 검증 | 주장마다 실제로 가져온 출처와 원문 그대로의 인용을 대조합니다. 재검증 때는 출처 원본이 바이트 단위로 같을 때만 이전 판정을 재사용합니다. |
-| 실패 원인 분리 | FAIL마다 원인 기록(`attribution_trace`)을 남기고 **하네스 결함**과 **제품 결함**을 구분합니다. 하네스 결함은 제품 예산을 쓰지 않습니다. |
-| 학습 효과 (`model_compare.py`) | 모델 파일, 평가 입력, 정답의 해시를 고정합니다. 학습·평가 데이터 중복을 검사하고, 정답은 평가자만 가집니다. 점수(정확도, macro-F1)는 AX Branch 코드가 계산하며, 효과는 "이 평가에서"로만 주장합니다. |
-| 회귀 테스트 | 표준 `unittest`로 591건입니다. 실제 AppContainer와 헤드리스 브라우저를 포함합니다. 버전과 CHANGELOG가 어긋나면 `test_release.py`가 실패합니다. |
+| Independent verification | A different prompt from the producer, and an output schema with no content field, so the verifier cannot fix the result itself. Runs on the other engine when possible; which one actually ran is recorded (other engine / same engine with role separation / unknown). |
+| Source verification | Every claim is checked against the fetched source and a verbatim quote. On re-verification a previous judgment is reused only if the source is byte-identical. |
+| Failure attribution | Every FAIL gets an `attribution_trace` that separates **harness defects** from **product defects**. Harness defects do not spend the product budget. |
+| Training effect (`model_compare.py`) | Hashes of model files, evaluation inputs and answers are fixed; train/eval overlap is checked; only the evaluator holds the answers. Scores (accuracy, macro-F1) are computed by AX Branch's own code, and an effect is claimed only "in this evaluation". |
+| Regression | 591 tests with stdlib `unittest`, including a real AppContainer and a headless browser. `test_release.py` fails if the version and CHANGELOG disagree. |
 
-**부정적 결과도 그대로 기록합니다.**
-- 데모에서 LoRA를 실제로 학습했지만 정확도가 0.9159로 기준 모델(0.9669)보다 낮았습니다. `lora_not_better`로 기록했습니다.
-- 경험 활용 A/B 실험은 두 번 모두 결과 없이 멈췄습니다(토큰 64,487개로 한도 60,000 초과). 효과는 미확인으로 남겼습니다.
+**Negative results are recorded as they are.**
+- In the demo, LoRA was actually trained but scored 0.9159, below the baseline (0.9669). Recorded as `lora_not_better`.
+- The experience-reuse A/B experiment stopped without a result both times (64,487 tokens, over the 60,000 limit). The effect stays unverified.
 
-## 실패 재현과 수정 기록
+## Failure reproduction and fixes
 
-각 항목의 근거는 [CHANGELOG](CHANGELOG.md)의 Fixed 항목과 [`docs/evidence/`](docs/evidence/)에 있습니다.
+Sources: the Fixed entries in the [CHANGELOG](CHANGELOG.md) and [`docs/evidence/`](docs/evidence/).
 
-| 버전 | 증상 | 원인 | 수정 | 재발 방지 |
+| Version | Symptom | Root cause | Fix | Guard |
 |---|---|---|---|---|
-| 0.1.34 | 올바른 제품이 "status 201, expected -1"로 4번 실패했고, 재빌드를 반복하다 예산을 소진(EXHAUSTED)했습니다 | 시험 프로브의 오류를 제품 결함으로 판정했습니다. CEO가 프로브를 올바르게 고쳤는데 다른 단계(T5)가 그 수정을 되돌렸습니다 | 하네스 결함과 제품 결함을 분리했습니다. T5는 정확한 상태 코드와 assertion을 그대로 유지합니다 | 원인 기록 v1, 전체 284/284 |
-| 0.1.39 | 전략 검토 도중 프로세스가 죽으면 계획 변경이 두 번 적용될 수 있었습니다 | 계획 변경과 완료 표시가 따로 커밋됐습니다 | 둘을 하나의 트랜잭션으로 묶었습니다 | 회귀 테스트 |
-| 0.1.50 | 목표 1 하나에 검증 호출이 16회 발생했습니다 | 재검증할 때마다 보고서와 근거 전체를 다시 보냈습니다 | `verification_basis` 해시를 도입하고, 출처가 바이트 단위로 같고 인용이 그대로인 주장만 재사용합니다 | `test_sources` 35/35 (출처 변경, 읽기 불가, 인용 소실 시 PASS 불가) |
-| 0.1.51 | 실제 학습 환경 준비가 실패했습니다(pip가 torch 헤더를 쓰지 못함) | 깊은 프로젝트 폴더에서 Windows 경로 260자 제한에 걸렸습니다 | 짧은 경로를 사용합니다. 관리자 설정(long paths)은 건드리지 않았습니다 | 재실행 성공 (273초) |
-| 0.1.67 | 전체 회귀 591건 중 1건 실패(`test_open_use_isolate_and_stop`) | 강제 종료한 프로세스의 핸들을 Windows가 아직 잡고 있는 동안 `rmtree(ignore_errors)`를 한 번만 실행했습니다. 그 결과 격리 권한이 걸린 실행 폴더가 남았습니다 | 모든 정리 지점에서 짧게 재시도합니다 | `a76dfbc`에서 전체 재실행: 590 통과, 1 건너뜀, 0 실패 |
-| 미해결 | 브라우저 런타임 테스트가 간헐적으로 90초 제한을 넘깁니다 | **원인 미확인.** 분리 재현 결과 이 브랜치 2/10, `main` 1/10으로 실패했고, 관련 코드는 두 브랜치가 동일합니다 | 제한 시간 연장이나 재시도는 실패를 가리므로 **일부러 넣지 않았습니다** | [재현 기록](docs/evidence/2026-10-24-F160b-runtime-failure.md) |
+| 0.1.34 | A correct product failed 4 times on "status 201, expected -1" and was rebuilt until the budget was EXHAUSTED | A test-probe error was judged a product defect. The CEO repaired the probe correctly, but a later step (T5) undid that repair | Harness and product defects are separated. T5 keeps exact status codes and assertions | Outcome attribution v1, full suite 284/284 |
+| 0.1.39 | A crash during strategy review could apply a plan change twice | The plan change and its completion marker were committed separately | Both commit in one transaction | Regression test |
+| 0.1.50 | Goal 1 alone made 16 verifier calls | Every re-verification re-sent the full report and evidence | `verification_basis` hash; a claim is reused only if its source is byte-identical and its quote is still verbatim | `test_sources` 35/35 (changed / unreadable source or missing quote can never PASS) |
+| 0.1.51 | Real training-stack setup failed (pip could not write a torch header) | Windows' 260-character path limit under a deep project folder | Use a short path. The admin setting (long paths) was left untouched | Re-run succeeded (273 s) |
+| 0.1.67 | 1 of 591 full-regression tests failed (`test_open_use_isolate_and_stop`) | `rmtree(ignore_errors)` ran once while Windows still held the killed process's handles, leaving a run folder with isolation grants | Removal retries briefly at every cleanup point | Full re-run on `a76dfbc`: 590 passed, 1 skipped, 0 failed |
+| Open | Browser runtime tests intermittently exceed the 90 s limit | **Root cause not identified.** Isolated reproduction failed 2/10 on this branch and 1/10 on `main`; the relevant code is identical on both | A longer limit or a retry would hide the failure, so **neither was added on purpose** | [Reproduction record](docs/evidence/2026-10-24-F160b-runtime-failure.md) |
 
 
-## 무엇을 해결하나
+## What it solves
 
-AI 도구로 일을 맡기면 결국 사람이 계획을 쪼개고, 도구를 고르고, 결과를 검사하고, 다시 시키는 일을 반복하게 됩니다. AX Branch는 이 관리 업무를 대신합니다. Owner는 목표와 자료를 주고, 결과가 실제로 쓸 만한지만 판단합니다.
+When you hand work to AI tools, a person still ends up splitting the plan, picking tools, checking results and asking again. AX Branch takes over that management work. The Owner provides a goal and materials and only judges whether the result is actually usable.
 
-**구체적인 흐름 예시**
+**Example flow**
 
-1. Owner가 웹 화면에 목표를 적습니다. 예: "첨부한 문의 기록으로 팀별 문의 건수 보고서를 만들어 줘". CSV를 첨부하고, 부서 라이브러리에서 **리서치**와 **운영**을 끌어다 붙입니다.
-2. 淸月 CEO가 계획을 세웁니다. 리서치 단계는 수치와 근거를 정리하고, 운영 단계는 권고안을 만듭니다. 단계마다 그 부서의 역할·도구·권한·수용 기준을 가진 임시 에이전트를 만듭니다.
-3. 결과물은 별도의 검증 단계를 거칩니다. 부서 수용 기준(예: "모든 수치에 출처가 있다")을 하나라도 못 지키면 재작업으로 돌아갑니다.
-4. 통과한 결과만 Owner 검토에 올라옵니다. Owner가 "제목을 바꿔 줘"처럼 글로 요청하면 **같은 프로젝트**에서 재작업·재검증을 거쳐 고친 버전이 다시 올라옵니다.
-5. 기록된 실행·검증 결과는 다음 업무에서 범위를 제한해 참고 자료로 다시 쓰입니다. 이것은 "경험의 재사용"이지 학습이 아닙니다.
+1. The Owner writes a goal in the web UI, e.g. "Build a per-team inquiry-count report from the attached inquiry log", attaches a CSV, and drags **Research** and **Operations** in from the department library.
+2. The 淸月 CEO plans: the research stage compiles figures and evidence, the operations stage writes recommendations. Each stage gets a temporary agent with that department's role, tools, permissions and acceptance criteria.
+3. The output goes through a separate verification step. If any department acceptance criterion (e.g. "every figure has a source") is not met, it goes back to rework.
+4. Only passing results reach Owner review. A written request such as "change the title" is reworked and re-verified **in the same project**, and the revised version comes back.
+5. Recorded runs and verification results are retrieved, with bounded scope, as reference material in later work. This is "experience reuse", not training.
 
-## 상세 구조
+## Detailed structure
 
-### 전체 흐름
+### Overall flow
 
-거버넌스·정책은 마지막 단계가 아니라 계획부터 결과 전달까지 전 과정을 둘러싼 **권한 경계**입니다.
+Governance and policy are not a final step but a **permission boundary** around everything from planning to delivery.
 
 ```mermaid
 flowchart TB
     subgraph OWNER["Owner"]
-        G["목표 + 파일 + 부서 첨부"]
-        FB["Owner 검토 · 피드백<br/>(작동함 / 고장 / 글 수정 요청)"]
+        G["Goal + files + attached departments"]
+        FB["Owner review · feedback<br/>(works / broken / written change request)"]
     end
 
-    subgraph GOV["거버넌스 · 정책 경계 (전 단계에 적용)<br/>유료 API 차단 · 부서 권한 · 네트워크 승인 · 예산 · 수용 기준 고정"]
-        CEO["淸月 CEO<br/>계획 · 업무 배분"]
-        DH["부서 하네스<br/>(고정된 버전의 재사용 패키지)"]
-        AG["임시 전문 에이전트<br/>(Claude Code / Codex CLI)"]
-        EX["실행<br/>(단계별 산출물)"]
-        VR["독립 검증<br/>(실패 시 재작업)"]
-        AR["결과물 · 근거<br/>(버전별 폴더, SQLite 이벤트)"]
-        XP["경험 검색<br/>(범위 제한 · 잠정 자료)"]
+    subgraph GOV["Governance · policy boundary (every step)<br/>paid API blocked · department permissions · network approval · budget · fixed acceptance criteria"]
+        CEO["淸月 CEO<br/>planning · work assignment"]
+        DH["Department harness<br/>(reusable package, pinned version)"]
+        AG["Temporary specialist agent<br/>(Claude Code / Codex CLI)"]
+        EX["Execution<br/>(per-stage output)"]
+        VR["Independent verification<br/>(rework on failure)"]
+        AR["Artifacts · evidence<br/>(versioned folders, SQLite events)"]
+        XP["Experience retrieval<br/>(bounded · provisional)"]
     end
 
     G --> CEO
     CEO --> DH --> AG --> EX --> VR
-    VR -- "불합격" --> EX
-    VR -- "합격" --> AR --> FB
-    FB -- "재작업 요청" --> CEO
-    AR -. "기록" .-> XP
-    XP -. "관련 사례만 참고" .-> CEO
+    VR -- "fail" --> EX
+    VR -- "pass" --> AR --> FB
+    FB -- "rework request" --> CEO
+    AR -. "record" .-> XP
+    XP -. "relevant cases only" .-> CEO
 ```
 
-### 부서 구성
+### Departments
 
 ```mermaid
 flowchart LR
-    L["부서 라이브러리<br/>리서치 · 운영 · 상품기획"] --> A["Owner가 프로젝트에 첨부<br/>(사용 가능 / 필수)"]
-    A --> C["CEO가 첨부된 부서로<br/>업무 흐름 구성"]
-    C --> S["필요한 단계에만<br/>임시 전문 에이전트 생성"]
-    A -. "필수" .-> R["필수 부서: 계획·실행·수용에서<br/>실제 작업과 기준 충족 확인"]
+    L["Department library<br/>Research · Operations · Product planning"] --> A["Owner attaches to a project<br/>(available / required)"]
+    A --> C["CEO builds the workflow<br/>from attached departments"]
+    C --> S["Temporary specialists<br/>only for stages that need them"]
+    A -. "required" .-> R["Required department: real work and criteria<br/>checked at planning, execution, acceptance"]
 ```
 
-### 경험의 수명 주기
+### Experience lifecycle
 
-실선은 구현된 단계, 점선은 계획된 단계입니다.
+Solid lines are implemented; dotted lines are planned.
 
 ```mermaid
 flowchart LR
-    E1["실행"] --> E2["결과"] --> E3["검증"] --> E4["Owner 피드백"] --> E5["경험 기록"] --> E6["관련 경험 검색"]
-    E6 -.-> P1["개선 후보 (계획)"] -.-> P2["격리 평가 (계획)"] -.-> P3["승격 / 거절 (계획)"]
+    E1["Run"] --> E2["Result"] --> E3["Verification"] --> E4["Owner feedback"] --> E5["Experience record"] --> E6["Relevant experience retrieval"]
+    E6 -.-> P1["Improvement candidate (planned)"] -.-> P2["Isolated evaluation (planned)"] -.-> P3["Promote / reject (planned)"]
 ```
 
-### 용어 구분
+### Terms
 
-| 구분 | 의미 |
+| Distinction | Meaning |
 |---|---|
-| **하네스 ≠ 에이전트** | 부서 하네스(`departments/<id>/department.json`)는 역할·도구·권한·입출력·수용 기준을 담은 **재사용 패키지**입니다. 에이전트는 한 단계를 위해 하네스로 만들어졌다가 사라지는 **임시 실행자**입니다. |
-| **능력 ≠ 권한** | 에이전트가 할 수 있는 일과 해도 되는 일은 다릅니다. 부서가 네트워크 권한을 선언하지 않으면 웹 조사 단계는 계획 단계에서 거절됩니다. 에이전트에게 셸 권한은 주어지지 않습니다. |
-| **경험 저장 ≠ 학습** | 경험은 기존 SQLite 이벤트 저장소에 기록되고 다음 업무에서 참고 자료로 검색될 뿐입니다. 모델 가중치는 바뀌지 않습니다(파인튜닝 없음). |
-| **검색된 경험 ≠ 검증된 개선** | 검색된 경험에는 "잠정(PROVISIONAL)" 표시가 붙습니다. 경험이 결과를 실제로 좋게 하는지는 아직 측정되지 않았습니다(아래 한계 참고). |
+| **Harness ≠ agent** | A department harness (`departments/<id>/department.json`) is a **reusable package** of role, tools, permissions, inputs/outputs and acceptance criteria. An agent is a **temporary executor** built from a harness for one stage and then discarded. |
+| **Capability ≠ permission** | What an agent can do differs from what it may do. If a department does not declare network permission, a web-research stage is refused at planning. Agents never get a shell. |
+| **Stored experience ≠ training** | Experience is recorded in the existing SQLite event store and retrieved as reference material later. Model weights do not change (no fine-tuning). |
+| **Retrieved experience ≠ verified improvement** | Retrieved experience is labelled PROVISIONAL. Whether it actually improves results has not been measured yet (see limits below). |
 
-### 부서
+### Departments in the library
 
-현재 있는 부서는 **리서치**(1.1.0), **운영**(1.1.0), **상품기획**(1.0.1) 세 개입니다. 프로젝트에 붙일 때 그 버전으로 고정되므로 나중에 부서 정의가 바뀌어도 진행 중인 프로젝트에는 몰래 반영되지 않습니다. 각 부서에는 레지스트리 상태(후보·검증됨·격리됨·폐기됨)가 있습니다. 격리·폐기된 부서는 새로 연결하거나 일을 맡길 수 없지만, 이미 고정된 기록은 그대로 남습니다. 현재 세 부서는 상태 도입 전 부서(legacy)로 표시되며, 명세 형식만 검증되었고 행동 검증은 판정되지 않았습니다. 재무·법무·마케팅 같은 부서는 같은 형식으로 추가할 수 있는 **향후 예시**이며, 지금은 없습니다.
+There are three: **Research** (1.1.0), **Operations** (1.1.0) and **Product planning** (1.0.1). A department is pinned to its version when attached, so later definition changes never leak silently into running projects. Each department has a registry state (candidate · verified · quarantined · retired). Quarantined or retired departments cannot be newly attached or given work, but pinned records stay. The three current departments predate states and are marked legacy: their spec format is validated, their behavior is not yet judged. Finance, legal or marketing departments could be added in the same format; they are **future examples** and do not exist today.
 
-## 구현 현황
+## Implementation status
 
-| 기능 | 상태 | 확인 수준 |
+| Feature | Status | Verification level |
 |---|---|---|
-| 목표·파일·부서 첨부 → CEO 계획 → 단계 실행 | 구현 | 자동 테스트 · 실제 모델 실행 |
-| 부서 하네스 3종, 버전 고정, 계획 시 권한 검사 | 구현 | 자동 테스트 · 실제 모델 실행 |
-| 독립 검증과 재작업 루프 (수용 기준은 낮추지 않음) | 구현 | 자동 테스트 · 실제 모델 실행 |
-| Owner 글 수정 요청 → 같은 프로젝트에서 재작업·재검증 | 구현 | 실제 패키지 웹 E2E 11/11 (후보 빌드 0.1.63-18fbd6d, P-20261027-f8b412) |
-| 검증 출처 기록 (다른 엔진 검증 / 같은 엔진·역할 분리 / 불명) | 구현 | 자동 테스트 |
-| 범위를 제한한 경험 검색 (잠정 표시) | 구현 | 자동 테스트 |
-| 결과물 라이브러리, 완성된 결과물을 이어서 개발 | 구현 | 자동 테스트 |
-| 로컬 웹 화면 · Tk 창 · CLI (같은 동작 공유) | 구현 | 자동 테스트 · 헤드리스 브라우저 |
-| Owner 개발실 (AX Branch 자체의 개발 현황) | 구현 | 자동 테스트 |
-| 경험 활용 효과 비교 (상품기획 A/B) | **결과 없음** | 2회 시도 모두 과제 A에서 정지 (재시도 없음) |
-| H1: 부서 레지스트리 상태(후보·검증·격리·폐기), 근거·기록, 격리 강제 | 구현 | 자동 테스트 (실제 모델 실행 없음) |
-| H2: 부서 "사용 가능 / 필수" 구분과 강제 (계획·실행·수용·분리) | 구현 | 자동 테스트 · 헤드리스 브라우저 · 실제 모델 1회 (충족 경로만, [근거](docs/evidence/2026-10-26-h2-required-real-run.md)) |
-| 상품기획 계약(필수 제목·JSON)을 계획·제작·검증에 동일하게 전달, 사전 충돌 검사 | 구현 | 자동 테스트 |
+| Goal · files · departments → CEO plan → staged execution | Implemented | Automated tests · real model runs |
+| 3 department harnesses, version pinning, permission check at planning | Implemented | Automated tests · real model runs |
+| Independent verification and rework loop (criteria never lowered) | Implemented | Automated tests · real model runs |
+| Owner written change request → rework and re-verification in the same project | Implemented | Real packaged web E2E 11/11 (candidate build 0.1.63-18fbd6d, P-20261027-f8b412) |
+| Verification provenance (other engine / same engine, role-separated / unknown) | Implemented | Automated tests |
+| Bounded experience retrieval (provisional label) | Implemented | Automated tests |
+| Result library; continuing development of a finished result | Implemented | Automated tests |
+| Local web UI · Tk window · CLI (shared behavior) | Implemented | Automated tests · headless browser |
+| Owner devroom (AX Branch's own development status) | Implemented | Automated tests |
+| Experience-reuse effect comparison (product planning A/B) | **No result** | Both attempts stopped at task A (not retried) |
+| H1: department registry states, evidence and history, quarantine enforcement | Implemented | Automated tests (no real model run) |
+| H2: "available / required" departments, enforced at planning · execution · acceptance · detachment | Implemented | Automated tests · headless browser · 1 real model run (satisfied path only, [evidence](docs/evidence/2026-10-26-h2-required-real-run.md)) |
+| Product-planning contract (required headings · JSON) passed identically to planning, production and verification; pre-flight conflict check | Implemented | Automated tests |
 
 
-## 확인 수준과 한계
+## Verification levels and limits
 
-**확인 수준**은 네 가지로 구분합니다.
+**Verification levels**
 
-- **자동 테스트**: 전체 회귀 591건: 590 통과 + 1 건너뜀(사유 기록) + 0 실패 (커밋 a76dfbc).
-- **실제 모델 실행**: 실제 구독 모델을 호출한 실행입니다. 근거는 [`docs/evidence/`](docs/evidence/)에 있습니다.
-- **빌드 후보**: 보존된 패키지로 확인한 것입니다.
-- **미확인**: 위 어느 것으로도 확인하지 않은 것입니다.
+- **Automated tests**: full regression 591 = 590 passed + 1 skipped (reason recorded) + 0 failed (commit a76dfbc).
+- **Real model runs**: runs that called real subscription models. Evidence in [`docs/evidence/`](docs/evidence/).
+- **Build candidate**: checked with a preserved package.
+- **Unverified**: not checked by any of the above.
 
-**알려진 한계**
+**Known limits**
 
-- **OS 격리의 지원 범위가 제한됩니다.** 현재 소스는 AppContainer로 생성 프로그램 검사와 앱 내부의 제한된 CLI/단일 프로세스 결과 실행을 보호합니다. 실제 미끼 파일·토큰으로 차단을 확인했습니다. 웹/서버·학습 인터프리터 및 보호된 GUI 결과 실행은 지원하지 않아 차단하며, 명시적 Owner 예외 실행과 외부 수동 실행은 이 보호 범위 밖입니다. 허용된 시스템 읽기 권한까지 전부 차단한다고 주장하지 않습니다. 실행 중인 이전 서버에는 아직 적용되지 않았습니다.
-- **자동 자기 개선은 없습니다.** 경험은 기록되고 참고될 뿐이며, 개선 후보 생성·격리 평가·승격은 계획 단계입니다.
-- **다른 엔진의 검증이 항상 보장되지는 않습니다.** 독립 검증은 원래 생산과 다른 엔진(Codex)이 맡아야 합니다. 그러나 사용량 한도 때문에 같은 엔진으로 대신 검증한 실행이 있으며, 각 실행에 어느 쪽이었는지 기록됩니다.
-- **경험 활용 A/B 비교는 결과가 없습니다.** 축소 실험을 두 번 시도했고 두 번 모두 과제 A에서 멈췄습니다.
-  - 첫 시도: 과제 문구가 부서 계약과 맞지 않았습니다([근거](docs/evidence/2026-10-26-product-ab-compact-run.md)).
-  - 둘째 시도(계약 정렬 후): 첫 초안의 `excluded`/`experiments` 목록이 비어 재작업이 생겼고, 프로젝트당 60,000 토큰 한도를 넘었습니다(64,487 토큰, [근거](docs/evidence/2026-10-27-codex-163.md)).
-  - 효과는 미확인이고, 개선 후보는 [개선 백로그](docs/IMPROVEMENT_BACKLOG.md)에 기록했습니다.
-- **글 수정 재작업의 웹 E2E 범위.** 후보 빌드 0.1.63-18fbd6d에서 실제 모델로 한 번 통과했습니다(11/11).
-  - 검증자는 Codex와 Claude가 번갈아 맡았고, 실제 제공자가 기록되어 있습니다.
-  - 테스트 피드백은 Owner의 실제 확인이 아니라 위임된 시험 입력입니다.
-- **간헐적 테스트 문제.** 브라우저 자체 검사가 가끔 90초 안에 끝나지 않으며, 원인은 확인되지 않았습니다. 한 번의 전체 실행에서 시간 민감 테스트 4건이 실패했고, 재발하지 않았지만 원인 미확인으로 남아 있습니다.
-- 상용 제품과 같은 수준이라고 주장하지 않습니다.
+- **OS isolation has a limited scope.** The current source uses AppContainer to protect generated-program checks and in-app restricted CLI / single-process result runs; blocking was confirmed with real decoy files and tokens. Web/server, training interpreters and protected GUI result runs are unsupported and therefore blocked; explicit Owner-exception runs and external manual runs are outside this protection. It does not claim to block every allowed system read. Not yet applied to the older running server.
+- **No automatic self-improvement.** Experience is recorded and referenced only; candidate generation, isolated evaluation and promotion are planned.
+- **Cross-engine verification is not always guaranteed.** Independent verification should run on a different engine (Codex) from production, but usage limits forced some runs to verify on the same engine; each run records which.
+- **The experience-reuse A/B comparison has no result.** A reduced experiment was attempted twice and stopped at task A both times.
+  - First attempt: the task wording did not match the department contract ([evidence](docs/evidence/2026-10-26-product-ab-compact-run.md)).
+  - Second attempt (contract aligned): the first draft's `excluded`/`experiments` lists were empty, causing rework, and the run exceeded the 60,000-token per-project limit (64,487 tokens, [evidence](docs/evidence/2026-10-27-codex-163.md)).
+  - The effect is unverified; improvement candidates are in the [improvement backlog](docs/IMPROVEMENT_BACKLOG.md).
+- **Web E2E scope for written-change rework.** Passed once with real models on candidate build 0.1.63-18fbd6d (11/11).
+  - Codex and Claude alternated as verifier; the actual provider is recorded.
+  - The test feedback was delegated test input, not a real Owner confirmation.
+- **Intermittent test issues.** The browser self-test occasionally does not finish within 90 s; root cause unknown. One full run had 4 time-sensitive test failures that did not recur; cause also unknown.
+- No claim of commercial-product quality.
 
-## 실행 방법 (로컬 웹)
+## Running it (local web)
 
-**필요 조건**
+**Requirements**
 
-- Python 3.11 이상 (3.12.10에서 확인).
-- 이 저장소 옆에 `cheongwol` 저장소가 있어야 합니다. 그 provider 계층을 재사용합니다.
-- 실제로 업무를 실행하려면 `claude` 또는 `codex` CLI가 구독 계정으로 로그인되어 있어야 합니다. 화면을 여는 것만으로는 모델을 호출하지 않습니다.
-- 유료 API는 쓰지 않습니다. 환경에 유료 API 키가 있으면 실행이 멈춥니다.
+- Python 3.11+ (checked on 3.12.10).
+- The `cheongwol` repository must sit next to this one; its provider layer is reused.
+- To actually run work, the `claude` or `codex` CLI must be logged in with a subscription account. Opening the UI alone never calls a model.
+- No paid API is used. If a paid API key is present in the environment, runs stop.
 
 ```text
 AX-Branch/
-├── ax-branch/     ← 이 저장소
-├── cheongwol/     ← 필수 (cheongwol/ceo 를 불러옴)
-├── workspace/     ← 있으면 런타임 데이터가 여기에 저장됨
-└── obsidian/      ← workspace/ 와 함께 있을 때 이 폴더가 작업 루트로 쓰임
+├── ax-branch/     ← this repository
+├── cheongwol/     ← required (cheongwol/ceo is imported)
+├── workspace/     ← runtime data goes here if present
+└── obsidian/      ← used as the work root together with workspace/
 ```
 
 ```sh
 cd ax-branch
-python -X utf8 -m axbranch web              # http://127.0.0.1:8765/ (브라우저는 직접 엽니다)
-python -X utf8 -m axbranch web --port 8799  # 다른 포트
-python -X utf8 -m axbranch web --stop       # 실행 중인 웹 서버 종료
+python -X utf8 -m axbranch web              # http://127.0.0.1:8765/ (open the browser yourself)
+python -X utf8 -m axbranch web --port 8799  # another port
+python -X utf8 -m axbranch web --stop       # stop the running web server
 ```
 
-- 서버는 `127.0.0.1`에서만 열립니다. 화면의 API는 시작 시 발급된 토큰이 있어야 응답합니다.
-- 상위 폴더에 `workspace/`와 `obsidian/`이 **둘 다** 없으면 저장소 안의 `workspace/`를 씁니다.
-- 위 명령은 격리된 복사본에서 서버 시작 → 페이지 응답(200) → `--stop` 종료까지 확인했습니다.
-- 데스크톱 창은 `python -X utf8 -m axbranch`로 엽니다. 패키지 빌드에서는 `AXBranch.exe`, 웹은 `AXBranch.exe web`입니다.
-- 그 밖의 CLI 명령(new / run / status / review / finish 등)은 `python -m axbranch --help`에서 볼 수 있습니다.
+- The server listens on `127.0.0.1` only. The UI's API answers only with the token issued at startup.
+- If the parent folder has **neither** `workspace/` nor `obsidian/`, the in-repo `workspace/` is used.
+- The commands above were checked in an isolated copy: server start → page response (200) → `--stop`.
+- The desktop window opens with `python -X utf8 -m axbranch`. In the packaged build: `AXBranch.exe`, and `AXBranch.exe web` for the web UI.
+- Other CLI commands (new / run / status / review / finish, etc.): `python -m axbranch --help`.
 
-테스트와 빌드:
+Tests and build:
 
 ```sh
 python -X utf8 -m unittest discover -s tests -t .
 python -X utf8 build_exe.py
 ```
 
-## 결과와 근거는 어디에 있나
+## Where results and evidence live
 
-| 무엇 | 위치 |
+| What | Where |
 |---|---|
-| 런타임 상태 (기준 데이터) | `workspace/axbranch.sqlite3` |
-| 결과물 (버전별) | `workspace/projects/<id>/artifacts/v<N>/` |
-| 엔진 간 인계 기록 | `workspace/projects/<id>/HANDOFF.md` |
-| 장기 지식 (저장하고 닫기 시에만) | `obsidian/AX-Branch-Vault/Branch_DB/Projects/` |
-| 개발 근거 (실험·E2E·감사) | [`docs/evidence/`](docs/evidence/) |
-| Owner 개발실 데이터 | [`docs/devroom/status.json`](docs/devroom/status.json) — 웹 화면 [오너 개발실]에서 표시 |
-| 개발 인계 (Claude Code ↔ Codex) | [`docs/CODEX_CLI_HANDOFF.md`](docs/CODEX_CLI_HANDOFF.md) |
+| Runtime state (source of truth) | `workspace/axbranch.sqlite3` |
+| Artifacts (per version) | `workspace/projects/<id>/artifacts/v<N>/` |
+| Engine-to-engine handoff | `workspace/projects/<id>/HANDOFF.md` |
+| Long-term knowledge (on save & close only) | `obsidian/AX-Branch-Vault/Branch_DB/Projects/` |
+| Development evidence (experiments · E2E · audits) | [`docs/evidence/`](docs/evidence/) |
+| Owner devroom data | [`docs/devroom/status.json`](docs/devroom/status.json), shown in the web UI's Owner devroom |
+| Development handoff (Claude Code ↔ Codex) | [`docs/CODEX_CLI_HANDOFF.md`](docs/CODEX_CLI_HANDOFF.md) |
 
-## 로드맵
+## Roadmap
 
-- **H1 — 부서 레지스트리 상태 (구현됨).** 각 부서에 후보·검증됨·격리됨·폐기됨 상태, 이유, 근거, 변경 기록이 붙습니다. 상태 변경은 Owner만 기록과 함께 할 수 있고(`python -m axbranch lifecycle`), "검증됨"으로 올리려면 근거가 2개 이상 필요합니다.
-- **H2 — 사용 가능 / 필수 부서 (구현됨).** 필수로 붙인 부서는 다음 각 시점에서 실제로 일하고 기준을 통과했는지 강제됩니다:
-  - 계획;
-  - 실행·재작업;
-  - 결과 수용;
-  - 부서 분리.
-- **다음 단계.**
-  - 필수 부서가 빠진 계획이 막히는 경로를 실제 모델로 확인합니다(지금은 자동 테스트로만 확인).
-  - 상품기획 A/B는 두 번 정지했고, 다시 하려면 새 Owner 결정이 필요합니다. 먼저 개선 백로그의 IB-1, IB-2를 검토합니다.
-  - 경험 수명 주기 중 개선 후보·격리 평가·승격 단계는 계획 상태입니다.
+- **H1 — Department registry states (implemented).** Each department carries a candidate · verified · quarantined · retired state with reason, evidence and history. Only the Owner changes a state, with a record (`python -m axbranch lifecycle`); promotion to "verified" needs at least two pieces of evidence.
+- **H2 — Available / required departments (implemented).** A required department is enforced to have actually worked and met its criteria at each point:
+  - planning;
+  - execution and rework;
+  - result acceptance;
+  - detachment.
+- **Next.**
+  - Confirm with a real model that a plan missing a required department is blocked (currently automated tests only).
+  - The product-planning A/B stopped twice; retrying needs a new Owner decision. Review backlog items IB-1 and IB-2 first.
+  - The improvement-candidate, isolated-evaluation and promotion stages of the experience lifecycle are planned.
 
-**H3 부서 추천도 구현했습니다.** 청월의 기존 계획 호출에서 최대 세 부서를 이유와 함께 제안하고, Owner가 수락해야 연결됩니다. 추천만으로 실행·권한·필수 조건을 바꾸지 않으며, 현재 계획을 자동 재시작하지 않습니다. 모의 모델·실제 HTTP·headless Chrome으로 확인했고 실제 모델의 추천 품질은 아직 검증하지 않았습니다.
+**H3 department recommendations are also implemented.** Within the CEO's existing planning call, up to three departments are suggested with reasons; they are attached only when the Owner accepts. A recommendation alone never changes execution, permissions or required conditions, and never restarts the current plan. Checked with a mock model, real HTTP and headless Chrome; real-model recommendation quality is not yet verified.
 
-설계는 [Department Harness Proposal](docs/DEPARTMENT_HARNESS_PROPOSAL.md)을 참고하세요. H4, 추가 모델 학습, 유료 서비스는 현재 범위 밖입니다.
+Design: [Department Harness Proposal](docs/DEPARTMENT_HARNESS_PROPOSAL.md). H4, further model training and paid services are out of scope.
 
-## 버전: 현재 소스와 사용 중인 빌드
+## Versions: current source and serving build
 
-| | 버전 | 비고 |
+| | Version | Notes |
 |---|---|---|
-| 이 브랜치의 소스 | 0.1.67 (`dev/web-ui`) | 전체 회귀 591건: 590 통과 + 1 건너뜀 (a76dfbc). 후보 빌드 0.1.67-a76dfbc |
-| Owner가 쓰는 서버 | 이전 빌드 | 실제 적용 빌드는 [오너 개발실](docs/devroom/status.json)의 `serving_build` 참고 |
-| `main` 브랜치 | 0.1.59 시점 | 이전 README가 표시됨 |
+| This branch's source | 0.1.67 (`dev/web-ui`, default branch) | Full regression 591 = 590 passed + 1 skipped (a76dfbc). Candidate build 0.1.67-a76dfbc |
+| Server the Owner uses | An earlier build | See `serving_build` in the [Owner devroom](docs/devroom/status.json) |
+| `main` branch | 0.1.59 snapshot | Older; not the default branch |
 
-## 문서
+## Documents
 
-- [문서 안내](docs/README.md) — 사용자용·개발용 문서 구분
+- [Docs guide](docs/README.md): user vs. developer documents
 - [Architecture](docs/ARCHITECTURE.md) · [Decisions](docs/DECISIONS.md) · [Changelog](CHANGELOG.md)
-- 에이전트 작업 규칙: [AGENTS.md](AGENTS.md)
+- Agent working rules: [AGENTS.md](AGENTS.md)
 
-라이선스 파일은 아직 없습니다(모든 권리 보유).
+No license file yet (all rights reserved).
